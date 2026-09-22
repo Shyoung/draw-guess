@@ -13,3 +13,19 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "24"
+      # 방 상태 저장소. 아래 Key Value 인스턴스의 내부 접속 주소가 자동으로 들어간다.
+      # 다른 Redis(Upstash 등)로 바꾸려면 이 값만 redis:// 또는 rediss:// 주소로 교체하면 된다.
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: draw-guess-kv
+          property: connectionString
+
+  # 방 상태 저장용 Redis 호환 인스턴스(무료 25MB). 웹 서비스가 재배포되어도 이 인스턴스는 유지되므로
+  # 진행 중인 게임이 이어진다. 무료 플랜은 디스크 영속화가 없어 이 인스턴스 자체가 재시작되면 비워진다.
+  - type: keyvalue
+    name: draw-guess-kv
+    plan: free
+    region: singapore
+    maxmemoryPolicy: noeviction
+    ipAllowList: [] # 내부(같은 리전 Render 서비스)에서만 접속

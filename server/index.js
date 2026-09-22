@@ -13,6 +13,7 @@ const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
 const { Room } = require('./game');
+const { createStore } = require('./store');
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 12;
@@ -55,7 +56,7 @@ function sendIndex(req, res) {
 app.get(['/', '/index.html'], sendIndex);
 
 // 헬스체크 / keep-alive 핑 대상 (정적 파일보다 가볍게)
-app.get('/healthz', (req, res) => res.type('text').send('ok'));
+app.get('/healthz', (req, res) => res.json({ ok: true, version: ASSET_VERSION, store: store.kind, rooms: rooms.size, uptime: Math.round(process.uptime()) }));
 
 // js/css는 URL에 버전이 붙으므로 1년 캐시(immutable)해도 안전하다. 그 외 파일은 매번 재검증.
 app.use(express.static(PUBLIC_DIR, {
@@ -71,6 +72,33 @@ const io = new Server(server);
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
+
+// 방 상태 저장소: STORE_URL / REDIS_URL (redis://, rediss://, file:...) — 없으면 메모리만
+const store = createStore(process.env);
+
+/** 저장소에 남아 있는 방을 복원한다 (배포/재시작 직후). 오래된 스냅샷은 버린다 */
+async function restoreRooms() {
+  let snaps = [];
+  try { snaps = await store.loadAll(); } catch (err) { console.warn('[store] loadAll failed:', err.message); return 0; }
+  let n = 0;
+  for (const s of snaps) {
+    if (!s || !CODE_RE.test(s.code || '') || rooms.has(s.code)) continue;
+    if (!Array.isArray(s.players) || !s.players.length) { store.delete(s.code).catch(() => {}); continue; }
+    if (Date.now() - (s.savedAt || 0) > 3 * 60 * 60 * 1000) { store.delete(s.code).catch(() => {}); continue; }
+    try {
+      const room = Room.fromSnapshot(io, s);
+      room.store = store;
+      room.onEmpty = deleteRoomIfEmpty;
+      rooms.set(room.code, room);
+      room.resumeAfterRestore();
+      n += 1;
+    } catch (err) {
+      console.warn(`[store] restore failed for ${s.code}:`, err.message);
+      store.delete(s.code).catch(() => {});
+    }
+  }
+  return n;
+}
 
 // ── 방 코드 ─────────────────────────────────────────────────────
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -136,6 +164,7 @@ function deleteRoomIfEmpty(room) {
   if (room && room.isEmpty()) {
     room.destroy();
     rooms.delete(room.code);
+    store.delete(room.code).catch((err) => console.warn('[store] delete failed:', err.message));
     console.log(`[draw-guess] room ${room.code} deleted (empty). rooms=${rooms.size}`);
   }
 }
@@ -238,6 +267,7 @@ io.on('connection', (socket) => {
     if (!code) return ack({ ok: false, error: '방을 만들 수 없습니다. 잠시 후 다시 시도해 주세요.' });
 
     const room = new Room(io, code);
+    room.store = store;
     room.onEmpty = deleteRoomIfEmpty; // 유예 시간 만료로 마지막 사람이 빠질 때 방 정리
     rooms.set(code, room);
     const token = sanitizeToken(data.token);
@@ -424,7 +454,29 @@ function startKeepAlive() {
   console.log(`[keep-alive] pinging ${target} every ${KEEP_ALIVE_MS / 60000} min`);
 }
 
-server.listen(PORT, () => {
-  console.log(`[draw-guess] listening on http://localhost:${PORT} (asset version ${ASSET_VERSION})`);
-  startKeepAlive();
+// 종료 신호(배포 시 Render가 SIGTERM을 보낸다): 방 상태를 마지막으로 저장하고 내려간다.
+// 클라이언트는 끊김을 감지해 새 서버에 재접속하고, 새 서버는 저장소에서 방을 복원한다.
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[draw-guess] ${signal} received: saving ${rooms.size} room(s) and shutting down`);
+  const timer = setTimeout(() => process.exit(0), 4000);
+  try {
+    await Promise.all([...rooms.values()].map((room) => room.flushPersist()));
+    await store.close();
+  } catch (err) {
+    console.warn('[draw-guess] shutdown flush error:', err.message);
+  }
+  clearTimeout(timer);
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+restoreRooms().then((n) => {
+  server.listen(PORT, () => {
+    console.log(`[draw-guess] listening on http://localhost:${PORT} (asset version ${ASSET_VERSION}, store=${store.kind}, restored ${n} room(s))`);
+    startKeepAlive();
+  });
 });

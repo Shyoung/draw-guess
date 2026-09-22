@@ -206,6 +206,132 @@ class Room {
     this._interval = null;
     this._timeout = null;
     this.destroyed = false;
+
+    /** 상태 저장소 (index.js가 주입). 없으면 저장하지 않는다 */
+    this.store = null;
+    this._persistTimer = null;
+  }
+
+  // ── 저장/복원 (배포·재시작 후 방 유지) ────────────────────────
+  /** 직렬화 가능한 스냅샷. 소켓/타이머 같은 런타임 값은 제외하고, 시간은 절대 시각(phaseEndsAt)으로 남긴다 */
+  toSnapshot() {
+    return {
+      v: 1,
+      code: this.code,
+      hostId: this.hostId,
+      settings: { ...this.settings },
+      phase: this.phase,
+      round: this.round,
+      totalRounds: this.totalRounds,
+      turnOrder: this.turnOrder.slice(),
+      turnIndex: this.turnIndex,
+      drawerId: this.drawerId,
+      word: this.word,
+      wordOptions: this.wordOptions.slice(),
+      revealed: [...this.revealed],
+      hintTimes: [...this.hintTimes],
+      drawTime: this.drawTime,
+      timeLeft: this.timeLeft,
+      phaseEndsAt: this.phaseEndsAt,
+      ops: this.ops,
+      usedWords: [...this.usedWords],
+      turnPoints: [...this.turnPoints.entries()],
+      lastTurnEnd: this.lastTurnEnd,
+      lastGameOver: this.lastGameOver,
+      players: this.players.map((p) => ({
+        id: p.id, name: p.name, avatar: { ...p.avatar }, score: p.score,
+        isDrawing: p.isDrawing, hasGuessed: p.hasGuessed, token: p.token,
+      })),
+      savedAt: Date.now(),
+    };
+  }
+
+  /**
+   * 스냅샷으로 방을 복원한다. 모든 플레이어는 "연결 끊김(유예 중)" 상태로 시작하고,
+   * 클라이언트가 토큰으로 room:rejoin 하면 같은 자리로 돌아온다. 타이머는 저장된 종료 시각부터 이어간다.
+   */
+  static fromSnapshot(io, s) {
+    const room = new Room(io, s.code);
+    room.hostId = s.hostId;
+    room.settings = { ...DEFAULT_SETTINGS, ...(s.settings || {}) };
+    room.phase = s.phase || 'lobby';
+    room.round = s.round || 0;
+    room.totalRounds = s.totalRounds || room.settings.rounds;
+    room.turnOrder = Array.isArray(s.turnOrder) ? s.turnOrder.slice() : [];
+    room.turnIndex = typeof s.turnIndex === 'number' ? s.turnIndex : -1;
+    room.drawerId = s.drawerId || null;
+    room.word = s.word || null;
+    room.wordOptions = Array.isArray(s.wordOptions) ? s.wordOptions.slice() : [];
+    room.revealed = new Set(s.revealed || []);
+    room.hintTimes = new Set(s.hintTimes || []);
+    room.drawTime = s.drawTime || room.settings.drawTime;
+    room.timeLeft = s.timeLeft || 0;
+    room.phaseEndsAt = s.phaseEndsAt || 0;
+    room.ops = Array.isArray(s.ops) ? s.ops : [];
+    room.currentStroke = null;
+    room.usedWords = new Set(s.usedWords || []);
+    room.turnPoints = new Map(s.turnPoints || []);
+    room.lastTurnEnd = s.lastTurnEnd || null;
+    room.lastGameOver = s.lastGameOver || null;
+    room.players = (s.players || []).map((p) => ({
+      id: p.id, name: p.name, avatar: { ...p.avatar }, score: p.score || 0,
+      isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed, token: p.token || null,
+      connected: false, socketId: null, _graceTimer: null,
+    }));
+    return room;
+  }
+
+  /** 복원 직후 호출: 유예 타이머와 phase 타이머를 다시 건다 */
+  resumeAfterRestore() {
+    for (const p of this.players) this.startGrace(p);
+    if (this.phase === 'choosing' || this.phase === 'drawing') {
+      this.timeLeft = this.remainingSeconds();
+      if (this.timeLeft <= 0) {
+        if (this.phase === 'choosing') this.beginDrawing(this.wordOptions[0]);
+        else this.endTurn('time');
+      } else {
+        // startTicker()는 phaseEndsAt을 다시 계산하므로 여기서는 종료 시각을 유지한 채 interval만 건다
+        this.clearTimers();
+        this._interval = setInterval(() => this.tick(), 1000);
+      }
+    } else if (this.phase === 'turnEnd') {
+      const reason = this.lastTurnEnd ? this.lastTurnEnd.reason : 'time';
+      this.setPhaseTimeout(Math.max(500, this.phaseEndsAt - Date.now()), () => {
+        if (reason === 'notEnoughPlayers') this.gameOver();
+        else this.nextTurn();
+      });
+    } else if (this.phase === 'gameOver') {
+      this.setPhaseTimeout(Math.max(500, this.phaseEndsAt - Date.now()), () => this.backToLobby());
+    }
+  }
+
+  /** 끊긴 플레이어의 퇴장 유예 타이머 */
+  startGrace(p) {
+    this.clearGrace(p);
+    if (RECONNECT_GRACE_MS <= 0) return;
+    p._graceTimer = setTimeout(() => {
+      p._graceTimer = null;
+      if (this.destroyed || p.connected || !this.getPlayer(p.id)) return;
+      this.removePlayer(p.id, 'left');
+      if (typeof this.onEmpty === 'function') this.onEmpty(this);
+    }, RECONNECT_GRACE_MS);
+  }
+
+  /** 상태 저장 예약(300ms 스로틀). 저장 실패는 게임에 영향 없음 */
+  persist() {
+    if (!this.store || this.destroyed || this._persistTimer) return;
+    this._persistTimer = setTimeout(() => {
+      this._persistTimer = null;
+      this.flushPersist();
+    }, 300);
+  }
+
+  /** 즉시 저장 (종료 직전 등) */
+  flushPersist() {
+    if (!this.store || this.destroyed) return Promise.resolve();
+    if (this._persistTimer) { clearTimeout(this._persistTimer); this._persistTimer = null; }
+    if (this.isEmpty()) return Promise.resolve();
+    return this.store.save(this.code, this.toSnapshot()).catch((err) => console.warn('[store] save failed:', err.message));
   }
 
   // ── 전송 헬퍼 ──────────────────────────────────────────────
@@ -275,6 +401,7 @@ class Room {
   destroy() {
     this.clearTimers();
     for (const p of this.players) this.clearGrace(p);
+    if (this._persistTimer) { clearTimeout(this._persistTimer); this._persistTimer = null; }
     this.destroyed = true;
   }
 
@@ -334,6 +461,7 @@ class Room {
 
   broadcastState() {
     this.emitAll('room:state', this.toState());
+    this.persist();
   }
 
   // ── 플레이어 입퇴장 ─────────────────────────────────────────
@@ -378,12 +506,7 @@ class Room {
       if (next) this.hostId = next.id;
     }
 
-    p._graceTimer = setTimeout(() => {
-      p._graceTimer = null;
-      if (this.destroyed || p.connected || !this.getPlayer(id)) return;
-      this.removePlayer(id, 'left');
-      if (typeof this.onEmpty === 'function') this.onEmpty(this);
-    }, RECONNECT_GRACE_MS);
+    this.startGrace(p);
 
     // 인원 부족은 여기서 바로 끝내지 않는다: 유예 시간 안에 돌아올 수 있으므로 턴은 계속 진행하고,
     // 다음 턴으로 넘어갈 때(nextTurn) 접속 인원이 2명 미만이면 그때 게임을 끝낸다.
@@ -433,11 +556,14 @@ class Room {
   /** 중간 참가자/재접속자에게 현재 진행 상황 전달 (단어/후보는 절대 포함하지 않음) */
   sendCatchUp(id) {
     const drawer = this.getPlayer(this.drawerId);
+    const isDrawer = id === this.drawerId;
     if (this.phase === 'choosing') {
+      // 출제자 본인이 복귀하는 경우(재시작 복원 등)에는 후보 단어도 다시 준다
       this.emitTo(id, 'game:choosing', {
         drawerId: this.drawerId,
         drawerName: drawer ? drawer.name : '',
         timeLeft: this.timeLeft,
+        ...(isDrawer ? { wordOptions: this.wordOptions.slice() } : {}),
       });
     } else if (this.phase === 'drawing') {
       this.emitTo(id, 'game:drawing', {
@@ -447,6 +573,7 @@ class Room {
         timeLeft: this.timeLeft,
         wordMask: maskWord(this.word, this.revealed),
         wordLength: Array.from(this.word).length,
+        ...(isDrawer ? { word: this.word } : {}), // 출제자 본인에게만 단어
       });
       this.emitTo(id, 'draw:sync', { ops: this.ops });
     } else if (this.phase === 'turnEnd' && this.lastTurnEnd) {
@@ -895,6 +1022,7 @@ class Room {
    * @param {unknown} payload
    */
   handleDraw(id, type, payload) {
+    this.persist(); // 그림 변화도 저장(300ms 스로틀). 검증 전에 예약해도 실제 저장 시점의 상태가 담긴다
     if (this.phase !== 'drawing' || id !== this.drawerId) return;
 
     switch (type) {

@@ -469,6 +469,7 @@
       var pageVersion = meta ? meta.getAttribute('content') : null;
       if (!pageVersion || !p || typeof p.version !== 'string' || p.version === pageVersion) return;
       toast('새 버전이 배포되어 새로고침합니다');
+      if (inRoom && state.roomCode) saveLastRoom(state.roomCode); // 새로고침 뒤 같은 방으로 자동 복귀
       setTimeout(function () { location.reload(); }, 1200);
     });
     on('room:state', onRoomState);
@@ -498,6 +499,7 @@
   // ------------------------------------------------------------------
   function onRoomState(s) {
     if (!s || typeof s !== 'object') return;
+    if (inRoom && state.roomCode) saveLastRoom(state.roomCode);
     var prevPhase = state.phase;
     if (s.roomCode != null) state.roomCode = String(s.roomCode);
     state.hostId = s.hostId != null ? s.hostId : state.hostId;

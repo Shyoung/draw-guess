@@ -7,13 +7,15 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node test/smoke.js && node test/reconnect.js",
+    "test": "node test/smoke.js && node test/reconnect.js && node test/persist.js",
+    "test:persist": "node test/persist.js",
     "test:reconnect": "node test/reconnect.js",
     "test:browser": "node test/browser.js"
   },
   "license": "MIT",
   "dependencies": {
     "express": "^4.22.3",
+    "ioredis": "^5.11.1",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
