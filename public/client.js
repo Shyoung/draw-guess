@@ -96,7 +96,7 @@
 
   // 최근 게임 이벤트에서 파생된 UI 데이터
   var ui = {
-    wordMask: '', wordLength: 0, word: null, wordOptions: null, chosenWord: null,
+    wordMask: '', wordLength: 0, word: null, wordOptions: null, chosenWord: null, category: null,
     drawerName: '', timeLeft: null, turnEnd: null, ranking: null, optionsKey: ''
   };
 
@@ -534,7 +534,7 @@
     ui.wordOptions = Array.isArray(p.wordOptions) ? p.wordOptions.map(String) : null;
     if (ui.wordOptions && ui.wordOptions.length) SFX.play('myTurn');
     ui.chosenWord = null;
-    ui.word = null; ui.wordMask = ''; ui.turnEnd = null; ui.ranking = null;
+    ui.word = null; ui.wordMask = ''; ui.category = null; ui.turnEnd = null; ui.ranking = null;
     resetCanvasState();
     setTimeLeft(p.timeLeft != null ? num(p.timeLeft, 15) : 15, true);
     renderAll();
@@ -547,6 +547,7 @@
     if (p.round != null) state.round = num(p.round, state.round);
     if (p.totalRounds != null) state.totalRounds = num(p.totalRounds, state.totalRounds);
     ui.wordMask = typeof p.wordMask === 'string' ? p.wordMask : '';
+    ui.category = typeof p.category === 'string' ? p.category : null;
     ui.wordLength = num(p.wordLength, 0);
     ui.word = typeof p.word === 'string' ? p.word : null;
     ui.wordOptions = null; ui.chosenWord = null; ui.turnEnd = null;
@@ -561,6 +562,7 @@
   function onHint(p) {
     if (!p || typeof p.wordMask !== 'string') return;
     ui.wordMask = p.wordMask;
+    if (typeof p.category === 'string') ui.category = p.category;
     renderWordArea();
   }
 
@@ -663,11 +665,17 @@
       wa.appendChild(el('span', 'word-hint', isDrawer() ? '단어를 골라주세요!' : '단어를 고르고 있어요…'));
     } else if (ph === 'drawing') {
       if (isDrawer() && ui.word) {
-        var s = el('span', 'word-secret'); s.appendChild(el('span', 'label', '내 단어')); s.appendChild(el('span', 'word', ui.word)); wa.appendChild(s);
+        var s = el('span', 'word-secret'); s.appendChild(el('span', 'label', '내 단어')); s.appendChild(el('span', 'word', ui.word));
+        if (ui.category) s.appendChild(el('span', 'word-category', ui.category));
+        wa.appendChild(s);
       } else if (ui.wordMask) {
         var maskEl = maskNode(ui.wordMask, ui.wordLength);
         var me = findPlayer(myId);
         if (me && me.hasGuessed) maskEl.classList.add('solved');
+        if (ui.category && !(me && me.hasGuessed)) {
+          var cat = el('span', 'word-category hint'); cat.appendChild(el('span', 'cat-label', '카테고리')); cat.appendChild(el('span', 'cat-name', ui.category));
+          maskEl.appendChild(cat);
+        }
         wa.appendChild(maskEl);
       } else {
         wa.appendChild(el('span', 'word-hint', '그리는 중…'));

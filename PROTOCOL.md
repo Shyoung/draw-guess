@@ -75,8 +75,8 @@
 | event | payload | 비고 |
 |---|---|---|
 | `game:choosing` | `{ drawerId, drawerName, timeLeft, wordOptions? }` | `wordOptions`(string[])는 **출제자에게만** 포함. 나머지는 없음(undefined) |
-| `game:drawing` | `{ drawerId, round, totalRounds, timeLeft, wordMask, wordLength, word? }` | `word`는 출제자에게만. `wordMask` 형식은 아래 참고 |
-| `game:hint` | `{ wordMask }` | 초성 공개 갱신 (출제자·이미 정답을 맞힌 사람 제외). 누군가 정답을 맞히면 그 사람에게만 별도로 `wordMask`가 실제 글자로 전체 공개된 `game:hint`가 온다(초성이 아님) |
+| `game:drawing` | `{ drawerId, round, totalRounds, timeLeft, wordMask, wordLength, word?, category? }` | `word`·`category`는 출제자에게만(catch-up 시 이미 공개된 카테고리는 비출제자에게도). `wordMask` 형식은 아래 참고 |
+| `game:hint` | `{ wordMask, category? }` | 초성 공개 갱신 (출제자·이미 정답을 맞힌 사람 제외). 누군가 정답을 맞히면 그 사람에게만 별도로 `wordMask`가 실제 글자로 전체 공개된 `game:hint`가 온다(초성이 아님) |
 | `game:timer` | `{ timeLeft }` | 매 1초 (choosing / drawing 단계) |
 | `game:turnEnd` | `{ word, reason:'time'\|'allGuessed'\|'drawerLeft'\|'notEnoughPlayers', deltas:[{ id, delta }], timeLeft }` | 5초간 표시. `deltas`에는 이번 턴 획득 점수(0 포함 전원) |
 | `game:over` | `{ ranking:[{ id, name, avatar, score }] }` | 점수 내림차순. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
@@ -116,6 +116,8 @@
 - 각 글자를 `_`로, 공백은 그대로, 글자 사이는 공백 1개로 구분한다. 예: `사과` → `_ _`, `ice cream` → `_ _ _   _ _ _ _ _`
   (단어 사이 공백은 3개로 표시해 단어 경계가 보이게 함).
 - 힌트는 아직 공개되지 않은 글자 위치 중 무작위로 1개씩 고르고, 한글 음절은 **초성만** 공개한다 (예: `사과` → `ㅅ _`). 한글이 아닌 글자(영문·숫자)는 그 글자를 그대로 공개한다.
+- 카테고리 힌트: 마지막(k번째) 초성 힌트 `game:hint`에 `category`(예: "동물", "탈것")가 함께 실린다. 사전에 없는 사용자 단어는 "방장이 낸 단어". hints=0 이면 카테고리 힌트도 없다.
+- 후보 반복 방지: 한 게임 안에서 정답으로 쓰인 단어뿐 아니라 후보로 한 번 제시된 단어도 다시 후보로 내지 않는다(풀이 부족할 때만 재사용).
 - 힌트 시점: 종료 `hintEndAt`초 전을 기준으로 역산한다. 실제 힌트 개수 k = min(`hints`, 단어의 공개 가능 글자 수). 마지막(k번째) 힌트는 항상 잔여 `hintEndAt`초에 뜨고, 그 앞 힌트들은 시작~마지막 힌트 사이에 균등 배치된다. 그래서 1글자 단어와 3글자 단어 모두 "힌트가 전부 공개되는 시점"이 같다. 예) hints=2, drawTime=80, hintEndAt=15 → 잔여 37초, 15초. 한글만으로 된 단어는 모든 글자의 초성까지 공개될 수 있고, 영문·숫자가 섞인 단어는 전체 글자 수 - 1 까지만 공개한다.
 
 ## 정답 판정

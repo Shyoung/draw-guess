@@ -8,7 +8,7 @@
  *  - word / wordOptions 는 출제자에게만 보낸다
  */
 
-const { pickWords } = require('./words');
+const { pickWords, categoryOf } = require('./words');
 
 // ── 상수 ────────────────────────────────────────────────────────
 const CANVAS_W = 800;
@@ -220,7 +220,10 @@ class Room {
     this.ops = [];
     this.currentStroke = null;
 
-    this.usedWords = new Set(); // 이번 게임에서 이미 나온 단어
+    this.usedWords = new Set(); // 이번 게임에서 이미 나온(선택된) 단어
+    this.offeredWords = new Set(); // 이번 게임에서 후보로 한 번이라도 제시된 단어 — 반복 제시 방지
+    this.hintCount = 0; // 이번 턴에 예정된 초성 힌트 개수
+    this.categoryRevealed = false; // 마지막 초성 힌트와 함께 카테고리를 공개했는지
     this.turnPoints = new Map(); // 이번 턴 획득 점수 (id → delta)
 
     this.lastTurnEnd = null; // 중간 참가자 재전송용
@@ -259,6 +262,9 @@ class Room {
       phaseEndsAt: this.phaseEndsAt,
       ops: this.ops,
       usedWords: [...this.usedWords],
+      offeredWords: [...this.offeredWords],
+      hintCount: this.hintCount,
+      categoryRevealed: this.categoryRevealed,
       turnPoints: [...this.turnPoints.entries()],
       lastTurnEnd: this.lastTurnEnd,
       lastGameOver: this.lastGameOver,
@@ -296,6 +302,9 @@ class Room {
     room.ops = Array.isArray(s.ops) ? s.ops : [];
     room.currentStroke = null;
     room.usedWords = new Set(s.usedWords || []);
+    room.offeredWords = new Set(s.offeredWords || []);
+    room.hintCount = s.hintCount || 0;
+    room.categoryRevealed = !!s.categoryRevealed;
     room.turnPoints = new Map(s.turnPoints || []);
     room.lastTurnEnd = s.lastTurnEnd || null;
     room.lastGameOver = s.lastGameOver || null;
@@ -599,7 +608,8 @@ class Room {
         timeLeft: this.timeLeft,
         wordMask: maskWord(this.word, this.revealed),
         wordLength: Array.from(this.word).length,
-        ...(isDrawer ? { word: this.word } : {}), // 출제자 본인에게만 단어
+        ...(isDrawer ? { word: this.word, category: this.category() } : {}), // 출제자 본인에게만 단어
+        ...(!isDrawer && this.categoryRevealed ? { category: this.category() } : {}), // 이미 공개된 카테고리 힌트
       });
       this.emitTo(id, 'draw:sync', { ops: this.ops });
     } else if (this.phase === 'turnEnd' && this.lastTurnEnd) {
@@ -704,6 +714,7 @@ class Room {
       p.isDrawing = false;
     }
     this.usedWords = new Set();
+    this.offeredWords = new Set();
     this.round = 1;
     this.totalRounds = this.settings.rounds;
     this.turnOrder = this.players.map((p) => p.id);
@@ -786,7 +797,10 @@ class Room {
       p.hasGuessed = false;
     }
 
-    let options = pickWords(this.settings, this.usedWords, this.settings.wordCount);
+    // 이미 정답으로 쓰였거나 후보로 제시됐던 단어는 가능하면 다시 내지 않는다
+    const exclude = new Set([...this.usedWords, ...this.offeredWords]);
+    let options = pickWords(this.settings, exclude, this.settings.wordCount);
+    for (const o of options) this.offeredWords.add(o);
     if (!options.length) options = ['사과']; // 방어: 절대 비어있지 않게
     this.wordOptions = options;
     this.timeLeft = CHOOSING_TIME;
@@ -827,6 +841,8 @@ class Room {
     this.timeLeft = this.drawTime;
     // 힌트 개수는 설정값과 이 단어의 공개 가능 글자 수 중 작은 쪽. 마지막 힌트는 항상 종료 hintEndAt초 전
     this.hintTimes = computeHintTimes(Math.min(this.settings.hints, maxReveals(word)), this.drawTime, this.settings.hintEndAt);
+    this.hintCount = this.hintTimes.size;
+    this.categoryRevealed = false;
 
     const base = {
       drawerId: this.drawerId,
@@ -837,7 +853,7 @@ class Room {
       wordLength: Array.from(word).length,
     };
     this.emitExcept(this.drawerId, 'game:drawing', base);
-    this.emitTo(this.drawerId, 'game:drawing', { ...base, word });
+    this.emitTo(this.drawerId, 'game:drawing', { ...base, word, category: this.category() });
     this.emitAll('draw:sync', { ops: [] });
     this.broadcastState();
     this.systemMessage(`${drawer.name}님이 그림을 그립니다.`);
@@ -886,9 +902,15 @@ class Room {
     const candidates = letterIdx.filter((i) => !this.revealed.has(i));
     if (!candidates.length) return;
     this.revealed.add(candidates[Math.floor(Math.random() * candidates.length)]);
+    // 마지막 초성 힌트에는 카테고리도 함께 공개한다 (사용자 단어는 카테고리가 없으므로 '방장이 낸 단어')
+    const payload = { wordMask: maskWord(this.word, this.revealed) };
+    if (this.revealed.size >= this.hintCount) {
+      this.categoryRevealed = true;
+      payload.category = this.category();
+    }
     // 출제자와 이미 정답을 맞힌 사람(이미 전체 공개를 받음)은 제외하고 아직 못 맞힌 사람에게만 보낸다.
     const targets = this.players.filter((pl) => pl.id !== this.drawerId && !pl.hasGuessed).map((pl) => pl.id);
-    this.emitToIds(targets, 'game:hint', { wordMask: maskWord(this.word, this.revealed) });
+    this.emitToIds(targets, 'game:hint', payload);
   }
 
   /**
@@ -904,6 +926,11 @@ class Room {
     if (this.round >= this.totalRounds) return null;
     const nextOrder = this.connectedPlayers().map((pl) => pl.id);
     return nextOrder.length ? nextOrder[0] : null;
+  }
+
+  /** 현재 단어의 카테고리 힌트 문구 */
+  category() {
+    return categoryOf(this.word) || '방장이 낸 단어';
   }
 
   /** 출제자를 제외한 모든 플레이어가 맞혔는지 */

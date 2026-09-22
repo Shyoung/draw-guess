@@ -418,6 +418,12 @@ async function main() {
   const chars = Array.from(word);
   const singleReveal = chars.some((ch, i) => ch !== ' ' && hint.wordMask === maskWord(word, new Set([i])));
   check('game:hint reveals exactly one correct letter', singleReveal, { word, mask: hint.wordMask });
+  // hints=1 이므로 이 힌트가 마지막 → 카테고리 동봉. 사용자 단어(customWordsOnly)라 '방장이 낸 단어'
+  // 사용자 단어라도 사전에 있으면 그 카테고리, 없으면 '방장이 낸 단어' — 어느 쪽이든 문자열이어야 한다
+  check('last hint carries a category string', typeof hint.category === 'string' && hint.category.length > 0, hint);
+  const wordsMod = require('../server/words');
+  check('categoryOf: dictionary words map to a category, custom word → null', wordsMod.categoryOf('강아지') === '동물' && wordsMod.categoryOf('자전거') === '탈것' && wordsMod.categoryOf('스타벅스') === '브랜드·캐릭터' && wordsMod.categoryOf('없는단어zzz') === null);
+  check('words.ko grew past 1400 with 13 categories', wordsMod.ko.length >= 1400 && Object.keys(wordsMod.CATEGORIES).length === 13, { n: wordsMod.ko.length, cats: Object.keys(wordsMod.CATEGORIES).length });
   // drawing 시작(game:drawing) 이후의 타이머만 본다 — choosing 단계 tick(14, 13 ...)은 제외
   const drawingLogIdx = g2.log.findLastIndex((e) => e.ev === 'game:drawing');
   const timerVals = g2.log.slice(drawingLogIdx).filter((e) => e.ev === 'game:timer').map((e) => e.payload.timeLeft);

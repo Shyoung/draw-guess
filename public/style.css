@@ -182,6 +182,11 @@ textarea { resize: vertical; min-height: 64px; }
 }
 .mask-box.revealed { background: var(--primary-soft); }
 .mask-wrap.solved .mask-box.revealed { background: #d6f5e3; color: #1e9a62; }
+/* 카테고리 힌트: 마지막 초성 힌트와 함께 등장 */
+.word-category { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--secondary-dark); background: var(--secondary-soft); padding: 2px 8px; border-radius: 999px; margin-left: 8px; white-space: nowrap; animation: cat-pop .35s ease-out; }
+.word-category .cat-label { font-weight: 600; opacity: .7; }
+.word-secret .word-category { margin-left: 10px; }
+@keyframes cat-pop { from { transform: scale(.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .mask-gap { width: 14px; }
 .mask-len { font-size: 13px; color: var(--muted); margin-left: 4px; }
 .word-secret { display: inline-flex; align-items: baseline; gap: 8px; }
