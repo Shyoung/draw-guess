@@ -12,7 +12,7 @@
 const path = require('path');
 const { spawn } = require('child_process');
 const { io } = require('socket.io-client');
-const { maskWord, normalizeAnswer, levenshtein, computeHintTimes } = require('../server/game');
+const { maskWord, hintChar, normalizeAnswer, levenshtein, computeHintTimes } = require('../server/game');
 const words = require('../server/words');
 
 const PORT = 3123;
@@ -176,7 +176,9 @@ async function main() {
   // 0) 순수 헬퍼 / 단어 사전 검증
   check('maskWord: 사과 → "_ _"', maskWord('사과', new Set()) === '_ _');
   check('maskWord: ice cream → "_ _ _   _ _ _ _ _"', maskWord('ice cream', new Set()) === '_ _ _   _ _ _ _ _');
-  check('maskWord: 한글 음절 단위 공개 "사 _"', maskWord('사과', new Set([0])) === '사 _');
+  check('maskWord: 한글은 초성만 공개 "ㅅ _"', maskWord('사과', new Set([0])) === 'ㅅ _');
+  check('maskWord: 영문·숫자는 그대로 공개 "G _ 2 _"', maskWord('GS25', new Set([0, 2])) === 'G _ 2 _');
+  check('hintChar: 쌍자음·받침 처리', hintChar('빵') === 'ㅃ' && hintChar('닭') === 'ㄷ' && hintChar('힣') === 'ㅎ' && hintChar('a') === 'a');
   check('hint times: hints=2, drawTime=80 → [53, 27]', JSON.stringify([...computeHintTimes(2, 80)]) === '[53,27]');
   check('hint times: hints=1, drawTime=30 → [15]', JSON.stringify([...computeHintTimes(1, 30)]) === '[15]');
   check('levenshtein basic', levenshtein('apple', 'aple') === 1 && levenshtein('abc', 'abc') === 0 && levenshtein('abc', 'xyz') === 3);

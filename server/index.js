@@ -20,6 +20,9 @@ const CODE_RE = /^[A-Z]{4}$/;
 const DEFAULT_AVATAR = { emoji: '🙂', color: '#4f8cff' };
 
 const app = express();
+// 헬스체크 / keep-alive 핑 대상 (정적 파일보다 가볍게)
+app.get('/healthz', (req, res) => res.type('text').send('ok'));
+
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const server = http.createServer(app);
@@ -285,6 +288,19 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
+// Render 무료 플랜은 15분간 요청이 없으면 잠든다. 공개 URL이 있으면 10분마다 스스로 핑을 보내 깨어 있게 한다.
+// Render는 RENDER_EXTERNAL_URL 을 자동으로 넣어 준다. 다른 호스팅에서는 KEEP_ALIVE_URL 로 지정.
+const KEEP_ALIVE_URL = process.env.KEEP_ALIVE_URL || process.env.RENDER_EXTERNAL_URL || '';
+const KEEP_ALIVE_MS = 10 * 60 * 1000;
+function startKeepAlive() {
+  if (!KEEP_ALIVE_URL) return;
+  const target = KEEP_ALIVE_URL.replace(/\/+$/, '') + '/healthz';
+  const ping = () => fetch(target).catch((err) => console.warn('[keep-alive] ping failed:', err.message));
+  setInterval(ping, KEEP_ALIVE_MS).unref();
+  console.log(`[keep-alive] pinging ${target} every ${KEEP_ALIVE_MS / 60000} min`);
+}
+
 server.listen(PORT, () => {
   console.log(`[draw-guess] listening on http://localhost:${PORT}`);
+  startKeepAlive();
 });

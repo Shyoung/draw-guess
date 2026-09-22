@@ -1,6 +1,6 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
 # GitHub 레포를 Render에 연결하면 이 파일대로 무료 Web Service가 만들어진다.
-# 무료 플랜은 15분간 접속이 없으면 잠들고, 다음 접속 때 30~60초 뒤 깨어난다.
+# 무료 플랜은 15분간 접속이 없으면 잠들지만, 서버가 RENDER_EXTERNAL_URL 로 10분마다 자기 자신을 핑해 깨어 있게 한다.
 services:
   - type: web
     name: draw-guess
@@ -9,7 +9,7 @@ services:
     region: singapore
     buildCommand: npm ci --omit=dev
     startCommand: npm start
-    healthCheckPath: /
+    healthCheckPath: /healthz
     envVars:
       - key: NODE_VERSION
         value: "24"

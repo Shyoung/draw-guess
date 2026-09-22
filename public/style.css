@@ -1,5 +1,5 @@
 /* =====================================================================
-   그려라 맞혀라 — style.css
+   서버가 터져서 도망친 곳에 낙원은 있나? — style.css
    playful, rounded, soft shadows. Korean-first typography.
    ===================================================================== */
 
@@ -99,8 +99,9 @@ ul, ol { padding: 0; list-style: none; }
 }
 .logo {
   display: flex; align-items: center; justify-content: center; gap: 10px;
-  font-size: 38px; font-weight: 900; letter-spacing: -0.03em; line-height: 1.1;
+  font-size: 26px; font-weight: 900; letter-spacing: -0.03em; line-height: 1.25; text-align: center;
 }
+.logo-text { display: block; word-break: keep-all; }
 .logo-pencil { display: inline-block; font-size: 36px; animation: wiggle 2.4s ease-in-out infinite; transform-origin: 70% 70%; }
 @keyframes wiggle { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(10deg); } }
 .logo-text em { font-style: normal; color: var(--primary); }
@@ -415,7 +416,7 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 }
 @media (max-width: 560px) {
   .landing-card { padding: 26px 18px 20px; border-radius: 22px; }
-  .logo { font-size: 30px; }
+  .logo { font-size: 21px; }
   .emoji-strip { grid-template-columns: repeat(8, 1fr); gap: 4px; }
   .emoji-btn { font-size: 20px; }
   .color-row { gap: 6px; }

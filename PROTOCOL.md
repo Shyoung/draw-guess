@@ -72,7 +72,7 @@
 |---|---|---|
 | `game:choosing` | `{ drawerId, drawerName, timeLeft, wordOptions? }` | `wordOptions`(string[])는 **출제자에게만** 포함. 나머지는 없음(undefined) |
 | `game:drawing` | `{ drawerId, round, totalRounds, timeLeft, wordMask, wordLength, word? }` | `word`는 출제자에게만. `wordMask` 형식은 아래 참고 |
-| `game:hint` | `{ wordMask }` | 글자 공개 갱신 (출제자에겐 안 보내도 됨) |
+| `game:hint` | `{ wordMask }` | 초성 공개 갱신 (출제자에겐 안 보내도 됨) |
 | `game:timer` | `{ timeLeft }` | 매 1초 (choosing / drawing 단계) |
 | `game:turnEnd` | `{ word, reason:'time'\|'allGuessed'\|'drawerLeft'\|'notEnoughPlayers', deltas:[{ id, delta }], timeLeft }` | 5초간 표시. `deltas`에는 이번 턴 획득 점수(0 포함 전원) |
 | `game:over` | `{ ranking:[{ id, name, avatar, score }] }` | 점수 내림차순. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
@@ -105,8 +105,8 @@
 ## Word mask 규칙
 - 각 글자를 `_`로, 공백은 그대로, 글자 사이는 공백 1개로 구분한다. 예: `사과` → `_ _`, `ice cream` → `_ _ _   _ _ _ _ _`
   (단어 사이 공백은 3개로 표시해 단어 경계가 보이게 함).
-- 힌트는 아직 공개되지 않은 글자 위치 중 무작위로 1개씩 공개한다. 한글은 음절 단위로 공개 (예: `사 _`).
-- 힌트 시점: 총 `hints`회를 drawTime의 균등 분할 시점에 준다. 예) hints=2, drawTime=80 → 잔여 53초, 27초쯤. 전체 글자 수 - 1 까지만 공개.
+- 힌트는 아직 공개되지 않은 글자 위치 중 무작위로 1개씩 고르고, 한글 음절은 **초성만** 공개한다 (예: `사과` → `ㅅ _`). 한글이 아닌 글자(영문·숫자)는 그 글자를 그대로 공개한다.
+- 힌트 시점: 총 `hints`회를 drawTime의 균등 분할 시점에 준다. 예) hints=2, drawTime=80 → 잔여 53초, 27초쯤. 한글만으로 된 단어는 모든 글자의 초성까지 공개될 수 있고, 영문·숫자가 섞인 단어는 전체 글자 수 - 1 까지만 공개한다.
 
 ## 정답 판정
 - 정규화: trim, 소문자화, 연속 공백 1개로. 한글은 그대로 비교(NFC).

@@ -70,16 +70,30 @@ function levenshtein(a, b) {
   return prev[t.length];
 }
 
+const CHOSEONG = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
+
+/** 완성형 한글 음절(가~힣)인지 */
+function isHangulSyllable(ch) {
+  const code = String(ch).codePointAt(0);
+  return code >= 0xac00 && code <= 0xd7a3;
+}
+
+/** 힌트로 보여줄 글자: 한글 음절은 초성만, 그 외(영문·숫자 등)는 글자 그대로 */
+function hintChar(ch) {
+  return isHangulSyllable(ch) ? CHOSEONG[Math.floor((ch.codePointAt(0) - 0xac00) / 588)] : ch;
+}
+
 /**
  * 단어 마스크. 각 글자 → '_', 공백은 그대로, 글자 사이 공백 1개.
  * 결과적으로 단어 사이 경계는 공백 3개로 보인다. 예) 'ice cream' → '_ _ _   _ _ _ _ _'
+ * 공개된 위치는 hintChar()로 표시한다. 예) '사과', {0} → 'ㅅ _'
  * @param {string} word
  * @param {Set<number>} revealed 공개된 글자 인덱스(Array.from 기준)
  */
 function maskWord(word, revealed) {
   const chars = Array.from(String(word));
   const rev = revealed || new Set();
-  return chars.map((ch, i) => (ch === ' ' ? ' ' : rev.has(i) ? ch : '_')).join(' ');
+  return chars.map((ch, i) => (ch === ' ' ? ' ' : rev.has(i) ? hintChar(ch) : '_')).join(' ');
 }
 
 /** 힌트 시점(잔여 초) 집합. hints=2, drawTime=80 → {53, 27} */
@@ -563,7 +577,11 @@ class Room {
     }
   }
 
-  /** 미공개 글자 위치 중 무작위 1개 공개 (전체 글자 수 - 1 까지) */
+  /**
+   * 미공개 글자 위치 중 무작위 1개의 초성 공개.
+   * 한글만으로 된 단어는 모든 글자의 초성까지 공개 가능(초성만으로는 정답이 드러나지 않음).
+   * 영문·숫자가 섞인 단어는 글자가 그대로 드러나므로 전체 글자 수 - 1 까지만.
+   */
   revealHint() {
     if (!this.word) return;
     const chars = Array.from(this.word);
@@ -571,7 +589,9 @@ class Room {
     chars.forEach((c, i) => {
       if (c !== ' ') letterIdx.push(i);
     });
-    if (this.revealed.size >= letterIdx.length - 1) return;
+    const allHangul = letterIdx.every((i) => isHangulSyllable(chars[i]));
+    const maxReveal = allHangul ? letterIdx.length : letterIdx.length - 1;
+    if (this.revealed.size >= maxReveal) return;
     const candidates = letterIdx.filter((i) => !this.revealed.has(i));
     if (!candidates.length) return;
     this.revealed.add(candidates[Math.floor(Math.random() * candidates.length)]);
@@ -794,6 +814,8 @@ module.exports = {
   GAME_OVER_TIME,
   // 테스트/재사용을 위한 순수 헬퍼
   maskWord,
+  hintChar,
+  isHangulSyllable,
   normalizeAnswer,
   levenshtein,
   computeHintTimes,
