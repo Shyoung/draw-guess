@@ -290,7 +290,9 @@ class Room {
     room.hintTimes = new Set(s.hintTimes || []);
     room.drawTime = s.drawTime || room.settings.drawTime;
     room.timeLeft = s.timeLeft || 0;
-    room.phaseEndsAt = s.phaseEndsAt || 0;
+    // 저장 시점 기준 잔여 시간을 복원 시점부터 다시 흐르게 한다 (배포 전환 사이의 빈 시간은 게임 시간에서 빼지 않음)
+    const downtime = s.savedAt ? Math.max(0, Date.now() - s.savedAt) : 0;
+    room.phaseEndsAt = s.phaseEndsAt ? s.phaseEndsAt + downtime : 0;
     room.ops = Array.isArray(s.ops) ? s.ops : [];
     room.currentStroke = null;
     room.usedWords = new Set(s.usedWords || []);
@@ -718,9 +720,22 @@ class Room {
   nextTurn() {
     if (this.destroyed) return;
     if (this.connectedPlayers().length < 2) {
+      // 유예 중인(곧 돌아올 수 있는) 사람이 있어 전체 인원은 2명 이상이면 잠시 기다린다.
+      // 유예가 끝나 실제로 퇴장하면 players 가 줄어 아래 gameOver 로 내려온다.
+      if (this.players.length >= 2) {
+        if (!this._waitingNotice) {
+          this._waitingNotice = true;
+          this.systemMessage('다른 참가자의 재접속을 기다리고 있어요…');
+        }
+        this.phase = 'turnEnd';
+        this.setPhaseTimeout(2000, () => this.nextTurn());
+        this.broadcastState();
+        return;
+      }
       this.gameOver();
       return;
     }
+    this._waitingNotice = false;
     // 무한 루프 방지: 최대 (turnOrder + players) 만큼만 탐색
     for (let guard = 0; guard < this.turnOrder.length + this.players.length + 2; guard++) {
       this.turnIndex += 1;

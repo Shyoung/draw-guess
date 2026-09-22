@@ -76,28 +76,41 @@ const rooms = new Map();
 // 방 상태 저장소: STORE_URL / REDIS_URL (redis://, rediss://, file:...) — 없으면 메모리만
 const store = createStore(process.env);
 
-/** 저장소에 남아 있는 방을 복원한다 (배포/재시작 직후). 오래된 스냅샷은 버린다 */
-async function restoreRooms() {
-  let snaps = [];
-  try { snaps = await store.loadAll(); } catch (err) { console.warn('[store] loadAll failed:', err.message); return 0; }
-  let n = 0;
-  for (const s of snaps) {
-    if (!s || !CODE_RE.test(s.code || '') || rooms.has(s.code)) continue;
-    if (!Array.isArray(s.players) || !s.players.length) { store.delete(s.code).catch(() => {}); continue; }
-    if (Date.now() - (s.savedAt || 0) > 3 * 60 * 60 * 1000) { store.delete(s.code).catch(() => {}); continue; }
+/**
+ * 방을 메모리에서 찾고, 없으면 저장소에서 "그 시점에" 복원한다 (lazy restore).
+ * 부팅 시 한꺼번에 복원하지 않는 이유: Render는 새 서버를 먼저 띄워 두고 나중에 트래픽을 넘기므로,
+ * 부팅 시 복원하면 참가자가 아직 옛 서버에 있는 동안 새 서버의 방이 "0명"으로 혼자 진행되어 버린다.
+ * 첫 참가자가 실제로 돌아오는 순간 복원하면 옛 서버가 종료 직전에 저장한 최종 상태를 읽게 되고,
+ * 그 사이 흐른 시간은 fromSnapshot 이 타이머에서 빼 준다.
+ * @returns {Promise<Room|null>}
+ */
+const restoring = new Map();
+async function getOrRestoreRoom(code) {
+  const existing = rooms.get(code);
+  if (existing) return existing;
+  if (restoring.has(code)) return restoring.get(code);
+  const task = (async () => {
+    let s = null;
+    try { s = await store.load(code); } catch (err) { console.warn('[store] load failed:', err.message); }
+    if (!s || !Array.isArray(s.players) || !s.players.length) return null;
+    if (Date.now() - (s.savedAt || 0) > 3 * 60 * 60 * 1000) { store.delete(code).catch(() => {}); return null; }
+    if (rooms.has(code)) return rooms.get(code); // 경합 방지
     try {
       const room = Room.fromSnapshot(io, s);
       room.store = store;
       room.onEmpty = deleteRoomIfEmpty;
       rooms.set(room.code, room);
       room.resumeAfterRestore();
-      n += 1;
+      console.log(`[store] restored room ${code} from store (phase ${room.phase}, ${room.players.length} players)`);
+      return room;
     } catch (err) {
-      console.warn(`[store] restore failed for ${s.code}:`, err.message);
-      store.delete(s.code).catch(() => {});
+      console.warn(`[store] restore failed for ${code}:`, err.message);
+      store.delete(code).catch(() => {});
+      return null;
     }
-  }
-  return n;
+  })();
+  restoring.set(code, task);
+  try { return await task; } finally { restoring.delete(code); }
 }
 
 // ── 방 코드 ─────────────────────────────────────────────────────
@@ -197,11 +210,15 @@ io.on('connection', (socket) => {
   /** 핸들러 예외가 서버를 죽이지 않도록 감싼다 */
   const on = (event, handler) => {
     socket.on(event, (...args) => {
-      try {
-        handler(...args);
-      } catch (err) {
+      const onErr = (err) => {
         console.error(`[draw-guess] handler error on ${event}:`, err);
         fail('요청을 처리하는 중 오류가 발생했습니다.');
+      };
+      try {
+        const ret = handler(...args);
+        if (ret && typeof ret.then === 'function') ret.catch(onErr);
+      } catch (err) {
+        onErr(err);
       }
     });
   };
@@ -280,7 +297,7 @@ io.on('connection', (socket) => {
   });
 
   // room:join { roomCode, name, avatar } → ack 동일
-  on('room:join', (rawData, rawAck) => {
+  on('room:join', async (rawData, rawAck) => {
     const [data, ack] = normalizeArgs(rawData, rawAck);
     const code = typeof data.roomCode === 'string' ? data.roomCode.trim().toUpperCase() : '';
     if (!CODE_RE.test(code)) return ack({ ok: false, error: '방 코드는 영문 4글자입니다.' });
@@ -288,7 +305,7 @@ io.on('connection', (socket) => {
     if (!name) return ack({ ok: false, error: '이름은 1~12자여야 합니다.' });
     const avatar = sanitizeAvatar(data.avatar);
 
-    const room = rooms.get(code);
+    const room = await getOrRestoreRoom(code);
     if (!room) return ack({ ok: false, error: '존재하지 않는 방입니다.' });
     if (socket.data.roomCode === code && room.getPlayer(pid())) {
       return ack({ ok: false, error: '이미 이 방에 참가 중입니다.' });
@@ -316,12 +333,12 @@ io.on('connection', (socket) => {
 
   // room:rejoin { roomCode, token } → ack { ok, roomCode, playerId, token } | { ok:false, error }
   // 연결이 끊긴 지 RECONNECT_GRACE_MS 안이면 같은 playerId·점수로 복귀한다.
-  on('room:rejoin', (rawData, rawAck) => {
+  on('room:rejoin', async (rawData, rawAck) => {
     const [data, ack] = normalizeArgs(rawData, rawAck);
     const code = typeof data.roomCode === 'string' ? data.roomCode.trim().toUpperCase() : '';
     const token = typeof data.token === 'string' && TOKEN_RE.test(data.token) ? data.token : null;
     if (!CODE_RE.test(code) || !token) return ack({ ok: false, error: '재접속 정보가 올바르지 않습니다.' });
-    const room = rooms.get(code);
+    const room = await getOrRestoreRoom(code);
     if (!room) return ack({ ok: false, error: '방이 더 이상 존재하지 않습니다.' });
     const p = room.findByToken(token);
     if (!p) return ack({ ok: false, error: '이어서 할 수 있는 자리가 없습니다. 다시 참가해 주세요.' });
@@ -474,9 +491,7 @@ async function shutdown(signal) {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-restoreRooms().then((n) => {
-  server.listen(PORT, () => {
-    console.log(`[draw-guess] listening on http://localhost:${PORT} (asset version ${ASSET_VERSION}, store=${store.kind}, restored ${n} room(s))`);
-    startKeepAlive();
-  });
+server.listen(PORT, () => {
+  console.log(`[draw-guess] listening on http://localhost:${PORT} (asset version ${ASSET_VERSION}, store=${store.kind}, rooms restore on demand)`);
+  startKeepAlive();
 });

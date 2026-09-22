@@ -137,8 +137,11 @@ const lastEv = (c, ev) => { const e = c.log.filter((x) => x.ev === ev).pop(); re
   check('snapshot survives shutdown with all players and score', snapAfter && snapAfter.players.length === 3 && byId(snapAfter.players, P2).score === scoreP2 && snapAfter.word === word, snapAfter && snapAfter.players);
 
   // ── 서버 B ─────────────────────────────────────────────────────
+  await sleep(2500); // 배포 전환 사이의 빈 시간(다운타임) — 이 시간은 게임의 남은 시간에서 빠지지 않아야 한다
   serverProc = await startServer('B');
-  check('server B restored 1 room from store', /restored 1 room/.test(serverProc.logs), serverProc.logs.trim());
+  check('server B does NOT restore at boot (restore on demand)', /restore on demand/.test(serverProc.logs) && !/restored room/.test(serverProc.logs), serverProc.logs.trim());
+  const hzBefore = await fetch(URL + '/healthz').then((x) => x.json());
+  check('healthz before anyone rejoins: rooms=0', hzBefore.rooms === 0, hzBefore);
 
   const b1 = await connect('P1b'), b2 = await connect('P2b'), b3 = await connect('P3b');
   // catch-up 이벤트는 rejoin ack 직후 비동기로 오므로 먼저 대기를 걸어둔다
@@ -151,6 +154,7 @@ const lastEv = (c, ev) => { const e = c.log.filter((x) => x.ev === ev).pop(); re
   const r2 = await emitAck(b2, 'room:rejoin', { roomCode: code, token: T2 });
   const r3 = await emitAck(b3, 'room:rejoin', { roomCode: code, token: T3 });
   const [dB1, hintB2, dB3, syncB] = await Promise.all([cu1, cu2, cu3d, cu3s]);
+  check('room restored on first rejoin (server log)', /restored room [A-Z]{4} from store \(phase drawing, 3 players\)/.test(serverProc.logs), serverProc.logs.trim());
   check('all three rejoin with their ORIGINAL playerIds', r1.ok && r1.playerId === P1 && r2.ok && r2.playerId === P2 && r3.ok && r3.playerId === P3, [r1, r2, r3]);
 
   const stB = await allConnP;
@@ -158,7 +162,7 @@ const lastEv = (c, ev) => { const e = c.log.filter((x) => x.ev === ev).pop(); re
 
   check('drawer gets game:drawing WITH word after restore', dB1 && dB1.word === word, dB1);
   check('guesser gets game:drawing with same mask, no word', dB3 && dB3.word === undefined && dB3.wordMask === d0.wordMask, dB3);
-  check('remaining time continues (not reset to 90)', dB3 && dB3.timeLeft <= timeLeftBefore && dB3.timeLeft >= timeLeftBefore - 8, { before: timeLeftBefore, after: dB3 && dB3.timeLeft });
+  check('remaining time continues and downtime is NOT deducted (within 2s of the value before shutdown)', dB3 && dB3.timeLeft <= timeLeftBefore && dB3.timeLeft >= timeLeftBefore - 2, { before: timeLeftBefore, after: dB3 && dB3.timeLeft });
   check('draw:sync restores ops (stroke + fill)', syncB && syncB.ops.length === 2 && syncB.ops[0].type === 'stroke' && syncB.ops[0].points.length === 4 && syncB.ops[1].type === 'fill', syncB && syncB.ops);
   check('rejoined correct guesser (P2) sees the full word again', hintB2 && hintB2.wordMask.replace(/ /g, '') === word, hintB2);
   check('P2 still hasGuessed after restore', byId(stB.players, P2).hasGuessed === true);

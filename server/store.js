@@ -6,7 +6,7 @@
  *  - redis:// | rediss://  → Redis 호환 서버 (Render Key Value, Upstash, Railway, 자체 호스팅 등 무엇이든)
  *  - file:<경로>           → JSON 파일 하나 (로컬 개발/테스트, 디스크가 있는 호스팅)
  *
- * 모든 구현은 같은 인터페이스: { kind, save(code, snapshot), delete(code), loadAll() → snapshot[], close() }
+ * 모든 구현은 같은 인터페이스: { kind, save(code, snapshot), delete(code), load(code) → snapshot|null, loadAll() → snapshot[], close() }
  * 저장 실패는 게임을 멈추지 않는다(로그만 남김).
  */
 const fs = require('fs');
@@ -21,6 +21,7 @@ function memoryStore() {
     kind: 'memory',
     async save() {},
     async delete() {},
+    async load() { return null; },
     async loadAll() { return []; },
     async close() {},
   };
@@ -42,6 +43,7 @@ function fileStore(filePath) {
     kind: 'file',
     async save(code, snapshot) { const all = readAll(); all[code] = snapshot; writeAll(all); },
     async delete(code) { const all = readAll(); if (code in all) { delete all[code]; writeAll(all); } },
+    async load(code) { return readAll()[code] || null; },
     async loadAll() { return Object.values(readAll()); },
     async close() {},
   };
@@ -68,6 +70,11 @@ function redisStore(url) {
       await client.set(KEY_PREFIX + code, JSON.stringify(snapshot), 'EX', TTL_SEC);
     },
     async delete(code) { await client.del(KEY_PREFIX + code); },
+    async load(code) {
+      const v = await client.get(KEY_PREFIX + code);
+      if (!v) return null;
+      try { return JSON.parse(v); } catch (e) { return null; }
+    },
     async loadAll() {
       const out = [];
       let cursor = '0';
