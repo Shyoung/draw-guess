@@ -58,7 +58,7 @@ HEADFUL=1 node test/browser.js   # 창을 띄워서 진행 과정 보기
 
 ### Render (권장, 무료)
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/shyoung-lee/draw-guess)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Shyoung/draw-guess)
 
 1. 위 버튼을 누르고 GitHub 계정으로 Render에 로그인합니다.
 2. 저장소의 `render.yaml`이 자동으로 읽혀 무료 Web Service가 만들어집니다. Apply를 누르면 2~3분 뒤 `https://draw-guess-xxxx.onrender.com` 주소가 나옵니다.
