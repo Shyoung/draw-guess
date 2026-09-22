@@ -97,7 +97,10 @@
   // 최근 게임 이벤트에서 파생된 UI 데이터
   var ui = {
     wordMask: '', wordLength: 0, word: null, wordOptions: null, chosenWord: null, category: null,
-    drawerName: '', timeLeft: null, turnEnd: null, ranking: null, optionsKey: ''
+    drawerName: '', timeLeft: null, turnEnd: null, ranking: null, optionsKey: '',
+    gallery: null,      // 가장 최근 게임의 갤러리 [{ round, word, category, drawerName, guessed, ops }]
+    galleryOpen: false,
+    galleryThumbs: []   // 렌더링한 썸네일 dataURL 캐시 (gallery와 같은 인덱스)
   };
 
   var profile = { name: '', emoji: EMOJIS[0], color: AV_COLORS[4] };
@@ -590,8 +593,129 @@
       return { id: r.id, name: String(r.name || playerName(r.id, '?')), avatar: safeAvatar(r.avatar), score: num(r.score, 0) };
     }).sort(function (a, b) { return b.score - a.score; });
     ui.turnEnd = null;
+    if (Array.isArray(p && p.gallery)) {
+      ui.gallery = p.gallery.filter(function (g) { return g && typeof g === 'object' && typeof g.word === 'string'; }).map(function (g) {
+        return {
+          round: num(g.round, 0), word: String(g.word), category: g.category ? String(g.category) : '',
+          drawerId: g.drawerId, drawerName: String(g.drawerName || playerName(g.drawerId, '?')), guessed: num(g.guessed, 0),
+          ops: Array.isArray(g.ops) ? g.ops.map(sanitizeOp).filter(Boolean) : [], trimmed: !!g.trimmed
+        };
+      });
+      ui.galleryThumbs = [];
+    }
     setTimeLeft(10, false);
     renderAll();
+  }
+
+  // ------------------------------------------------------------------
+  // 그림 갤러리 (게임 종료 후) — ops 를 오프스크린 캔버스에 재생해 PNG 로 만든다
+  // ------------------------------------------------------------------
+  /** 기존 그리기 함수들(drawStroke/floodFill/clearCanvas)은 전역 ctx 를 쓰므로, 잠시 바꿔 끼워 재사용한다 */
+  function withCtx(tmpCtx, fn) {
+    var saved = ctx; ctx = tmpCtx;
+    try { fn(); } finally { ctx = saved; }
+  }
+  function renderOpsToCanvas(opsList) {
+    var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    var c2 = cv.getContext('2d', { willReadFrequently: true });
+    withCtx(c2, function () {
+      clearCanvas();
+      for (var i = 0; i < opsList.length; i++) renderOp(opsList[i]);
+    });
+    return cv;
+  }
+  function galleryThumb(i) {
+    if (!ui.gallery || !ui.gallery[i]) return '';
+    if (!ui.galleryThumbs[i]) {
+      try { ui.galleryThumbs[i] = renderOpsToCanvas(ui.gallery[i].ops).toDataURL('image/png'); } catch (e) { ui.galleryThumbs[i] = ''; }
+    }
+    return ui.galleryThumbs[i];
+  }
+  function galleryCaption(g) {
+    return (g.round ? g.round + '라운드 · ' : '') + '정답 ' + g.word + ' · ✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘';
+  }
+  function safeFile(s) { return String(s).replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40); }
+  function downloadDataUrl(dataUrl, filename) {
+    var a = document.createElement('a'); a.href = dataUrl; a.download = filename;
+    document.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); }, 0);
+  }
+  /** 그림 + 아래 캡션 띠를 합친 PNG */
+  function galleryItemPng(i) {
+    var g = ui.gallery[i];
+    var src = renderOpsToCanvas(g.ops);
+    var cv = document.createElement('canvas'); cv.width = W; cv.height = H + 72;
+    var c2 = cv.getContext('2d');
+    c2.fillStyle = '#ffffff'; c2.fillRect(0, 0, cv.width, cv.height);
+    c2.drawImage(src, 0, 0);
+    c2.fillStyle = '#f3ecff'; c2.fillRect(0, H, W, 72);
+    c2.fillStyle = '#2b2d42'; c2.font = 'bold 26px "Pretendard", "Malgun Gothic", sans-serif'; c2.textBaseline = 'middle';
+    c2.fillText(g.word + (g.category ? '  (' + g.category + ')' : ''), 20, H + 26);
+    c2.fillStyle = '#6c6f85'; c2.font = '16px "Pretendard", "Malgun Gothic", sans-serif';
+    c2.fillText('✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘 · ' + (g.round ? g.round + '라운드 · ' : '') + '서버가 터져서 도망친 곳에 낙원은 있나?', 20, H + 54);
+    return cv.toDataURL('image/png');
+  }
+  /** 전체를 한 장에 모은 시트 PNG (3열) */
+  function gallerySheetPng() {
+    var items = ui.gallery || [];
+    var cols = Math.min(3, Math.max(1, items.length)), cellW = 400, cellH = 300, cap = 44, pad = 16, head = 64;
+    var rows = Math.ceil(items.length / cols);
+    var cv = document.createElement('canvas');
+    cv.width = pad + cols * (cellW + pad); cv.height = head + rows * (cellH + cap + pad) + pad;
+    var c2 = cv.getContext('2d');
+    c2.fillStyle = '#fdf6ec'; c2.fillRect(0, 0, cv.width, cv.height);
+    c2.fillStyle = '#2b2d42'; c2.font = 'bold 26px "Pretendard", "Malgun Gothic", sans-serif'; c2.textBaseline = 'middle';
+    c2.fillText('🖼 그림 갤러리 · 방 ' + (state.roomCode || '') + ' · ' + items.length + '장', pad, head / 2);
+    items.forEach(function (g, i) {
+      var col = i % cols, row = Math.floor(i / cols);
+      var x = pad + col * (cellW + pad), y = head + row * (cellH + cap + pad);
+      c2.fillStyle = '#ffffff'; c2.fillRect(x, y, cellW, cellH + cap);
+      c2.drawImage(renderOpsToCanvas(g.ops), x, y, cellW, cellH);
+      c2.fillStyle = '#f3ecff'; c2.fillRect(x, y + cellH, cellW, cap);
+      c2.fillStyle = '#2b2d42'; c2.font = 'bold 17px "Pretendard", "Malgun Gothic", sans-serif';
+      c2.fillText(g.word, x + 12, y + cellH + cap / 2);
+      c2.fillStyle = '#6c6f85'; c2.font = '13px "Pretendard", "Malgun Gothic", sans-serif'; c2.textAlign = 'right';
+      c2.fillText('✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘', x + cellW - 12, y + cellH + cap / 2);
+      c2.textAlign = 'left';
+    });
+    return cv.toDataURL('image/png');
+  }
+  function openGallery() { if (!ui.gallery || !ui.gallery.length) { toast('아직 갤러리에 담을 그림이 없어요'); return; } ui.galleryOpen = true; renderGallery(); }
+  function closeGallery() { ui.galleryOpen = false; renderGallery(); }
+  function renderGallery() {
+    var m = $('overlay-gallery'); if (!m) return;
+    var items = ui.gallery || [];
+    m.hidden = !ui.galleryOpen || !items.length;
+    var bo = $('btn-gallery-open'); if (bo) bo.hidden = !items.length;
+    var bl = $('btn-gallery-lobby'); if (bl) bl.hidden = !(items.length && state.phase === 'lobby');
+    if (m.hidden) return;
+    var cnt = $('gallery-count'); if (cnt) cnt.textContent = items.length + '장';
+    var grid = $('gallery-grid'); if (!grid) return;
+    grid.innerHTML = '';
+    items.forEach(function (g, i) {
+      var card = el('div', 'gallery-item');
+      card.setAttribute('data-index', String(i));
+      if (g.ops.length || !g.trimmed) {
+        var img = document.createElement('img'); img.alt = g.word + ' 그림'; img.src = galleryThumb(i); img.loading = 'lazy';
+        card.appendChild(img);
+      } else {
+        card.appendChild(el('div', 'gallery-empty', '그림 데이터가 너무 커서 생략됐어요'));
+      }
+      var meta = el('div', 'gallery-meta');
+      var wd = el('div', 'gallery-word', g.word);
+      if (g.category) wd.appendChild(el('span', 'gallery-cat', g.category));
+      meta.appendChild(wd);
+      var sub = el('div', 'gallery-sub');
+      sub.appendChild(el('span', '', (g.round ? g.round + 'R · ' : '') + '✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘'));
+      var dl = el('button', 'btn btn-secondary btn-sm', 'PNG 저장'); dl.type = 'button';
+      dl.addEventListener('click', function () {
+        try { downloadDataUrl(galleryItemPng(i), safeFile('그림맞추기_' + (state.roomCode || '') + '_' + (i + 1) + '_' + g.word) + '.png'); }
+        catch (e) { toast('이미지를 만들지 못했어요', 'error'); }
+      });
+      sub.appendChild(dl);
+      meta.appendChild(sub);
+      card.appendChild(meta);
+      grid.appendChild(card);
+    });
   }
 
   function onChatMessage(m) {
@@ -643,7 +767,7 @@
   // Rendering
   // ------------------------------------------------------------------
   function renderAll() {
-    renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput();
+    renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery();
   }
 
   function renderTopbar() {
@@ -1098,6 +1222,7 @@
     state.roomCode = null; state.hostId = null; state.phase = 'lobby'; state.round = 0; state.totalRounds = 0;
     state.drawerId = null; state.players = []; state.settings = Object.assign({}, DEFAULT_SETTINGS);
     ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null; ui.optionsKey = '';
+    ui.gallery = null; ui.galleryThumbs = []; ui.galleryOpen = false;
     setTimeLeft(null);
     resetCanvasState(); clearChat();
     var vl = $('view-landing'), vr = $('view-room');
@@ -1177,6 +1302,15 @@
     var bc = $('btn-copy'); if (bc) bc.addEventListener('click', copyInvite);
     var bl = $('btn-leave'); if (bl) bl.addEventListener('click', function () { resetToLanding(true); });
     var bs = $('btn-sound'); if (bs) { renderSoundButton(bs); bs.addEventListener('click', function () { SFX.toggle(); renderSoundButton(bs); }); }
+    var go = $('btn-gallery-open'); if (go) go.addEventListener('click', openGallery);
+    var gl = $('btn-gallery-lobby'); if (gl) gl.addEventListener('click', openGallery);
+    var gc = $('btn-gallery-close'); if (gc) gc.addEventListener('click', closeGallery);
+    var gs = $('btn-gallery-sheet'); if (gs) gs.addEventListener('click', function () {
+      try { downloadDataUrl(gallerySheetPng(), safeFile('그림맞추기_' + (state.roomCode || '') + '_전체') + '.png'); }
+      catch (e) { toast('이미지를 만들지 못했어요', 'error'); }
+    });
+    var gm = $('overlay-gallery'); if (gm) gm.addEventListener('click', function (e) { if (e.target === gm) closeGallery(); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && ui.galleryOpen) closeGallery(); });
 
     var form = $('chat-form'), input = $('chat-input');
     if (form && input) {

@@ -79,7 +79,7 @@
 | `game:hint` | `{ wordMask, category? }` | 초성 공개 갱신 (출제자·이미 정답을 맞힌 사람 제외). 누군가 정답을 맞히면 그 사람에게만 별도로 `wordMask`가 실제 글자로 전체 공개된 `game:hint`가 온다(초성이 아님) |
 | `game:timer` | `{ timeLeft }` | 매 1초 (choosing / drawing 단계) |
 | `game:turnEnd` | `{ word, reason:'time'\|'allGuessed'\|'drawerLeft'\|'notEnoughPlayers', deltas:[{ id, delta }], timeLeft }` | 5초간 표시. `deltas`에는 이번 턴 획득 점수(0 포함 전원) |
-| `game:over` | `{ ranking:[{ id, name, avatar, score }] }` | 점수 내림차순. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
+| `game:over` | `{ ranking:[{ id, name, avatar, score }], gallery:[{ round, word, category, drawerId, drawerName, guessed, ops, trimmed? }] }` | 점수 내림차순. `gallery`는 이 게임에서 실제로 그린 턴들의 (제시어, 그림 ops) 기록 — 클라이언트가 갤러리로 렌더링하고 PNG로 저장. 전체가 약 1.5MB를 넘으면 오래된 턴의 `ops`를 비우고 `trimmed:true`. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
 
 ### 드로잉 (출제자를 제외한 방 전체에 그대로 중계)
 `draw:start`, `draw:move`, `draw:end`, `draw:fill`, `draw:clear`, `draw:undo` — 페이로드는 C→S와 동일.

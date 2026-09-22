@@ -362,6 +362,36 @@ async function say(page, text) {
     check(rank.length > 0 && /\d+/.test(rank), '게임 종료 랭킹 표시');
     await host.screenshot({ path: path.join(SHOTS, 'e2e-gameover.png') });
 
+    // 갤러리: 3턴 모두 그림이 있었으므로 3장, 썸네일은 실제 PNG dataURL, 다운로드 버튼 존재
+    check(await host.locator('#btn-gallery-open').isVisible(), '게임 종료 화면에 갤러리 버튼');
+    await host.click('#btn-gallery-open');
+    await host.waitForSelector('#overlay-gallery:not([hidden])', { timeout: 3000 });
+    const gItems = await host.locator('#gallery-grid .gallery-item').count();
+    check(gItems === 3, '갤러리에 턴 수만큼(3장) 그림', gItems);
+    const srcs = await host.$$eval('#gallery-grid .gallery-item img', (imgs) => imgs.map((i) => i.src.slice(0, 22)));
+    check(srcs.length === 3 && srcs.every((s) => s.startsWith('data:image/png;base64')), '썸네일이 PNG dataURL로 렌더링', srcs);
+    const nonWhiteThumb = await host.$$eval('#gallery-grid .gallery-item img', (imgs) => {
+      const img = imgs[0]; const cv = document.createElement('canvas'); cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+      const c2 = cv.getContext('2d'); c2.drawImage(img, 0, 0); const d = c2.getImageData(0, 0, cv.width, cv.height).data;
+      let n = 0; for (let i = 0; i < d.length; i += 4) if (d[i] < 250 || d[i + 1] < 250 || d[i + 2] < 250) n++; return n;
+    });
+    check(nonWhiteThumb > 500, '첫 장 썸네일에 실제 그림 픽셀', nonWhiteThumb);
+    const words = await host.$$eval('#gallery-grid .gallery-word', (els) => els.map((e) => e.firstChild.textContent.trim()));
+    check(words.every((w) => w.length > 0), '갤러리 카드마다 제시어 표시', words);
+    check((await host.locator('#gallery-grid .gallery-item .btn').count()) === 3 && await host.locator('#btn-gallery-sheet').isVisible(), '개별 PNG 저장 버튼 3개 + 전체 저장 버튼');
+    // 다운로드가 실제로 일어나는지 (Playwright download 이벤트)
+    const dlPromise = host.waitForEvent('download', { timeout: 5000 }).catch(() => null);
+    await host.locator('#gallery-grid .gallery-item .btn').first().click();
+    const dl = await dlPromise;
+    check(!!dl && /\.png$/.test(dl.suggestedFilename()), '개별 PNG 다운로드 파일명 .png', dl && dl.suggestedFilename());
+    const dlSheet = host.waitForEvent('download', { timeout: 5000 }).catch(() => null);
+    await host.click('#btn-gallery-sheet');
+    const ds = await dlSheet;
+    check(!!ds && /전체\.png$/.test(ds.suggestedFilename()), '전체 시트 PNG 다운로드', ds && ds.suggestedFilename());
+    await host.screenshot({ path: path.join(SHOTS, 'e2e-gallery.png') });
+    await host.click('#btn-gallery-close');
+    check(await host.locator('#overlay-gallery').isHidden(), '갤러리 닫기');
+
     // 랭킹 내림차순
     const scores = await host.$$eval('#ranking-list li', (els) =>
       els.map((e) => parseInt((e.textContent.match(/(\d+)\s*점/) || [0, 0])[1], 10)));
@@ -370,6 +400,7 @@ async function say(page, text) {
     // 10초 후 로비 복귀
     await host.waitForSelector('#settings-panel:not([hidden])', { timeout: 15000 });
     check(await host.locator('#btn-start').isVisible(), '게임 종료 후 로비 복귀');
+    check(await host.locator('#btn-gallery-lobby').isVisible(), '로비에 "지난 게임 그림 갤러리" 버튼 유지');
 
     // 나가기 → 호스트 이전
     await host.click('#btn-leave');

@@ -122,6 +122,7 @@
           <div class="start-row">
             <button id="btn-start" class="btn btn-primary btn-xl btn-block" type="button">게임 시작</button>
             <p id="start-hint" class="start-hint"></p>
+            <button id="btn-gallery-lobby" class="btn btn-ghost btn-block" type="button" hidden>🖼 지난 게임 그림 갤러리</button>
           </div>
         </div>
 
@@ -155,6 +156,7 @@
               <h3 class="card-title">최종 순위</h3>
               <div id="podium" class="podium"></div>
               <ol id="ranking-list" class="ranking-list"></ol>
+              <button id="btn-gallery-open" class="btn btn-secondary" type="button" hidden>🖼 그림 갤러리 보기</button>
               <p class="card-note"><span id="gameover-timer">10</span>초 후 대기실로 돌아갑니다</p>
             </div>
           </div>
@@ -207,6 +209,20 @@
       </aside>
     </div>
   </main>
+
+  <!-- 게임 종료 후 그림 갤러리 (phase와 무관하게 열고 닫는 모달) -->
+  <div id="overlay-gallery" class="modal" hidden>
+    <div class="modal-card">
+      <header class="modal-head">
+        <h3 class="card-title">🖼 그림 갤러리 <span id="gallery-count" class="panel-sub"></span></h3>
+        <div class="modal-actions">
+          <button id="btn-gallery-sheet" class="btn btn-primary btn-sm" type="button">전체 PNG 저장</button>
+          <button id="btn-gallery-close" class="btn btn-ghost btn-sm" type="button">닫기</button>
+        </div>
+      </header>
+      <div id="gallery-grid" class="gallery-grid"></div>
+    </div>
+  </div>
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 

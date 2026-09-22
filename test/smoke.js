@@ -514,6 +514,9 @@ async function main() {
   check('game:over ranking has 4 entries with {id, name, avatar, score}', Array.isArray(ranking) && ranking.length === 4 && ranking.every((r) => typeof r.id === 'string' && typeof r.name === 'string' && r.avatar && typeof r.avatar.emoji === 'string' && typeof r.score === 'number'), ranking);
   check('ranking sorted by score desc', ranking.every((r, i) => i === 0 || ranking[i - 1].score >= r.score), ranking.map((r) => r.score));
   check('game:over identical for all clients', overs.every((o) => JSON.stringify(o) === JSON.stringify(overs[0])));
+  const gal = overs[0].gallery;
+  check('game:over carries gallery of drawn turns (word, drawer, category, ops[])', Array.isArray(gal) && gal.length >= 1 && gal.every((g) => typeof g.word === 'string' && typeof g.drawerName === 'string' && typeof g.category === 'string' && Array.isArray(g.ops)), gal && gal.map((g) => ({ word: g.word, ops: g.ops.length })));
+  check('gallery turn 1 keeps the drawer ops (at least one stroke)', gal && gal[0] && gal[0].ops.some((o) => o.type === 'stroke'), gal && gal[0] && gal[0].ops.map((o) => o.type));
   const goState = await waitFor(c1, 'room:state', (s) => s.phase === 'gameOver', 3000).catch(() => c1.log.map((e) => e.payload).filter((p) => p && p.phase === 'gameOver').pop());
   check('room:state phase gameOver with drawerId null, scores match ranking', goState && goState.drawerId === null && goState.players.every((p) => byId(ranking, p.id).score === p.score), goState);
 

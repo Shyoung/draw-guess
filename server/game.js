@@ -222,6 +222,7 @@ class Room {
 
     this.usedWords = new Set(); // 이번 게임에서 이미 나온(선택된) 단어
     this.offeredWords = new Set(); // 이번 게임에서 후보로 한 번이라도 제시된 단어 — 반복 제시 방지
+    this.gallery = []; // 이번 게임의 턴별 기록 [{ round, word, category, drawerId, drawerName, guessed, ops }] — 게임 종료 갤러리
     this.hintCount = 0; // 이번 턴에 예정된 초성 힌트 개수
     this.categoryRevealed = false; // 마지막 초성 힌트와 함께 카테고리를 공개했는지
     this.turnPoints = new Map(); // 이번 턴 획득 점수 (id → delta)
@@ -263,6 +264,7 @@ class Room {
       ops: this.ops,
       usedWords: [...this.usedWords],
       offeredWords: [...this.offeredWords],
+      gallery: this.gallery,
       hintCount: this.hintCount,
       categoryRevealed: this.categoryRevealed,
       turnPoints: [...this.turnPoints.entries()],
@@ -303,6 +305,7 @@ class Room {
     room.currentStroke = null;
     room.usedWords = new Set(s.usedWords || []);
     room.offeredWords = new Set(s.offeredWords || []);
+    room.gallery = Array.isArray(s.gallery) ? s.gallery : [];
     room.hintCount = s.hintCount || 0;
     room.categoryRevealed = !!s.categoryRevealed;
     room.turnPoints = new Map(s.turnPoints || []);
@@ -715,6 +718,7 @@ class Room {
     }
     this.usedWords = new Set();
     this.offeredWords = new Set();
+    this.gallery = [];
     this.round = 1;
     this.totalRounds = this.settings.rounds;
     this.turnOrder = this.players.map((p) => p.id);
@@ -928,6 +932,18 @@ class Room {
     return nextOrder.length ? nextOrder[0] : null;
   }
 
+  /** 갤러리가 너무 커지면(저장소·전송 부담) 오래된 턴의 그림 데이터부터 비운다. 제시어·출제자 정보는 남긴다 */
+  trimGallery() {
+    const LIMIT = 1.5 * 1024 * 1024; // JSON 문자 수 기준 약 1.5MB
+    let size = JSON.stringify(this.gallery).length;
+    for (let i = 0; i < this.gallery.length && size > LIMIT; i++) {
+      if (!this.gallery[i].ops.length) continue;
+      size -= JSON.stringify(this.gallery[i].ops).length;
+      this.gallery[i].ops = [];
+      this.gallery[i].trimmed = true;
+    }
+  }
+
   /** 현재 단어의 카테고리 힌트 문구 */
   category() {
     return categoryOf(this.word) || '방장이 낸 단어';
@@ -958,6 +974,21 @@ class Room {
       this.turnPoints.set(drawer.id, pts);
     }
     if (this.word) this.usedWords.add(this.word);
+
+    // 갤러리 기록: 실제로 그림을 그린 턴만 (choosing 중 이탈 등은 제외)
+    if (this.phase === 'drawing' && this.word) {
+      const guessed = this.players.filter((p) => p.id !== this.drawerId && p.hasGuessed).length;
+      this.gallery.push({
+        round: this.round,
+        word: this.word,
+        category: this.category(),
+        drawerId: this.drawerId,
+        drawerName: drawer ? drawer.name : '',
+        guessed,
+        ops: this.ops.slice(),
+      });
+      this.trimGallery();
+    }
 
     const deltas = this.players.map((p) => ({ id: p.id, delta: this.turnPoints.get(p.id) || 0 }));
     this.phase = 'turnEnd';
@@ -990,8 +1021,8 @@ class Room {
       .slice()
       .sort((a, b) => b.score - a.score)
       .map((p) => ({ id: p.id, name: p.name, avatar: { ...p.avatar }, score: p.score }));
-    this.lastGameOver = { ranking };
-    this.emitAll('game:over', { ranking });
+    this.lastGameOver = { ranking, gallery: this.gallery };
+    this.emitAll('game:over', this.lastGameOver);
     this.broadcastState();
     this.setPhaseTimeout(GAME_OVER_TIME * 1000, () => this.backToLobby());
   }
