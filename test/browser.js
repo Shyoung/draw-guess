@@ -195,13 +195,24 @@ async function say(page, text) {
       check((await drawer.locator('#chat-list').textContent()).includes('완전틀린답'), `턴${turn}: 오답은 일반 채팅으로 전달`);
 
       // 근접 추측 (마지막 글자 변경) → 보낸 사람에게만 close
+      // 채팅 기록은 턴이 지나도 누적되므로(다른 턴에 이 플레이어가 근접 정답을 보낸 적 있을 수 있음),
+      // 항상 "이 조작 직후 새로 추가된 마지막 메시지"만 비교한다.
       if (word.length >= 3) {
         const close = word.slice(0, -1) + (word.endsWith('a') ? 'b' : 'a');
+        const beforeSelf = await guessers[0].locator('#chat-list > *').count();
+        const beforeOther = await guessers[1].locator('#chat-list > *').count();
         await say(guessers[0], close);
-        await sleep(300);
-        const lastMsg = await guessers[0].locator('#chat-list > *:last-child').textContent().catch(() => '');
-        check((await guessers[0].locator('#chat-list').textContent()).includes('거의'), `턴${turn}: 근접 정답 안내(보낸 사람)`, `word=${word} guess=${close} last=${lastMsg.trim().slice(0, 40)}`);
-        check(!(await guessers[1].locator('#chat-list').textContent()).includes('거의'), `턴${turn}: 근접 안내는 다른 사람에게 미노출`);
+        await guessers[0].waitForFunction(
+          (n) => document.getElementById('chat-list').children.length > n, beforeSelf, { timeout: 3000 },
+        ).catch(() => {});
+        await sleep(200);
+        const lastSelf = (await guessers[0].locator('#chat-list > *:last-child').textContent().catch(() => '')).trim();
+        check(lastSelf.includes('거의'), `턴${turn}: 근접 정답 안내(보낸 사람)`, `word=${word} guess=${close} last=${lastSelf.slice(0, 40)}`);
+        const afterOtherCount = await guessers[1].locator('#chat-list > *').count();
+        const newOtherMsgs = afterOtherCount > beforeOther
+          ? await guessers[1].locator('#chat-list > *').allTextContents().then((all) => all.slice(beforeOther))
+          : [];
+        check(!newOtherMsgs.some((t) => t.includes('거의')), `턴${turn}: 근접 안내는 다른 사람에게 미노출`, JSON.stringify(newOtherMsgs));
       }
 
       // 정답

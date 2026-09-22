@@ -18,6 +18,7 @@
     '#283593', '#8e24aa', '#f06292', '#f8c9a0', '#ffb74d'
   ];
   var SIZES = [4, 10, 20, 36];
+  var SFX = window.SFX || { play: function () {}, isMuted: function () { return true; }, setMuted: function () {}, toggle: function () { return true; } };
   var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, customWords: '', customWordsOnly: false };
   var REASON_TEXT = { time: '시간 종료!', allGuessed: '모두 맞혔어요!', drawerLeft: '출제자가 나갔어요', notEnoughPlayers: '플레이어가 부족해요' };
   var STORAGE_KEY = 'drawguess.profile';
@@ -91,6 +92,13 @@
     requestAnimationFrame(function () { t.classList.add('show'); });
     setTimeout(function () { t.classList.remove('show'); setTimeout(function () { t.remove(); }, 300); }, 3000);
     while (wrap.children.length > 4) wrap.removeChild(wrap.firstChild);
+  }
+
+  function renderSoundButton(btn) {
+    var muted = SFX.isMuted();
+    btn.textContent = muted ? '🔇' : '🔊';
+    btn.title = muted ? '효과음 켜기' : '효과음 끄기';
+    btn.setAttribute('aria-pressed', String(muted));
   }
 
   // ------------------------------------------------------------------
@@ -411,7 +419,7 @@
     on('player:guessed', function (p) {
       var pl = p && findPlayer(p.id); if (pl) { pl.hasGuessed = true; renderPlayers(); renderChatInput(); }
     });
-    on('error:msg', function (p) { toast(p && p.message ? p.message : '오류가 발생했어요', 'error'); });
+    on('error:msg', function (p) { toast(p && p.message ? p.message : '오류가 발생했어요', 'error'); SFX.play('error'); });
 
     on('draw:start', onDrawStart);
     on('draw:move', onDrawMove);
@@ -458,6 +466,7 @@
     if (p.drawerId != null) state.drawerId = p.drawerId;
     ui.drawerName = p.drawerName ? String(p.drawerName) : playerName(state.drawerId, '출제자');
     ui.wordOptions = Array.isArray(p.wordOptions) ? p.wordOptions.map(String) : null;
+    if (ui.wordOptions && ui.wordOptions.length) SFX.play('myTurn');
     ui.chosenWord = null;
     ui.word = null; ui.wordMask = ''; ui.turnEnd = null; ui.ranking = null;
     resetCanvasState();
@@ -499,12 +508,14 @@
       deltas: Array.isArray(p.deltas) ? p.deltas.filter(function (d) { return d && d.id != null; }) : []
     };
     // 델타를 players 점수에 미리 반영하진 않는다 (room:state가 곧 갱신함)
+    SFX.play('turnEnd');
     setTimeLeft(p.timeLeft != null ? num(p.timeLeft, 5) : 5, false);
     renderAll();
   }
 
   function onGameOver(p) {
     state.phase = 'gameOver';
+    SFX.play('gameOver');
     cancelLocalStroke(false);
     var ranking = p && Array.isArray(p.ranking) ? p.ranking : [];
     ui.ranking = ranking.filter(function (r) { return r && typeof r === 'object'; }).map(function (r) {
@@ -791,9 +802,17 @@
     var text = m.text == null ? '' : String(m.text);
     var atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     var node;
-    if (kind === 'system') node = el('div', 'msg msg-system', text);
-    else if (kind === 'correct') { node = el('div', 'msg msg-correct'); node.appendChild(el('span', 'msg-icon', '🎉')); node.appendChild(el('span', 'msg-text', text)); }
-    else if (kind === 'close') { node = el('div', 'msg msg-close'); node.appendChild(el('span', 'msg-icon', '🔥')); node.appendChild(el('span', 'msg-text', text)); node.appendChild(el('span', 'msg-note', '거의 맞았어요!')); }
+    if (kind === 'system') {
+      node = el('div', 'msg msg-system', text);
+      if (text.indexOf('입장했습니다') !== -1) SFX.play('join');
+      else if (text.indexOf('나갔습니다') !== -1 || text.indexOf('강퇴되었습니다') !== -1) SFX.play('leave');
+    } else if (kind === 'correct') {
+      node = el('div', 'msg msg-correct'); node.appendChild(el('span', 'msg-icon', '🎉')); node.appendChild(el('span', 'msg-text', text));
+      SFX.play(m.id === myId ? 'correctSelf' : 'correctOther');
+    } else if (kind === 'close') {
+      node = el('div', 'msg msg-close'); node.appendChild(el('span', 'msg-icon', '🔥')); node.appendChild(el('span', 'msg-text', text)); node.appendChild(el('span', 'msg-note', '거의 맞았어요!'));
+      SFX.play('close');
+    }
     else if (kind === 'guessed-chat') {
       node = el('div', 'msg msg-guessed'); node.appendChild(el('span', 'msg-icon', '🔒'));
       if (m.name) node.appendChild(el('span', 'msg-name', String(m.name)));
@@ -1016,6 +1035,7 @@
     });
     var bc = $('btn-copy'); if (bc) bc.addEventListener('click', copyInvite);
     var bl = $('btn-leave'); if (bl) bl.addEventListener('click', function () { resetToLanding(true); });
+    var bs = $('btn-sound'); if (bs) { renderSoundButton(bs); bs.addEventListener('click', function () { SFX.toggle(); renderSoundButton(bs); }); }
 
     var form = $('chat-form'), input = $('chat-input');
     if (form && input) {

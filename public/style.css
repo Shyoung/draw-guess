@@ -74,6 +74,7 @@ ul, ol { padding: 0; list-style: none; }
 .btn-ghost { background: rgba(43, 45, 66, 0.06); color: var(--text); }
 .btn-ghost:hover:not(:disabled) { background: rgba(43, 45, 66, 0.12); }
 .btn-sm { padding: 7px 12px; font-size: 13px; }
+.btn-icon { padding: 7px 10px; font-size: 16px; line-height: 1; }
 .btn-lg { padding: 13px 22px; font-size: 16px; }
 .btn-xl { padding: 16px 26px; font-size: 20px; }
 .btn-block { width: 100%; }
