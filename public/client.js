@@ -22,6 +22,9 @@
   var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, customWords: '', customWordsOnly: false };
   var REASON_TEXT = { time: '시간 종료!', allGuessed: '모두 맞혔어요!', drawerLeft: '출제자가 나갔어요', notEnoughPlayers: '플레이어가 부족해요' };
   var STORAGE_KEY = 'drawguess.profile';
+  var TOKEN_KEY = 'drawguess.token';      // 재접속용 토큰(브라우저별 1개)
+  var LAST_ROOM_KEY = 'drawguess.lastRoom'; // 마지막으로 있던 방 { code, ts }
+  var REJOIN_WINDOW_MS = 90 * 1000;        // 새로고침 후 이 시간 안이면 자동 재접속 시도
 
   function $(id) { return document.getElementById(id); }
   function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
@@ -64,6 +67,32 @@
   var myId = null;
   var inRoom = false;
   var socket = null;
+  var rejoinTarget = null; // 연결이 끊긴 뒤 다시 붙을 방 코드 (null이면 재접속 안 함)
+
+  function randomToken() {
+    var s = '';
+    try {
+      var buf = new Uint8Array(16); (window.crypto || window.msCrypto).getRandomValues(buf);
+      for (var i = 0; i < buf.length; i++) s += ('0' + buf[i].toString(16)).slice(-2);
+    } catch (e) { s = String(Date.now().toString(16)) + Math.random().toString(16).slice(2, 18); }
+    return s;
+  }
+  function getToken() {
+    var t = null;
+    try { t = localStorage.getItem(TOKEN_KEY); } catch (e) { /* ignore */ }
+    if (!t || !/^[A-Za-z0-9_-]{8,64}$/.test(t)) { t = randomToken(); try { localStorage.setItem(TOKEN_KEY, t); } catch (e) { /* ignore */ } }
+    return t;
+  }
+  function setToken(t) { if (typeof t === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(t)) { try { localStorage.setItem(TOKEN_KEY, t); } catch (e) { /* ignore */ } } }
+  function saveLastRoom(code) { try { localStorage.setItem(LAST_ROOM_KEY, JSON.stringify({ code: code, ts: Date.now() })); } catch (e) { /* ignore */ } }
+  function clearLastRoom() { try { localStorage.removeItem(LAST_ROOM_KEY); } catch (e) { /* ignore */ } }
+  function loadLastRoom() {
+    try {
+      var v = JSON.parse(localStorage.getItem(LAST_ROOM_KEY) || 'null');
+      if (v && typeof v.code === 'string' && Date.now() - num(v.ts, 0) < REJOIN_WINDOW_MS) return v.code.toUpperCase();
+    } catch (e) { /* ignore */ }
+    return null;
+  }
 
   // 최근 게임 이벤트에서 파생된 UI 데이터
   var ui = {
@@ -414,11 +443,18 @@
     if (typeof io !== 'function') { toast('서버에 연결할 수 없어요 (socket.io 로드 실패)', 'error'); return; }
     try { socket = io(); } catch (e) { toast('서버 연결에 실패했어요', 'error'); return; }
 
-    on('connect', function () { myId = socket.id || myId; connectErrorToasted = false; });
+    on('connect', function () {
+      connectErrorToasted = false;
+      var target = rejoinTarget || (!inRoom ? loadLastRoom() : null);
+      if (target) { tryRejoin(target); return; }
+      if (!inRoom) myId = socket.id || myId;
+    });
     on('connect_error', function () { if (!connectErrorToasted) { connectErrorToasted = true; toast('서버에 연결하는 중이에요…'); } });
     on('disconnect', function () {
-      if (inRoom) { toast('서버와 연결이 끊어졌어요', 'error'); resetToLanding(false); }
+      // 방 안에서 끊기면 화면을 유지한 채 재접속을 기다린다 (서버가 유예 시간 동안 자리를 비워둔다)
+      if (inRoom && state.roomCode) { rejoinTarget = state.roomCode; toast('연결이 끊어졌어요. 다시 연결 중…', 'error'); }
     });
+    on('react:show', onReactShow);
 
     // 배포 후 재접속 시 서버 버전이 이 페이지의 버전과 다르면 새 코드를 받기 위해 새로고침한다.
     on('server:version', function (p) {
@@ -464,7 +500,7 @@
     if (s.settings && typeof s.settings === 'object') state.settings = Object.assign({}, DEFAULT_SETTINGS, s.settings);
     if (Array.isArray(s.players)) {
       state.players = s.players.filter(function (p) { return p && typeof p === 'object' && p.id != null; }).map(function (p) {
-        return { id: p.id, name: String(p.name || '?'), avatar: safeAvatar(p.avatar), score: num(p.score, 0), isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed };
+        return { id: p.id, name: String(p.name || '?'), avatar: safeAvatar(p.avatar), score: num(p.score, 0), isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed, connected: p.connected !== false };
       });
     }
     if (inRoom && myId && state.players.length && !findPlayer(myId)) {
@@ -661,7 +697,8 @@
       if (p.score !== prevScore) { rank = i + 1; prevScore = p.score; }
       var isMe = p.id === myId, isDr = p.id === state.drawerId && state.phase !== 'lobby';
       var isNext = !isDr && state.phase !== 'lobby' && state.phase !== 'gameOver' && p.id === state.nextDrawerId;
-      var li = el('li', 'player' + (isMe ? ' me' : '') + (p.hasGuessed ? ' guessed' : '') + (isDr ? ' drawing' : '') + (isNext ? ' next' : ''));
+      var li = el('li', 'player' + (isMe ? ' me' : '') + (p.hasGuessed ? ' guessed' : '') + (isDr ? ' drawing' : '') + (isNext ? ' next' : '') + (p.connected === false ? ' offline' : ''));
+      li.setAttribute('data-id', p.id);
       li.appendChild(el('span', 'rank', '#' + rank));
       var av = avatarNode(p.avatar);
       if (isDr) av.appendChild(el('span', 'badge-drawer', '✏️'));
@@ -673,6 +710,7 @@
       if (isMe) { name.appendChild(document.createTextNode(' ')); name.appendChild(el('span', 'me-tag', '(나)')); }
       if (p.id === state.hostId) { name.appendChild(document.createTextNode(' ')); var crown = el('span', 'host-tag', '👑'); crown.title = '호스트'; name.appendChild(crown); }
       if (isNext) { name.appendChild(document.createTextNode(' ')); var nt = el('span', 'next-tag', '다음 차례'); nt.title = '다음 턴에 그릴 차례예요'; name.appendChild(nt); }
+      if (p.connected === false) { name.appendChild(document.createTextNode(' ')); var ot = el('span', 'offline-tag', '연결 끊김'); ot.title = '잠시 후 돌아올 수 있어요'; name.appendChild(ot); }
       info.appendChild(name);
       info.appendChild(el('span', 'pscore', p.score + '점' + (p.hasGuessed ? ' · 정답!' : '')));
       li.appendChild(info);
@@ -698,9 +736,20 @@
       ds.hidden = lobby || drawer || state.phase === 'gameOver';
       if (!ds.hidden) {
         var dn = playerName(state.drawerId, ui.drawerName || '출제자');
-        ds.textContent = state.phase === 'drawing' ? '✏️ ' + dn + '님이 그리고 있어요'
+        var txt = state.phase === 'drawing' ? '✏️ ' + dn + '님이 그리고 있어요'
           : state.phase === 'choosing' ? '✏️ ' + dn + '님의 차례예요'
           : '⏳ 다음 턴을 준비하고 있어요';
+        ds.innerHTML = '';
+        ds.appendChild(el('span', 'draw-status-text', txt));
+        if (state.phase === 'drawing') {
+          var rb = el('span', 'react-bar');
+          [['up', '👍', '좋아요'], ['down', '👎', '아쉬워요']].forEach(function (d) {
+            var b = el('button', 'react-btn react-' + d[0], d[1]); b.type = 'button'; b.title = d[2]; b.setAttribute('aria-label', d[2]);
+            b.addEventListener('click', function () { sendReact(d[0]); });
+            rb.appendChild(b);
+          });
+          ds.appendChild(rb);
+        }
       }
     }
     if (canvas) canvas.classList.toggle('can-draw', canDraw());
@@ -944,35 +993,73 @@
     busy = v;
     ['btn-create', 'btn-join'].forEach(function (id) { var b = $(id); if (b) b.disabled = v; });
   }
-  function withAck(ev, payload, done) {
-    if (!socket) { toast('서버에 연결되어 있지 않아요', 'error'); return; }
+  // onFail(errorText)를 주면 실패 시 기본 토스트 대신 그 콜백을 호출한다(재접속 흐름용).
+  function withAck(ev, payload, done, onFail) {
+    if (!socket) { if (onFail) onFail('서버에 연결되어 있지 않아요'); else toast('서버에 연결되어 있지 않아요', 'error'); return; }
     if (busy) return;
     setBusy(true);
     var finished = false;
-    var timer = setTimeout(function () { if (!finished) { finished = true; setBusy(false); toast('서버 응답이 없어요. 잠시 후 다시 시도해주세요', 'error'); } }, 7000);
+    var failWith = function (msg) { if (onFail) onFail(msg); else toast(msg, 'error'); };
+    var timer = setTimeout(function () { if (!finished) { finished = true; setBusy(false); failWith('서버 응답이 없어요. 잠시 후 다시 시도해주세요'); } }, 7000);
     emit(ev, payload, function (ack) {
       if (finished) return; finished = true; clearTimeout(timer); setBusy(false);
-      if (!ack || ack.ok !== true) { toast(ack && ack.error ? ack.error : '요청에 실패했어요', 'error'); return; }
+      if (!ack || ack.ok !== true) { failWith(ack && ack.error ? ack.error : '요청에 실패했어요'); return; }
       done(ack);
     });
   }
   function createRoom() {
     var p = validName(); if (!p) return;
     profile.name = p.name; saveProfile();
-    withAck('room:create', p, function (ack) { enterRoom(ack.roomCode, ack.playerId); });
+    p.token = getToken();
+    withAck('room:create', p, function (ack) { setToken(ack.token); enterRoom(ack.roomCode, ack.playerId); });
   }
   function joinRoom() {
     var code = codeInput();
     if (code.length !== 4) { toast('방 코드는 영문 4글자예요', 'error'); var c = $('room-code-input'); if (c) c.focus(); return; }
     var p = validName(); if (!p) return;
     profile.name = p.name; saveProfile();
-    withAck('room:join', { roomCode: code, name: p.name, avatar: p.avatar }, function (ack) { enterRoom(ack.roomCode || code, ack.playerId); });
+    withAck('room:join', { roomCode: code, name: p.name, avatar: p.avatar, token: getToken() }, function (ack) { setToken(ack.token); enterRoom(ack.roomCode || code, ack.playerId); });
+  }
+
+  /** 끊긴 방에 같은 자리로 복귀 시도. 실패하면 랜딩으로. */
+  function tryRejoin(code) {
+    var wasInRoom = inRoom;
+    rejoinTarget = null;
+    withAck('room:rejoin', { roomCode: code, token: getToken() }, function (ack) {
+      setToken(ack.token);
+      if (!wasInRoom) { enterRoom(ack.roomCode || code, ack.playerId); }
+      else { myId = ack.playerId || myId; renderAll(); }
+      toast('다시 연결되었어요', 'ok');
+    }, function (err) {
+      clearLastRoom();
+      if (wasInRoom) { toast(err || '이어서 참가할 수 없어요', 'error'); resetToLanding(false); }
+      else { myId = socket && socket.id ? socket.id : myId; }
+    });
+  }
+
+  /** 반응(👍/👎)을 보낸 사람의 아바타 위에 1초간 띄운다. 연타하면 겹쳐서 여러 개 뜬다. */
+  function onReactShow(p) {
+    if (!p || !p.id) return;
+    var li = document.querySelector('#player-list li[data-id="' + String(p.id).replace(/"/g, '') + '"]');
+    var av = li && li.querySelector('.avatar');
+    if (!av) return;
+    var pop = el('span', 'react-pop ' + (p.kind === 'down' ? 'down' : 'up'), p.kind === 'down' ? '👎' : '👍');
+    pop.style.left = (30 + Math.round((Math.random() - 0.5) * 36)) + 'px';
+    pop.style.setProperty('--rot', ((Math.random() - 0.5) * 30).toFixed(1) + 'deg');
+    av.appendChild(pop);
+    setTimeout(function () { if (pop.parentNode) pop.parentNode.removeChild(pop); }, 1000);
+  }
+  function sendReact(kind) {
+    if (state.phase !== 'drawing' || isDrawer()) return;
+    emit('react:send', { kind: kind });
   }
 
   function enterRoom(code, playerId) {
     inRoom = true;
+    rejoinTarget = null;
     myId = playerId || (socket && socket.id) || myId;
     state.roomCode = String(code || '').toUpperCase();
+    saveLastRoom(state.roomCode);
     clearChat(); resetCanvasState();
     ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null; ui.timeLeft = null;
     var vl = $('view-landing'), vr = $('view-room');
@@ -988,6 +1075,8 @@
   function resetToLanding(sendLeave) {
     if (sendLeave) emit('room:leave');
     inRoom = false;
+    rejoinTarget = null;
+    clearLastRoom();
     cancelLocalStroke(false);
     state.roomCode = null; state.hostId = null; state.phase = 'lobby'; state.round = 0; state.totalRounds = 0;
     state.drawerId = null; state.players = []; state.settings = Object.assign({}, DEFAULT_SETTINGS);

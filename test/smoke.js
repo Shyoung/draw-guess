@@ -67,7 +67,8 @@ function startServer() {
   return new Promise((resolve, reject) => {
     serverProc = spawn(process.execPath, ['server/index.js'], {
       cwd: ROOT,
-      env: { ...process.env, PORT: String(PORT) },
+      // 이 스모크는 "연결 끊김 = 즉시 퇴장" 경로(호스트 승계/drawerLeft/notEnoughPlayers)를 검증하므로 유예 시간을 0으로 둔다.
+      env: { ...process.env, PORT: String(PORT), RECONNECT_GRACE_MS: '0' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const timer = setTimeout(() => reject(new Error('server did not start within 15s')), 15000);

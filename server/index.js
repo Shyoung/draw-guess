@@ -19,6 +19,8 @@ const MAX_PLAYERS = 12;
 const MAX_CHAT_LEN = 100;
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const CODE_RE = /^[A-Z]{4}$/;
+const TOKEN_RE = /^[A-Za-z0-9_-]{8,64}$/;
+const REACT_LIMIT_PER_SEC = 8; // 플레이어당 초당 반응 상한(연타 허용, 폭주 방지)
 const DEFAULT_AVATAR = { emoji: '🙂', color: '#4f8cff' };
 
 const app = express();
@@ -115,6 +117,11 @@ function sanitizeAvatar(v) {
   return { emoji, color };
 }
 
+/** 재접속 토큰: 클라이언트가 보낸 값이 형식에 맞으면 그대로, 아니면 새로 발급 */
+function sanitizeToken(v) {
+  return typeof v === 'string' && TOKEN_RE.test(v) ? v : crypto.randomBytes(16).toString('hex');
+}
+
 /** 채팅 텍스트: 문자열, trim, 1..100자. 실패 시 null */
 function sanitizeChat(v) {
   if (typeof v !== 'string') return null;
@@ -136,6 +143,10 @@ function deleteRoomIfEmpty(room) {
 // ── 소켓 처리 ───────────────────────────────────────────────────
 io.on('connection', (socket) => {
   socket.data.roomCode = null;
+  socket.data.playerId = null; // 방 안에서의 고정 id (최초 접속 시 socket.id, 재접속해도 유지)
+  socket.data.reactTimes = [];
+  /** 이 소켓의 playerId */
+  const pid = () => socket.data.playerId || socket.id;
   // 접속(재접속 포함)마다 서버 자산 버전을 알려준다. 페이지 버전과 다르면 클라이언트가 스스로 새로고침한다.
   socket.emit('server:version', { version: ASSET_VERSION });
 
@@ -146,8 +157,9 @@ io.on('connection', (socket) => {
     const code = socket.data.roomCode;
     if (!code) return null;
     const room = rooms.get(code);
-    if (!room || !room.getPlayer(socket.id)) {
+    if (!room || !room.getPlayer(pid())) {
       socket.data.roomCode = null;
+      socket.data.playerId = null;
       return null;
     }
     return room;
@@ -165,17 +177,25 @@ io.on('connection', (socket) => {
     });
   };
 
-  /** 현재 방에서 나가기 (room:leave / disconnect / 새 방 생성 전) */
-  const leaveCurrentRoom = () => {
+  /**
+   * 현재 방에서 빠지기.
+   * - 'leave'      : 명시적 퇴장(room:leave, 새 방 생성/참가 전) → 즉시 제거
+   * - 'disconnect' : 연결 끊김 → RECONNECT_GRACE_MS 동안 자리 유지(room:rejoin 가능)
+   */
+  const detachFromRoom = (mode) => {
     const code = socket.data.roomCode;
     if (!code) return;
+    const id = pid();
     socket.data.roomCode = null;
+    socket.data.playerId = null;
     socket.leave(code);
     const room = rooms.get(code);
     if (!room) return;
-    room.removePlayer(socket.id, 'left');
+    if (mode === 'disconnect') room.markDisconnected(id);
+    else room.removePlayer(id, 'left');
     deleteRoomIfEmpty(room);
   };
+  const leaveCurrentRoom = () => detachFromRoom('leave');
 
   /** (data, ack) 인자 정규화 — 클라이언트가 data 없이 ack 만 보낸 경우 대비 */
   const normalizeArgs = (data, ack) => {
@@ -195,11 +215,14 @@ io.on('connection', (socket) => {
     if (!code) return ack({ ok: false, error: '방을 만들 수 없습니다. 잠시 후 다시 시도해 주세요.' });
 
     const room = new Room(io, code);
+    room.onEmpty = deleteRoomIfEmpty; // 유예 시간 만료로 마지막 사람이 빠질 때 방 정리
     rooms.set(code, room);
+    const token = sanitizeToken(data.token);
     socket.data.roomCode = code;
+    socket.data.playerId = socket.id;
     socket.join(code);
-    ack({ ok: true, roomCode: code, playerId: socket.id });
-    room.addPlayer({ id: socket.id, name, avatar });
+    ack({ ok: true, roomCode: code, playerId: socket.id, token });
+    room.addPlayer({ id: socket.id, name, avatar, token, socketId: socket.id });
     console.log(`[draw-guess] room ${code} created by ${name}. rooms=${rooms.size}`);
   });
 
@@ -214,7 +237,7 @@ io.on('connection', (socket) => {
 
     const room = rooms.get(code);
     if (!room) return ack({ ok: false, error: '존재하지 않는 방입니다.' });
-    if (socket.data.roomCode === code && room.getPlayer(socket.id)) {
+    if (socket.data.roomCode === code && room.getPlayer(pid())) {
       return ack({ ok: false, error: '이미 이 방에 참가 중입니다.' });
     }
     if (room.players.length >= MAX_PLAYERS) {
@@ -224,10 +247,45 @@ io.on('connection', (socket) => {
     leaveCurrentRoom(); // 다른 방에 있었다면 먼저 나간다
     if (!rooms.has(code)) return ack({ ok: false, error: '존재하지 않는 방입니다.' });
 
+    const token = sanitizeToken(data.token);
     socket.data.roomCode = code;
+    socket.data.playerId = socket.id;
     socket.join(code);
-    ack({ ok: true, roomCode: code, playerId: socket.id });
-    room.addPlayer({ id: socket.id, name, avatar });
+    ack({ ok: true, roomCode: code, playerId: socket.id, token });
+    room.addPlayer({ id: socket.id, name, avatar, token, socketId: socket.id });
+  });
+
+  // room:rejoin { roomCode, token } → ack { ok, roomCode, playerId, token } | { ok:false, error }
+  // 연결이 끊긴 지 RECONNECT_GRACE_MS 안이면 같은 playerId·점수로 복귀한다.
+  on('room:rejoin', (rawData, rawAck) => {
+    const [data, ack] = normalizeArgs(rawData, rawAck);
+    const code = typeof data.roomCode === 'string' ? data.roomCode.trim().toUpperCase() : '';
+    const token = typeof data.token === 'string' && TOKEN_RE.test(data.token) ? data.token : null;
+    if (!CODE_RE.test(code) || !token) return ack({ ok: false, error: '재접속 정보가 올바르지 않습니다.' });
+    const room = rooms.get(code);
+    if (!room) return ack({ ok: false, error: '방이 더 이상 존재하지 않습니다.' });
+    const p = room.findDisconnectedByToken(token);
+    if (!p) return ack({ ok: false, error: '이어서 할 수 있는 자리가 없습니다. 다시 참가해 주세요.' });
+
+    leaveCurrentRoom();
+    socket.data.roomCode = code;
+    socket.data.playerId = p.id;
+    socket.join(code);
+    ack({ ok: true, roomCode: code, playerId: p.id, token });
+    room.reconnect(p.id, socket.id);
+  });
+
+  // react:send { kind:'up'|'down' } — drawing 중 비출제자. 초당 REACT_LIMIT_PER_SEC 회까지.
+  on('react:send', (data) => {
+    const room = currentRoom();
+    if (!room) return;
+    const kind = data && data.kind === 'down' ? 'down' : 'up';
+    const now = Date.now();
+    const times = socket.data.reactTimes.filter((t) => now - t < 1000);
+    if (times.length >= REACT_LIMIT_PER_SEC) { socket.data.reactTimes = times; return; }
+    times.push(now);
+    socket.data.reactTimes = times;
+    room.react(pid(), kind);
   });
 
   // room:leave
@@ -239,7 +297,7 @@ io.on('connection', (socket) => {
   on('room:settings', (data) => {
     const room = currentRoom();
     if (!room) return fail('방에 참가하지 않았습니다.');
-    const err = room.updateSettings(socket.id, data && data.settings);
+    const err = room.updateSettings(pid(), data && data.settings);
     if (err) fail(err);
   });
 
@@ -247,7 +305,7 @@ io.on('connection', (socket) => {
   on('game:start', () => {
     const room = currentRoom();
     if (!room) return fail('방에 참가하지 않았습니다.');
-    const err = room.start(socket.id);
+    const err = room.start(pid());
     if (err) fail(err);
   });
 
@@ -255,34 +313,34 @@ io.on('connection', (socket) => {
   on('word:choose', (data) => {
     const room = currentRoom();
     if (!room) return fail('방에 참가하지 않았습니다.');
-    const err = room.chooseWord(socket.id, data && data.word);
+    const err = room.chooseWord(pid(), data && data.word);
     if (err) fail(err);
   });
 
   // draw:* — 출제자, drawing. 위반/잘못된 페이로드는 조용히 무시
   on('draw:start', (data) => {
     const room = currentRoom();
-    if (room) room.handleDraw(socket.id, 'start', data);
+    if (room) room.handleDraw(pid(), 'start', data);
   });
   on('draw:move', (data) => {
     const room = currentRoom();
-    if (room) room.handleDraw(socket.id, 'move', data);
+    if (room) room.handleDraw(pid(), 'move', data);
   });
   on('draw:end', () => {
     const room = currentRoom();
-    if (room) room.handleDraw(socket.id, 'end');
+    if (room) room.handleDraw(pid(), 'end');
   });
   on('draw:fill', (data) => {
     const room = currentRoom();
-    if (room) room.handleDraw(socket.id, 'fill', data);
+    if (room) room.handleDraw(pid(), 'fill', data);
   });
   on('draw:clear', () => {
     const room = currentRoom();
-    if (room) room.handleDraw(socket.id, 'clear');
+    if (room) room.handleDraw(pid(), 'clear');
   });
   on('draw:undo', () => {
     const room = currentRoom();
-    if (room) room.handleDraw(socket.id, 'undo');
+    if (room) room.handleDraw(pid(), 'undo');
   });
 
   // chat:message { text } — 1..100자, 정답 판정은 Room 이 수행
@@ -291,7 +349,7 @@ io.on('connection', (socket) => {
     if (!room) return fail('방에 참가하지 않았습니다.');
     const text = sanitizeChat(data && data.text);
     if (!text) return fail(`메시지는 1~${MAX_CHAT_LEN}자여야 합니다.`);
-    const err = room.handleChat(socket.id, text);
+    const err = room.handleChat(pid(), text);
     if (err) fail(err);
   });
 
@@ -299,25 +357,27 @@ io.on('connection', (socket) => {
   on('player:kick', (data) => {
     const room = currentRoom();
     if (!room) return fail('방에 참가하지 않았습니다.');
-    if (!room.isHost(socket.id)) return fail('호스트만 강퇴할 수 있습니다.');
+    if (!room.isHost(pid())) return fail('호스트만 강퇴할 수 있습니다.');
     const targetId = data && typeof data.playerId === 'string' ? data.playerId : null;
-    if (!targetId || targetId === socket.id || !room.getPlayer(targetId)) {
+    if (!targetId || targetId === pid() || !room.getPlayer(targetId)) {
       return fail('강퇴할 수 없는 플레이어입니다.');
     }
-    const target = io.sockets.sockets.get(targetId);
+    const targetPlayer = room.getPlayer(targetId);
+    const target = targetPlayer.socketId ? io.sockets.sockets.get(targetPlayer.socketId) : null;
     if (target) {
       target.emit('error:msg', { message: '호스트에 의해 방에서 내보내졌습니다.' });
       target.leave(room.code);
       target.data.roomCode = null;
+      target.data.playerId = null;
     }
     room.removePlayer(targetId, 'kicked');
     deleteRoomIfEmpty(room);
   });
 
-  // 연결 끊김 = 즉시 퇴장
+  // 연결 끊김 → 유예 시간 동안 자리 유지 (RECONNECT_GRACE_MS=0 이면 즉시 퇴장)
   socket.on('disconnect', () => {
     try {
-      leaveCurrentRoom();
+      detachFromRoom('disconnect');
     } catch (err) {
       console.error('[draw-guess] disconnect handler error:', err);
     }

@@ -16,6 +16,10 @@ const CANVAS_H = 600;
 const CHOOSING_TIME = 15; // 초
 const TURN_END_TIME = 5; // 초
 const GAME_OVER_TIME = 10; // 초
+// 연결이 끊긴 플레이어를 방에 남겨두는 시간(ms). 이 안에 room:rejoin 하면 점수·자리를 그대로 이어간다. 0이면 즉시 퇴장.
+const RECONNECT_GRACE_MS = process.env.RECONNECT_GRACE_MS != null
+  ? Math.max(0, Number(process.env.RECONNECT_GRACE_MS) || 0)
+  : 60000;
 
 const MAX_OPS = 3000; // 턴당 op 상한 (메모리 보호)
 const MAX_STROKE_POINTS = 5000; // stroke 하나의 점 상한
@@ -211,21 +215,31 @@ class Room {
     else this.io.to(this.code).emit(event, payload);
   }
 
+  /** playerId → 현재 socket id (재접속하면 socket id가 바뀌지만 playerId는 유지된다) */
+  sid(id) {
+    const p = this.getPlayer(id);
+    return p && p.socketId ? p.socketId : id;
+  }
+
   emitTo(id, event, payload) {
     if (this.destroyed || !id) return;
-    this.io.to(id).emit(event, payload);
+    const p = this.getPlayer(id);
+    if (p && !p.connected) return; // 끊긴 사람에게는 보낼 곳이 없다
+    this.io.to(this.sid(id)).emit(event, payload);
   }
 
   emitExcept(id, event, payload) {
     if (this.destroyed) return;
-    const target = id ? this.io.to(this.code).except(id) : this.io.to(this.code);
+    const target = id ? this.io.to(this.code).except(this.sid(id)) : this.io.to(this.code);
     if (payload === undefined) target.emit(event);
     else target.emit(event, payload);
   }
 
   emitToIds(ids, event, payload) {
-    if (this.destroyed || !ids.length) return;
-    this.io.to(ids).emit(event, payload);
+    if (this.destroyed) return;
+    const sids = ids.filter((id) => { const p = this.getPlayer(id); return !p || p.connected; }).map((id) => this.sid(id));
+    if (!sids.length) return;
+    this.io.to(sids).emit(event, payload);
   }
 
   systemMessage(text) {
@@ -260,7 +274,23 @@ class Room {
   /** 방 삭제 시 호출. 이후 모든 콜백/전송은 no-op */
   destroy() {
     this.clearTimers();
+    for (const p of this.players) this.clearGrace(p);
     this.destroyed = true;
+  }
+
+  clearGrace(p) {
+    if (p && p._graceTimer) { clearTimeout(p._graceTimer); p._graceTimer = null; }
+  }
+
+  /** 현재 연결된 플레이어 */
+  connectedPlayers() {
+    return this.players.filter((p) => p.connected);
+  }
+
+  /** 재접속 대상: 같은 token을 가진, 연결이 끊긴 플레이어 */
+  findDisconnectedByToken(token) {
+    if (!token) return null;
+    return this.players.find((p) => !p.connected && p.token === token) || null;
   }
 
   // ── 조회 ───────────────────────────────────────────────────
@@ -297,6 +327,7 @@ class Room {
         score: p.score,
         isDrawing: p.isDrawing,
         hasGuessed: p.hasGuessed,
+        connected: p.connected,
       })),
     };
   }
@@ -311,16 +342,92 @@ class Room {
    * 플레이어 추가. 소켓은 호출 전에 이미 this.code 룸에 join 되어 있어야 한다.
    * 게임 중이면 현재 진행 상황(choosing/drawing/turnEnd/gameOver)을 개별 전송한다.
    */
-  addPlayer({ id, name, avatar }) {
+  addPlayer({ id, name, avatar, token, socketId }) {
     if (this.getPlayer(id)) return this.getPlayer(id);
-    const p = { id, name, avatar, score: 0, isDrawing: false, hasGuessed: false };
+    const p = {
+      id, name, avatar, score: 0, isDrawing: false, hasGuessed: false,
+      token: token || null, connected: true, socketId: socketId || id, _graceTimer: null,
+    };
     this.players.push(p);
     if (!this.hostId) this.hostId = id;
 
     this.systemMessage(`${name}님이 입장했습니다.`);
     this.broadcastState();
+    this.sendCatchUp(id);
+    return p;
+  }
 
-    // 중간 참가자에게 현재 진행 상황 전달 (단어/후보는 절대 포함하지 않음)
+  /**
+   * 연결 끊김 처리. RECONNECT_GRACE_MS 동안 자리를 비워두고(점수 유지) 기다린다.
+   * 출제자였다면 턴은 즉시 끝내고(drawerLeft), 호스트였다면 접속 중인 다음 사람에게 넘긴다.
+   * @returns {boolean} 처리 여부
+   */
+  markDisconnected(id) {
+    const p = this.getPlayer(id);
+    if (!p || !p.connected) return false;
+    if (RECONNECT_GRACE_MS <= 0) return this.removePlayer(id, 'left');
+
+    p.connected = false;
+    p.socketId = null;
+    this.clearGrace(p);
+    const secs = Math.round(RECONNECT_GRACE_MS / 1000);
+    this.systemMessage(`${p.name}님의 연결이 끊어졌습니다. ${secs}초 안에 돌아오면 이어서 할 수 있어요.`);
+
+    if (this.hostId === id) {
+      const next = this.connectedPlayers()[0];
+      if (next) this.hostId = next.id;
+    }
+
+    p._graceTimer = setTimeout(() => {
+      p._graceTimer = null;
+      if (this.destroyed || p.connected || !this.getPlayer(id)) return;
+      this.removePlayer(id, 'left');
+      if (typeof this.onEmpty === 'function') this.onEmpty(this);
+    }, RECONNECT_GRACE_MS);
+
+    // 인원 부족은 여기서 바로 끝내지 않는다: 유예 시간 안에 돌아올 수 있으므로 턴은 계속 진행하고,
+    // 다음 턴으로 넘어갈 때(nextTurn) 접속 인원이 2명 미만이면 그때 게임을 끝낸다.
+    if (this.phase === 'choosing' || this.phase === 'drawing') {
+      if (id === this.drawerId) this.endTurn('drawerLeft');
+      else if (this.phase === 'drawing' && this.allGuessed()) this.endTurn('allGuessed');
+      else this.broadcastState();
+    } else {
+      this.broadcastState();
+    }
+    return true;
+  }
+
+  /**
+   * 재접속: 끊긴 플레이어를 새 소켓에 다시 붙인다. playerId·점수·순서는 그대로.
+   * @returns {boolean} 성공 여부
+   */
+  reconnect(id, socketId) {
+    const p = this.getPlayer(id);
+    if (!p || p.connected) return false;
+    this.clearGrace(p);
+    p.connected = true;
+    p.socketId = socketId;
+    this.systemMessage(`${p.name}님이 다시 연결되었습니다.`);
+    this.broadcastState();
+    this.sendCatchUp(id);
+    if (this.phase === 'drawing' && p.hasGuessed && this.word) {
+      this.emitTo(id, 'game:hint', { wordMask: revealAll(this.word) });
+    }
+    return true;
+  }
+
+  /** 반응(👍/👎): drawing 중, 출제자 제외. 기록하지 않고 방 전체에 중계만 한다. */
+  react(id, kind) {
+    const p = this.getPlayer(id);
+    if (!p) return '방에 참가하지 않았습니다.';
+    if (kind !== 'up' && kind !== 'down') return null;
+    if (this.phase !== 'drawing' || id === this.drawerId) return null;
+    this.emitAll('react:show', { id, kind });
+    return null;
+  }
+
+  /** 중간 참가자/재접속자에게 현재 진행 상황 전달 (단어/후보는 절대 포함하지 않음) */
+  sendCatchUp(id) {
     const drawer = this.getPlayer(this.drawerId);
     if (this.phase === 'choosing') {
       this.emitTo(id, 'game:choosing', {
@@ -347,7 +454,6 @@ class Room {
     } else if (this.phase === 'gameOver' && this.lastGameOver) {
       this.emitTo(id, 'game:over', this.lastGameOver);
     }
-    return p;
   }
 
   /**
@@ -360,6 +466,7 @@ class Room {
     const idx = this.players.findIndex((p) => p.id === id);
     if (idx === -1) return false;
     const [p] = this.players.splice(idx, 1);
+    this.clearGrace(p);
 
     if (this.players.length === 0) {
       // 마지막 사람이 나감 → 호출자가 방을 삭제한다
@@ -370,7 +477,8 @@ class Room {
 
     // 호스트 승계: 참가 순서상 다음 사람
     if (this.hostId === id) {
-      this.hostId = this.players[0].id;
+      const next = this.connectedPlayers()[0] || this.players[0];
+      this.hostId = next.id;
     }
 
     this.systemMessage(
@@ -378,7 +486,7 @@ class Room {
     );
 
     if (this.phase === 'choosing' || this.phase === 'drawing') {
-      if (this.players.length < 2) {
+      if (this.connectedPlayers().length < 2) {
         this.endTurn('notEnoughPlayers');
       } else if (id === this.drawerId) {
         this.endTurn('drawerLeft');
@@ -429,7 +537,7 @@ class Room {
   start(id) {
     if (!this.isHost(id)) return '호스트만 게임을 시작할 수 있습니다.';
     if (this.phase !== 'lobby') return '이미 게임이 진행 중입니다.';
-    if (this.players.length < 2) return '게임을 시작하려면 2명 이상이 필요합니다.';
+    if (this.connectedPlayers().length < 2) return '게임을 시작하려면 2명 이상이 필요합니다.';
 
     this.clearTimers();
     for (const p of this.players) {
@@ -453,7 +561,7 @@ class Room {
   /** 다음 출제자로 진행. 라운드 종료/게임 종료 판정 포함 */
   nextTurn() {
     if (this.destroyed) return;
-    if (this.players.length < 2) {
+    if (this.connectedPlayers().length < 2) {
       this.gameOver();
       return;
     }
@@ -474,11 +582,12 @@ class Room {
         this.turnIndex = 0;
       }
       const drawerId = this.turnOrder[this.turnIndex];
-      if (this.getPlayer(drawerId)) {
+      const cand = this.getPlayer(drawerId);
+      if (cand && cand.connected) {
         this.beginChoosing(drawerId);
         return;
       }
-      // 이미 나간 플레이어는 건너뜀
+      // 이미 나갔거나 연결이 끊긴 플레이어는 건너뜀
     }
     // 여기 도달하면 비정상 — 안전하게 게임 종료
     this.gameOver();
@@ -617,16 +726,17 @@ class Room {
   computeNextDrawerId() {
     if (this.phase === 'lobby' || this.phase === 'gameOver' || !this.turnOrder.length) return null;
     for (let i = this.turnIndex + 1; i < this.turnOrder.length; i++) {
-      if (this.getPlayer(this.turnOrder[i])) return this.turnOrder[i];
+      const cand = this.getPlayer(this.turnOrder[i]);
+      if (cand && cand.connected) return this.turnOrder[i];
     }
     if (this.round >= this.totalRounds) return null;
-    const nextOrder = this.players.map((pl) => pl.id);
+    const nextOrder = this.connectedPlayers().map((pl) => pl.id);
     return nextOrder.length ? nextOrder[0] : null;
   }
 
   /** 출제자를 제외한 모든 플레이어가 맞혔는지 */
   allGuessed() {
-    const guessers = this.players.filter((p) => p.id !== this.drawerId);
+    const guessers = this.players.filter((p) => p.id !== this.drawerId && p.connected);
     return guessers.length > 0 && guessers.every((p) => p.hasGuessed);
   }
 
@@ -641,7 +751,8 @@ class Room {
     // 출제자 점수: round(300 * guessedCount / (playerCount - 1)), 최대 300
     const drawer = this.getPlayer(this.drawerId);
     if (drawer && this.phase === 'drawing') {
-      const guessers = this.players.length - 1;
+      // 연결이 끊긴 사람은 맞힐 수 없으므로 분모에서 뺀다(단, 이미 맞힌 뒤 끊긴 사람은 분자·분모 모두 포함)
+      const guessers = this.players.filter((p) => p.id !== this.drawerId && (p.connected || p.hasGuessed)).length;
       const guessed = this.players.filter((p) => p.id !== this.drawerId && p.hasGuessed).length;
       const pts = guessers > 0 ? Math.min(300, Math.max(0, Math.round((300 * guessed) / guessers))) : 0;
       drawer.score += pts;
@@ -842,6 +953,7 @@ module.exports = {
   CHOOSING_TIME,
   TURN_END_TIME,
   GAME_OVER_TIME,
+  RECONNECT_GRACE_MS,
   // 테스트/재사용을 위한 순수 헬퍼
   maskWord,
   revealAll,

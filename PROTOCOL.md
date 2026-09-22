@@ -14,7 +14,7 @@
 - 배경은 흰색(`#ffffff`). 지우개(`eraser`)는 흰색으로 그린다.
 
 ## Identity
-- 플레이어 id = `socket.id`.
+- 플레이어 id = 최초 접속 시의 `socket.id`. 재접속(`room:rejoin`)해도 바뀌지 않는다(서버가 playerId→socketId를 매핑).
 - `avatar` = `{ emoji: string, color: string }` (color는 `#rrggbb`).
 - 이름은 1~12자, trim 후 빈 문자열이면 서버가 거절.
 
@@ -40,8 +40,10 @@
 
 | event | payload | ack / 비고 |
 |---|---|---|
-| `room:create` | `{ name, avatar }` | ack `{ ok:true, roomCode, playerId }` 또는 `{ ok:false, error }` |
-| `room:join` | `{ roomCode, name, avatar }` | ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명. roomCode는 대문자 정규화 |
+| `room:create` | `{ name, avatar, token? }` | ack `{ ok:true, roomCode, playerId, token }` 또는 `{ ok:false, error }`. `token`(영숫자·`_-` 8~64자)은 재접속용이며 없으면 서버가 발급 |
+| `room:rejoin` | `{ roomCode, token }` | 연결이 끊긴 지 유예 시간(기본 60초, `RECONNECT_GRACE_MS`) 안이면 같은 `playerId`·점수·순서로 복귀. ack 형식은 create와 동일. 성공 시 `room:state`와 진행 상황(catch-up)이 개별 전송된다 |
+| `react:send` | `{ kind:'up'\|'down' }` | drawing 중 비출제자. 기록되지 않고 방 전체에 `react:show`로 중계. 플레이어당 초당 8회 제한 |
+| `room:join` | `{ roomCode, name, avatar, token? }` | ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명. roomCode는 대문자 정규화 |
 | `room:leave` | – | 방 나가기 |
 | `room:settings` | `{ settings }` | 호스트, lobby에서만. 성공 시 모두에게 `room:state` |
 | `game:start` | – | 호스트, lobby, 플레이어 ≥ 2 |
@@ -63,7 +65,7 @@
   roomCode, hostId, phase, round, totalRounds,
   drawerId,                 // 현재 출제자 (lobby면 null)
   settings,
-  players: [{ id, name, avatar, score, isDrawing, hasGuessed }],  // 참가 순서
+  players: [{ id, name, avatar, score, isDrawing, hasGuessed, connected }],  // 참가 순서. connected=false 는 유예 중(재접속 대기)
   nextDrawerId              // 다음 턴에 출제할 사람. lobby/gameOver거나 이번이 마지막 턴이면 null
 }
 ```
@@ -99,6 +101,8 @@
 
 `player:guessed` `{ id }` — 누가 맞혔는지 (플레이어 목록 하이라이트용). 이후 `room:state`도 갱신됨.
 
+`react:show` `{ id, kind:'up'|'down' }` — 누군가 👍/👎 반응. 클라이언트는 그 사람 아바타 위에 1초간 표시만 한다(기록 없음).
+
 `error:msg` `{ message }` — 개별 소켓에 오류 안내 (토스트).
 
 `server:version` `{ version }` — 소켓 접속(재접속 포함) 직후 1회. 서버가 서빙 중인 자산 버전(public/ 내용 해시 8자리). 클라이언트는 `<meta name="asset-version">`의 값과 다르면 토스트 후 `location.reload()` 한다(배포 직후 자동 갱신). HTML은 `no-store`, css/js는 `?v=버전` 쿼리 + 1년 캐시로 서빙된다.
@@ -132,7 +136,7 @@
 ## 방 관리
 - roomCode: 대문자 A-Z 4글자, 충돌 없게 생성. 
 - 호스트가 나가면 참가 순서상 다음 사람이 호스트. 마지막 사람이 나가면 방 삭제.
-- 연결 끊김 = 즉시 퇴장 처리(재접속 없음).
+- 연결 끊김 = 유예 시간(`RECONNECT_GRACE_MS`, 기본 60초) 동안 자리·점수 유지(`connected:false`). 그 안에 `room:rejoin` 하면 복귀, 지나면 퇴장 처리. 끊긴 사람이 출제자였으면 턴은 즉시 `drawerLeft`로 끝나고, 호스트였으면 접속 중인 다음 사람이 호스트가 된다(복귀해도 돌려받지 않음). 끊긴 사람은 정답 대기 인원·다음 출제자 계산에서 제외된다. 명시적 `room:leave`/강퇴는 즉시 퇴장.
 - URL `?room=CODE` 로 접속하면 클라이언트는 방 코드 입력란을 자동으로 채운다.
 
 ## 서버 검증 원칙

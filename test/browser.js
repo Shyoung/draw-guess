@@ -236,6 +236,24 @@ async function say(page, text) {
         );
         await drawer.locator('.swatch[data-color="#000000"]').click();
 
+        // 반응(👍/👎): 비출제자가 연타하면 모든 화면의 그 사람 아바타 위에 팝업이 뜨고 1초 뒤 사라진다
+        const reactorId = await guessers[0].locator('#player-list li.me').getAttribute('data-id');
+        check(!!reactorId, `턴${turn}: 플레이어 항목에 data-id`, reactorId);
+        check(await guessers[0].locator('.react-btn.react-up').isVisible(), `턴${turn}: 비출제자에게 👍/👎 버튼 표시`);
+        check((await drawer.locator('.react-btn').count()) === 0, `턴${turn}: 출제자에게는 반응 버튼 없음`);
+        await guessers[0].locator('.react-btn.react-up').click({ clickCount: 1 });
+        await guessers[0].locator('.react-btn.react-up').click({ clickCount: 1 });
+        await guessers[0].locator('.react-btn.react-down').click({ clickCount: 1 });
+        await sleep(250);
+        const popsOnDrawer = await drawer.locator(`#player-list li[data-id="${reactorId}"] .react-pop`).count();
+        const popsOnOther = await guessers[1].locator(`#player-list li[data-id="${reactorId}"] .react-pop`).count();
+        const popsOnSelf = await guessers[0].locator(`#player-list li[data-id="${reactorId}"] .react-pop`).count();
+        check(popsOnDrawer === 3 && popsOnOther === 3 && popsOnSelf === 3, `턴${turn}: 연타 3회 → 모든 화면에 팝업 3개(보낸 사람 아바타)`, `${popsOnDrawer}/${popsOnOther}/${popsOnSelf}`);
+        check((await drawer.locator(`#player-list li[data-id="${reactorId}"] .react-pop.down`).count()) === 1, `턴${turn}: 👎 팝업 구분`);
+        await drawer.screenshot({ path: path.join(SHOTS, 'e2e-reaction.png') });
+        await sleep(1100);
+        check((await drawer.locator('.react-pop').count()) === 0, `턴${turn}: 팝업은 1초 뒤 사라짐(기록 없음)`);
+
         await guessers[0].screenshot({ path: path.join(SHOTS, 'e2e-drawing-guesser.png') });
         await drawer.screenshot({ path: path.join(SHOTS, 'e2e-drawing-drawer.png') });
       }
@@ -301,6 +319,27 @@ async function say(page, text) {
         joinedLate = true;
         names.push(late); nick.push('늦둥이');
         guessers.push(late); // 중간 참가자도 정답을 맞혀야 allGuessed로 턴이 끝난다
+
+        // 새로고침 재접속: guessers[1]이 F5 → 같은 자리(점수 유지)로 자동 복귀, 그림도 복원
+        const refresher = guessers[1];
+        const beforeScore = (await refresher.locator('#player-list li.me .pscore').textContent()).trim();
+        const beforeId = await refresher.locator('#player-list li.me').getAttribute('data-id');
+        const beforeCount = await refresher.locator(PLAYER_SEL).count();
+        await refresher.reload();
+        await refresher.waitForSelector('#view-room:not([hidden])', { timeout: 8000 }).catch(() => {});
+        await refresher.waitForSelector('#player-list li.me', { timeout: 8000 }).catch(() => {});
+        await sleep(600);
+        check(await refresher.locator('#view-room').isVisible(), '새로고침 후 자동으로 방에 복귀');
+        const afterId = await refresher.locator('#player-list li.me').getAttribute('data-id');
+        const afterScore = (await refresher.locator('#player-list li.me .pscore').textContent().catch(() => '')).trim();
+        check(afterId === beforeId, '새로고침 후 같은 플레이어 id 유지', `${beforeId} → ${afterId}`);
+        check(afterScore === beforeScore, '새로고침 후 점수 유지', `${beforeScore} → ${afterScore}`);
+        check((await refresher.locator(PLAYER_SEL).count()) === beforeCount, '새로고침 후 플레이어 수 동일(중복 없음)', await refresher.locator(PLAYER_SEL).count());
+        check((await nonWhitePixels(refresher)) > 500, '새로고침 후 그림 복원(draw:sync)');
+        check((await refresher.locator('#word-area .mask-box').count()) > 0, '새로고침 후 마스크 표시');
+        check((await drawer.locator('#chat-list').textContent()).includes('다시 연결되었습니다'), '다른 사람 채팅에 재연결 안내');
+        check((await drawer.locator('#player-list li.offline').count()) === 0, '복귀 후 끊김 표시 없음');
+        await refresher.screenshot({ path: path.join(SHOTS, 'e2e-after-reload.png') });
       }
 
       // 나머지 정답 → allGuessed로 턴 종료

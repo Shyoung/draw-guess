@@ -233,6 +233,22 @@ textarea { resize: vertical; min-height: 64px; }
 }
 .next-tag { color: var(--secondary-dark); font-weight: 700; font-size: 11px; background: var(--secondary-soft, rgba(79, 140, 255, .12)); padding: 1px 6px; border-radius: 8px; }
 .player.next { outline: 1.5px dashed var(--secondary); outline-offset: -1.5px; }
+.player.offline { opacity: .6; }
+.player.offline .avatar { filter: grayscale(1); }
+.offline-tag { color: var(--muted); font-weight: 700; font-size: 11px; background: rgba(43, 45, 66, .08); padding: 1px 6px; border-radius: 8px; }
+
+/* 반응(👍/👎) 팝업: 아바타 위로 떠오르며 1초 뒤 사라짐 */
+.avatar { overflow: visible; }
+.react-pop {
+  position: absolute; bottom: 60%; left: 30px; font-size: 20px; line-height: 1; pointer-events: none;
+  transform: translate(-50%, 0) rotate(var(--rot, 0deg)); animation: react-float 1s ease-out forwards; z-index: 3;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .25));
+}
+@keyframes react-float {
+  0% { opacity: 0; transform: translate(-50%, 6px) scale(.6) rotate(var(--rot, 0deg)); }
+  20% { opacity: 1; transform: translate(-50%, -6px) scale(1.15) rotate(var(--rot, 0deg)); }
+  100% { opacity: 0; transform: translate(-50%, -34px) scale(1) rotate(var(--rot, 0deg)); }
+}
 .pinfo { min-width: 0; display: flex; flex-direction: column; }
 .pname { font-weight: 800; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pname .me-tag { color: var(--secondary-dark); font-weight: 700; font-size: 12px; }
@@ -256,9 +272,17 @@ textarea { resize: vertical; min-height: 64px; }
 #canvas.can-draw { cursor: crosshair; }
 
 .draw-status {
+  display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;
   text-align: center; font-size: 14px; color: var(--muted); font-weight: 700;
-  padding: 8px; background: #f8f6fc; border-radius: 12px;
+  padding: 6px 8px; background: #f8f6fc; border-radius: 12px; min-height: 40px;
 }
+.react-bar { display: inline-flex; gap: 6px; }
+.react-btn {
+  border: 2px solid transparent; background: #fff; border-radius: 999px; width: 34px; height: 30px;
+  font-size: 16px; line-height: 1; box-shadow: var(--shadow-sm); transition: transform .08s, border-color .15s;
+}
+.react-btn:hover { transform: translateY(-1px); border-color: var(--secondary); }
+.react-btn:active { transform: scale(.9); }
 
 /* toolbar */
 .toolbar {
