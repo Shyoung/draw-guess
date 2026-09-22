@@ -181,7 +181,7 @@ async function main() {
   check('hint times: hints=1, drawTime=30 → [15]', JSON.stringify([...computeHintTimes(1, 30)]) === '[15]');
   check('levenshtein basic', levenshtein('apple', 'aple') === 1 && levenshtein('abc', 'abc') === 0 && levenshtein('abc', 'xyz') === 3);
   check('words.ko >= 250 unique', words.ko.length >= 250 && new Set(words.ko).size === words.ko.length, words.ko.length);
-  check('words.ko: all words have 2+ syllables', words.ko.every((w) => Array.from(w).length >= 2));
+  check('words.ko: includes 1-syllable words and brand category', words.ko.includes('곰') && words.ko.includes('스타벅스'));
 
   await startServer();
 
