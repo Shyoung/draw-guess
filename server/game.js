@@ -96,6 +96,15 @@ function maskWord(word, revealed) {
   return chars.map((ch, i) => (ch === ' ' ? ' ' : rev.has(i) ? hintChar(ch) : '_')).join(' ');
 }
 
+/**
+ * 전체 공개(정답을 맞힌 사람 전용). 초성이 아니라 실제 글자를 그대로 보여준다.
+ * maskWord와 같은 공백 규칙(글자 사이 1칸, 단어 사이 3칸)을 유지해 클라이언트 렌더링을 그대로 재사용한다.
+ * @param {string} word
+ */
+function revealAll(word) {
+  return Array.from(String(word)).join(' ');
+}
+
 /** 힌트 시점(잔여 초) 집합. hints=2, drawTime=80 → {53, 27} */
 function computeHintTimes(hints, drawTime) {
   const times = new Set();
@@ -279,6 +288,7 @@ class Room {
       round: this.round,
       totalRounds: this.totalRounds,
       drawerId: this.phase === 'lobby' ? null : this.drawerId,
+      nextDrawerId: this.computeNextDrawerId(),
       settings: { ...this.settings },
       players: this.players.map((p) => ({
         id: p.id,
@@ -595,7 +605,23 @@ class Room {
     const candidates = letterIdx.filter((i) => !this.revealed.has(i));
     if (!candidates.length) return;
     this.revealed.add(candidates[Math.floor(Math.random() * candidates.length)]);
-    this.emitExcept(this.drawerId, 'game:hint', { wordMask: maskWord(this.word, this.revealed) });
+    // 출제자와 이미 정답을 맞힌 사람(이미 전체 공개를 받음)은 제외하고 아직 못 맞힌 사람에게만 보낸다.
+    const targets = this.players.filter((pl) => pl.id !== this.drawerId && !pl.hasGuessed).map((pl) => pl.id);
+    this.emitToIds(targets, 'game:hint', { wordMask: maskWord(this.word, this.revealed) });
+  }
+
+  /**
+   * 다음 턴의 출제자 id. 현재 라운드에 남은 사람이 없으면 다음 라운드 첫 사람(참가 순서),
+   * 이번이 마지막 라운드의 마지막 턴이면 null(게임 종료 예정), 대기실/게임종료 단계에서도 null.
+   */
+  computeNextDrawerId() {
+    if (this.phase === 'lobby' || this.phase === 'gameOver' || !this.turnOrder.length) return null;
+    for (let i = this.turnIndex + 1; i < this.turnOrder.length; i++) {
+      if (this.getPlayer(this.turnOrder[i])) return this.turnOrder[i];
+    }
+    if (this.round >= this.totalRounds) return null;
+    const nextOrder = this.players.map((pl) => pl.id);
+    return nextOrder.length ? nextOrder[0] : null;
   }
 
   /** 출제자를 제외한 모든 플레이어가 맞혔는지 */
@@ -726,6 +752,10 @@ class Room {
     p.score += pts;
     this.turnPoints.set(p.id, pts);
 
+    // 정답을 맞힌 사람에게는 상단 단어 표시를 전체 공개로 바꿔 준다(본인만, 초성이 아닌 실제 글자).
+    // 이후 revealHint()가 아직 못 맞힌 사람만 대상으로 하므로 이 표시가 다시 부분 힌트로 덮이지 않는다.
+    this.emitTo(p.id, 'game:hint', { wordMask: revealAll(this.word) });
+
     // 정답 텍스트는 절대 브로드캐스트하지 않는다
     this.emitAll('chat:message', {
       id: p.id,
@@ -814,6 +844,7 @@ module.exports = {
   GAME_OVER_TIME,
   // 테스트/재사용을 위한 순수 헬퍼
   maskWord,
+  revealAll,
   hintChar,
   isHangulSyllable,
   normalizeAnswer,

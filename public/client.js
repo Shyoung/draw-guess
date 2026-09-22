@@ -339,11 +339,17 @@
   // --- 툴바 ---
   function setTool(t) { tool = t; renderToolbarState(); }
   function setColor(c) { if (isHex(c)) { color = c; if (tool === 'eraser') tool = 'pen'; renderToolbarState(); } }
+  var customColorEl = null;
   function setSize(s) { size = clamp(num(s, 10), 1, 60); renderToolbarState(); }
   function renderToolbarState() {
     var tb = $('toolbar'); if (!tb) return;
     tb.querySelectorAll('.tool[data-tool]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-tool') === tool); });
-    tb.querySelectorAll('.swatch').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-color') === color); });
+    tb.querySelectorAll('.swatch[data-color]').forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-color') === color); });
+    if (customColorEl) {
+      var isCustom = PALETTE.indexOf(color) === -1 && isHex(color);
+      customColorEl.classList.toggle('active', isCustom);
+      if (isCustom) { customColorEl.classList.add('chosen'); customColorEl.style.setProperty('--custom-color', color); }
+    }
     tb.querySelectorAll('.size-btn').forEach(function (b) { b.classList.toggle('active', Number(b.getAttribute('data-size')) === size); });
     var cur = $('current-color'); if (cur) cur.style.background = tool === 'eraser' ? '#ffffff' : color;
   }
@@ -356,8 +362,14 @@
     if (pal) PALETTE.forEach(function (c) {
       var b = el('button', 'swatch'); b.type = 'button'; b.title = c; b.setAttribute('data-color', c); b.style.background = c;
       b.addEventListener('click', function () { setColor(c); });
-      pal.appendChild(b);
+      pal.insertBefore(b, $('swatch-custom'));
     });
+    customColorEl = $('swatch-custom');
+    var customInput = $('custom-color-input');
+    if (customInput) {
+      customInput.addEventListener('input', function () { setColor(customInput.value); });
+      customInput.addEventListener('click', function (e) { e.stopPropagation(); });
+    }
     var sz = $('sizes');
     if (sz) SIZES.forEach(function (s) {
       var b = el('button', 'size-btn'); b.type = 'button'; b.title = s + 'px'; b.setAttribute('data-size', String(s));
@@ -408,6 +420,14 @@
       if (inRoom) { toast('서버와 연결이 끊어졌어요', 'error'); resetToLanding(false); }
     });
 
+    // 배포 후 재접속 시 서버 버전이 이 페이지의 버전과 다르면 새 코드를 받기 위해 새로고침한다.
+    on('server:version', function (p) {
+      var meta = document.querySelector('meta[name="asset-version"]');
+      var pageVersion = meta ? meta.getAttribute('content') : null;
+      if (!pageVersion || !p || typeof p.version !== 'string' || p.version === pageVersion) return;
+      toast('새 버전이 배포되어 새로고침합니다');
+      setTimeout(function () { location.reload(); }, 1200);
+    });
     on('room:state', onRoomState);
     on('game:choosing', onChoosing);
     on('game:drawing', onDrawing);
@@ -451,6 +471,7 @@
       // 강퇴 등으로 방에서 빠진 경우
       toast('방에서 나가게 되었어요', 'error'); resetToLanding(false); return;
     }
+    state.nextDrawerId = s.nextDrawerId == null ? null : s.nextDrawerId;
     if (state.phase === 'lobby' && prevPhase !== 'lobby') {
       resetCanvasState(); ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.chosenWord = null;
       ui.turnEnd = null; ui.ranking = null; setTimeLeft(null);
@@ -536,7 +557,7 @@
   // ------------------------------------------------------------------
   var tickTimer = null;
   function setTimeLeft(t, serverDriven) {
-    ui.timeLeft = t == null ? null : Math.max(0, Math.round(num(t, 0)));
+    applyTimeLeft(t == null ? null : Math.max(0, Math.round(num(t, 0))));
     renderTimers();
     armLocalTick(serverDriven ? 1500 : 1000);
   }
@@ -546,8 +567,14 @@
     tickTimer = setTimeout(function () {
       tickTimer = null;
       if (ui.timeLeft == null || ui.timeLeft <= 0) return;
-      ui.timeLeft -= 1; renderTimers(); armLocalTick(1000);
+      applyTimeLeft(ui.timeLeft - 1); renderTimers(); armLocalTick(1000);
     }, delay);
+  }
+  // 남은 시간이 실제로 바뀔 때만 갱신하고, choosing/drawing 중 5초 이하로 내려가면 째깍 소리를 낸다.
+  function applyTimeLeft(t) {
+    var changed = t !== ui.timeLeft;
+    ui.timeLeft = t;
+    if (changed && t != null && t >= 1 && t <= 5 && (state.phase === 'choosing' || state.phase === 'drawing')) SFX.play('tick');
   }
   function renderTimers() {
     var t = ui.timeLeft;
@@ -593,7 +620,10 @@
       if (isDrawer() && ui.word) {
         var s = el('span', 'word-secret'); s.appendChild(el('span', 'label', '내 단어')); s.appendChild(el('span', 'word', ui.word)); wa.appendChild(s);
       } else if (ui.wordMask) {
-        wa.appendChild(maskNode(ui.wordMask, ui.wordLength));
+        var maskEl = maskNode(ui.wordMask, ui.wordLength);
+        var me = findPlayer(myId);
+        if (me && me.hasGuessed) maskEl.classList.add('solved');
+        wa.appendChild(maskEl);
       } else {
         wa.appendChild(el('span', 'word-hint', '그리는 중…'));
       }
@@ -630,16 +660,19 @@
     sorted.forEach(function (p, i) {
       if (p.score !== prevScore) { rank = i + 1; prevScore = p.score; }
       var isMe = p.id === myId, isDr = p.id === state.drawerId && state.phase !== 'lobby';
-      var li = el('li', 'player' + (isMe ? ' me' : '') + (p.hasGuessed ? ' guessed' : '') + (isDr ? ' drawing' : ''));
+      var isNext = !isDr && state.phase !== 'lobby' && state.phase !== 'gameOver' && p.id === state.nextDrawerId;
+      var li = el('li', 'player' + (isMe ? ' me' : '') + (p.hasGuessed ? ' guessed' : '') + (isDr ? ' drawing' : '') + (isNext ? ' next' : ''));
       li.appendChild(el('span', 'rank', '#' + rank));
       var av = avatarNode(p.avatar);
       if (isDr) av.appendChild(el('span', 'badge-drawer', '✏️'));
+      else if (isNext) av.appendChild(el('span', 'badge-next', '⏭'));
       li.appendChild(av);
       var info = el('span', 'pinfo');
       var name = el('span', 'pname');
       name.appendChild(document.createTextNode(p.name));
       if (isMe) { name.appendChild(document.createTextNode(' ')); name.appendChild(el('span', 'me-tag', '(나)')); }
       if (p.id === state.hostId) { name.appendChild(document.createTextNode(' ')); var crown = el('span', 'host-tag', '👑'); crown.title = '호스트'; name.appendChild(crown); }
+      if (isNext) { name.appendChild(document.createTextNode(' ')); var nt = el('span', 'next-tag', '다음 차례'); nt.title = '다음 턴에 그릴 차례예요'; name.appendChild(nt); }
       info.appendChild(name);
       info.appendChild(el('span', 'pscore', p.score + '점' + (p.hasGuessed ? ' · 정답!' : '')));
       li.appendChild(info);

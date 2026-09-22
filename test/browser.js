@@ -162,6 +162,16 @@ async function say(page, text) {
       check(await drawer.locator('#toolbar').isVisible(), `턴${turn}: 출제자에게 툴바 표시`);
       check(!(await guessers[0].locator('#toolbar').isVisible()), `턴${turn}: 비출제자 툴바 숨김`);
 
+      // 다음 출제자 표시: rounds=1(참가자 수만큼의 턴)이므로 마지막 턴(turn3)에는 다음 사람이 없어야 한다.
+      const nextBadges = await guessers[0].locator('.player.next').count();
+      if (turn < 3) {
+        check(nextBadges === 1, `턴${turn}: 다음 출제자 배지 정확히 1명`, nextBadges);
+        const nextText = await guessers[0].locator('.player.next .next-tag').first().textContent().catch(() => '');
+        check(nextText.includes('다음'), `턴${turn}: 다음 출제자 태그 문구`, nextText);
+      } else {
+        check(nextBadges === 0, `턴${turn}: 마지막 턴에는 다음 출제자 배지 없음`, nextBadges);
+      }
+
       // 그리기 → 중계 확인
       await drawScribble(drawer);
       await sleep(700);
@@ -185,6 +195,47 @@ async function say(page, text) {
         check(own3 > own2 + 10000, `턴${turn}: 채우기 적용`, own3);
         check(Math.abs(remote3 - own3) / own3 < 0.05, `턴${turn}: 채우기 중계(오차<5%)`, `${remote3} vs ${own3}`);
         await drawer.click('[data-tool="pen"]');
+
+        // 커스텀 색상 피커: 고정 팔레트에 없는 임의의 색을 골라 실제로 그 색으로 그려지는지
+        await drawer.locator('#custom-color-input').evaluate((el) => {
+          el.value = '#123456'; el.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        await drawer.waitForTimeout(150);
+        const curBg = await drawer.locator('#current-color').evaluate((el) => getComputedStyle(el).backgroundColor);
+        check(curBg === 'rgb(18, 52, 86)', `턴${turn}: 커스텀 색상 선택 시 현재 색상 표시 갱신`, curBg);
+        check(
+          await drawer.locator('#swatch-custom').evaluate((el) => el.classList.contains('active')),
+          `턴${turn}: 커스텀 스와치 active 표시`,
+        );
+        const cbox2 = await drawer.locator('#canvas').boundingBox();
+        const relX = 0.55, relY = 0.65;
+        const ccx = cbox2.x + cbox2.width * relX, ccy = cbox2.y + cbox2.height * relY;
+        await drawer.mouse.move(ccx, ccy);
+        await drawer.mouse.down();
+        await drawer.mouse.move(ccx + 30, ccy, { steps: 3 });
+        await drawer.mouse.up();
+        await sleep(400);
+        const logicalX = Math.round(800 * relX), logicalY = Math.round(600 * relY);
+        const customPx = await drawer.evaluate(({ x, y }) => {
+          const cv = document.getElementById('canvas');
+          const d = cv.getContext('2d').getImageData(x, y, 1, 1).data;
+          return [d[0], d[1], d[2]];
+        }, { x: logicalX, y: logicalY });
+        check(
+          customPx[0] === 18 && customPx[1] === 52 && customPx[2] === 86,
+          `턴${turn}: 커스텀 색상으로 실제로 그려짐`, JSON.stringify(customPx),
+        );
+        const remoteCustomPx = await guessers[0].evaluate(({ x, y }) => {
+          const cv = document.getElementById('canvas');
+          const d = cv.getContext('2d').getImageData(x, y, 1, 1).data;
+          return [d[0], d[1], d[2]];
+        }, { x: logicalX, y: logicalY });
+        check(
+          remoteCustomPx[0] === 18 && remoteCustomPx[1] === 52 && remoteCustomPx[2] === 86,
+          `턴${turn}: 커스텀 색상이 다른 사람에게도 중계`, JSON.stringify(remoteCustomPx),
+        );
+        await drawer.locator('.swatch[data-color="#000000"]').click();
+
         await guessers[0].screenshot({ path: path.join(SHOTS, 'e2e-drawing-guesser.png') });
         await drawer.screenshot({ path: path.join(SHOTS, 'e2e-drawing-drawer.png') });
       }
@@ -221,6 +272,14 @@ async function say(page, text) {
       const chatAll = await guessers[1].locator('#chat-list').textContent();
       check(chatAll.includes('정답을 맞혔습니다'), `턴${turn}: 정답 시스템 메시지 브로드캐스트`);
       check(!chatAll.split('정답을 맞혔습니다')[0].includes(word) || turn > 1, `턴${turn}: 정답 단어 자체는 미노출`);
+
+      // 정답을 맞힌 guessers[0]에게는 상단 단어가 실제 글자로 전체 공개되고 초록색으로 강조되어야 한다.
+      // 아직 못 맞힌 guessers[1]에게는 여전히 마스크(초성/밑줄)만 보여야 한다.
+      await guessers[0].waitForSelector('#word-area .mask-wrap.solved', { timeout: 3000 }).catch(() => {});
+      const solvedText = (await guessers[0].locator('#word-area .mask-wrap.solved').textContent().catch(() => '')).replace(/\s+/g, '').replace(/\(.*\)$/, '');
+      check(solvedText === word, `턴${turn}: 정답자 상단에 전체 공개(초록 강조)`, `solvedText=${solvedText} word=${word}`);
+      const stillMasked = await guessers[1].locator('#word-area .mask-wrap.solved').count();
+      check(stillMasked === 0, `턴${turn}: 아직 못 맞힌 사람은 전체 공개 아님`);
 
       // 정답자 채팅은 출제자+정답자에게만 (턴별 고유 문구로 이전 턴 기록과 구분)
       const secret = '비밀채팅' + turn;

@@ -7,6 +7,8 @@
  */
 
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
@@ -20,10 +22,47 @@ const CODE_RE = /^[A-Z]{4}$/;
 const DEFAULT_AVATAR = { emoji: '🙂', color: '#4f8cff' };
 
 const app = express();
+const PUBLIC_DIR = path.join(__dirname, '..', 'public');
+
+/**
+ * 자산 버전: public/ 안의 html/js/css 내용 해시(8자리).
+ * 파일 내용이 바뀌면 값이 바뀌므로 배포마다 자동으로 새 URL(?v=...)이 되어 브라우저/중간 캐시가 무효화된다.
+ */
+function computeAssetVersion() {
+  const h = crypto.createHash('md5');
+  fs.readdirSync(PUBLIC_DIR)
+    .filter((n) => /\.(js|css|html)$/.test(n))
+    .sort()
+    .forEach((n) => { h.update(n); h.update(fs.readFileSync(path.join(PUBLIC_DIR, n))); });
+  return h.digest('hex').slice(0, 8);
+}
+const ASSET_VERSION = computeAssetVersion();
+
+// index.html은 매 요청 재검증(no-store)하고, 안의 로컬 css/js 참조에는 ?v=버전 을 붙여 서빙한다.
+// 외부/절대 경로(http:, //, /socket.io/..., data:)는 건드리지 않는다.
+const INDEX_HTML = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
+  .replace(/(href|src)="((?!https?:|\/|data:)[^"]+\.(?:css|js))"/g, (m, attr, file) => `${attr}="${file}?v=${ASSET_VERSION}"`)
+  .replace('<meta charset="utf-8">', `<meta charset="utf-8">\n  <meta name="asset-version" content="${ASSET_VERSION}">`);
+
+function sendIndex(req, res) {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.type('html').send(INDEX_HTML);
+}
+app.get(['/', '/index.html'], sendIndex);
+
 // 헬스체크 / keep-alive 핑 대상 (정적 파일보다 가볍게)
 app.get('/healthz', (req, res) => res.type('text').send('ok'));
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// js/css는 URL에 버전이 붙으므로 1년 캐시(immutable)해도 안전하다. 그 외 파일은 매번 재검증.
+app.use(express.static(PUBLIC_DIR, {
+  index: false,
+  setHeaders(res, filePath) {
+    if (/\.(js|css)$/.test(filePath)) res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    else res.set('Cache-Control', 'no-cache');
+  },
+}));
 
 const server = http.createServer(app);
 const io = new Server(server);
@@ -97,6 +136,8 @@ function deleteRoomIfEmpty(room) {
 // ── 소켓 처리 ───────────────────────────────────────────────────
 io.on('connection', (socket) => {
   socket.data.roomCode = null;
+  // 접속(재접속 포함)마다 서버 자산 버전을 알려준다. 페이지 버전과 다르면 클라이언트가 스스로 새로고침한다.
+  socket.emit('server:version', { version: ASSET_VERSION });
 
   const fail = (message) => socket.emit('error:msg', { message });
 
@@ -301,6 +342,6 @@ function startKeepAlive() {
 }
 
 server.listen(PORT, () => {
-  console.log(`[draw-guess] listening on http://localhost:${PORT}`);
+  console.log(`[draw-guess] listening on http://localhost:${PORT} (asset version ${ASSET_VERSION})`);
   startKeepAlive();
 });

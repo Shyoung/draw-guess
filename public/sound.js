@@ -94,6 +94,8 @@
     error: [[196, 0, 0.14, { type: 'sawtooth', gain: 0.12 }], [164.81, 0.1, 0.16, { type: 'sawtooth', gain: 0.12 }]],
     // 소리 켜짐 확인용 클릭
     toggleOn: [[880, 0, 0.08, { type: 'sine', gain: 0.14 }]],
+    // 남은 시간 5초 이하: 매초 짧은 째깍 소리
+    tick: [[1200, 0, 0.05, { type: 'square', gain: 0.13 }]],
   };
 
   function play(name) {

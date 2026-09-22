@@ -63,7 +63,8 @@
   roomCode, hostId, phase, round, totalRounds,
   drawerId,                 // 현재 출제자 (lobby면 null)
   settings,
-  players: [{ id, name, avatar, score, isDrawing, hasGuessed }]  // 참가 순서
+  players: [{ id, name, avatar, score, isDrawing, hasGuessed }],  // 참가 순서
+  nextDrawerId              // 다음 턴에 출제할 사람. lobby/gameOver거나 이번이 마지막 턴이면 null
 }
 ```
 
@@ -72,7 +73,7 @@
 |---|---|---|
 | `game:choosing` | `{ drawerId, drawerName, timeLeft, wordOptions? }` | `wordOptions`(string[])는 **출제자에게만** 포함. 나머지는 없음(undefined) |
 | `game:drawing` | `{ drawerId, round, totalRounds, timeLeft, wordMask, wordLength, word? }` | `word`는 출제자에게만. `wordMask` 형식은 아래 참고 |
-| `game:hint` | `{ wordMask }` | 초성 공개 갱신 (출제자에겐 안 보내도 됨) |
+| `game:hint` | `{ wordMask }` | 초성 공개 갱신 (출제자·이미 정답을 맞힌 사람 제외). 누군가 정답을 맞히면 그 사람에게만 별도로 `wordMask`가 실제 글자로 전체 공개된 `game:hint`가 온다(초성이 아님) |
 | `game:timer` | `{ timeLeft }` | 매 1초 (choosing / drawing 단계) |
 | `game:turnEnd` | `{ word, reason:'time'\|'allGuessed'\|'drawerLeft'\|'notEnoughPlayers', deltas:[{ id, delta }], timeLeft }` | 5초간 표시. `deltas`에는 이번 턴 획득 점수(0 포함 전원) |
 | `game:over` | `{ ranking:[{ id, name, avatar, score }] }` | 점수 내림차순. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
@@ -99,6 +100,8 @@
 `player:guessed` `{ id }` — 누가 맞혔는지 (플레이어 목록 하이라이트용). 이후 `room:state`도 갱신됨.
 
 `error:msg` `{ message }` — 개별 소켓에 오류 안내 (토스트).
+
+`server:version` `{ version }` — 소켓 접속(재접속 포함) 직후 1회. 서버가 서빙 중인 자산 버전(public/ 내용 해시 8자리). 클라이언트는 `<meta name="asset-version">`의 값과 다르면 토스트 후 `location.reload()` 한다(배포 직후 자동 갱신). HTML은 `no-store`, css/js는 `?v=버전` 쿼리 + 1년 캐시로 서빙된다.
 
 ---
 
