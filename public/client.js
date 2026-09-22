@@ -455,6 +455,13 @@
       if (inRoom && state.roomCode) { rejoinTarget = state.roomCode; toast('연결이 끊어졌어요. 다시 연결 중…', 'error'); }
     });
     on('react:show', onReactShow);
+    // 같은 브라우저(토큰)의 다른 탭/새로고침이 이 자리를 넘겨받았다 → 이 화면은 조용히 물러난다(재접속 시도 금지)
+    on('session:replaced', function (p) {
+      rejoinTarget = null;
+      clearLastRoom();
+      toast(p && p.message ? p.message : '다른 곳에서 접속해 이 화면은 종료됐어요');
+      resetToLanding(false);
+    });
 
     // 배포 후 재접속 시 서버 버전이 이 페이지의 버전과 다르면 새 코드를 받기 위해 새로고침한다.
     on('server:version', function (p) {

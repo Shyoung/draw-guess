@@ -138,14 +138,39 @@ const byId = (list, id) => list.find((p) => p.id === id);
   await sleep(300);
   check('drawer react:send is ignored', c1.log.filter((e) => e.ev === 'react:show').length === drawerReactBefore);
 
-  // ── P2 연결 끊김 → 유예 상태 ─────────────────────────────────
+  // ── 새로고침 경합: 옛 소켓이 아직 연결된 상태에서 같은 토큰으로 rejoin → 자리 넘겨받기 ──
   const p2Id = c2.playerId;
-  const offP = waitFor(c1, 'room:state', (s) => byId(s.players, p2Id) && byId(s.players, p2Id).connected === false, 5000, 'P2 offline');
-  c2.disconnect();
+  const replacedP = waitNext(c2, 'session:replaced', undefined, 3000, 'old socket replaced');
+  const c2take = await connect('P2-takeover');
+  const takeAck = await emitAck(c2take, 'room:rejoin', { roomCode: code, token: TOKEN2 });
+  check('rejoin while old socket still connected → takes over the SAME playerId', takeAck.ok === true && takeAck.playerId === p2Id, takeAck);
+  const replaced = await replacedP.then(() => true).catch(() => false);
+  check('old socket receives session:replaced', replaced);
+  const stTake = await waitFor(c1, 'room:state', (s) => s.players.length === 2 && byId(s.players, p2Id).connected === true, 3000, 'no duplicate after takeover');
+  check('no duplicate player after takeover (still 2 players)', stTake.players.length === 2, stTake.players);
+  c2.disconnect(); // 옛 소켓이 끊겨도 자리는 새 소켓 것 → 유예/끊김 처리 없어야 함
+  await sleep(400);
+  const stAfterOld = c1.log.filter((e) => e.ev === 'room:state').pop().payload;
+  check('old socket disconnect after takeover does NOT mark player offline', byId(stAfterOld.players, p2Id).connected === true, stAfterOld.players);
+
+  // ── room:join 에 같은 토큰 → 새 자리 대신 기존 자리로(이름 갱신) ──
+  const c2join = await connect('P2-join-again');
+  const replaced2P = waitNext(c2take, 'session:replaced', undefined, 3000, 'takeover socket replaced by join');
+  const joinAgain = await emitAck(c2join, 'room:join', { roomCode: code, name: '둘째개명', avatar: {}, token: TOKEN2 });
+  check('room:join with same token → same playerId, no new slot', joinAgain.ok === true && joinAgain.playerId === p2Id, joinAgain);
+  await replaced2P.catch(() => {});
+  const stRename = await waitFor(c1, 'room:state', (s) => byId(s.players, p2Id) && byId(s.players, p2Id).name === '둘째개명', 3000, 'renamed');
+  check('join-with-same-token updates name, still 2 players', stRename.players.length === 2, stRename.players);
+  // 이후 흐름은 이 소켓(c2join)이 P2 역할을 이어간다
+  const c2live = c2join;
+
+  // ── P2 연결 끊김 → 유예 상태 ─────────────────────────────────
+  const offP = waitNext(c1, 'room:state', (s) => byId(s.players, p2Id) && byId(s.players, p2Id).connected === false, 5000, 'P2 offline');
+  c2live.disconnect();
   const offState = await offP;
   check('after P2 disconnect: still in players, connected:false, score kept', offState.players.length === 2 && byId(offState.players, p2Id).connected === false, offState.players);
   check('phase stays drawing (guesser disconnect does not end the turn)', offState.phase === 'drawing', offState.phase);
-  check('system message announces disconnect with grace seconds', c1.log.some((e) => e.ev === 'chat:message' && e.payload.kind === 'system' && /연결이 끊어졌습니다/.test(e.payload.text)));
+  check('system message announces disconnect with grace seconds', c1.log.some((e) => e.ev === 'chat:message' && e.payload.kind === 'system' && /둘째개명님의 연결이 끊어졌습니다/.test(e.payload.text)));
 
   // ── 잘못된 토큰으로 rejoin → 거절 ───────────────────────────
   const bad = await connect('P2-bad');
@@ -189,7 +214,7 @@ const byId = (list, id) => list.find((p) => p.id === id);
 
   // ── 게임 종료 후 lobby: P2 다시 끊고 유예 만료 → 퇴장 ─────────
   await waitNext(c1, 'room:state', (s) => s.phase === 'lobby', 20000, 'back to lobby');
-  const leftP = waitNext(c1, 'chat:message', (m) => m.kind === 'system' && /둘째님이 나갔습니다/.test(m.text), GRACE_MS + 4000, 'grace expiry');
+  const leftP = waitNext(c1, 'chat:message', (m) => m.kind === 'system' && /둘째개명님이 나갔습니다/.test(m.text), GRACE_MS + 4000, 'grace expiry');
   const goneP = waitNext(c1, 'room:state', (s) => s.players.length === 1, GRACE_MS + 4000, 'P2 removed');
   c2b.disconnect();
   const t0 = Date.now();

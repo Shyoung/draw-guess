@@ -41,9 +41,9 @@
 | event | payload | ack / 비고 |
 |---|---|---|
 | `room:create` | `{ name, avatar, token? }` | ack `{ ok:true, roomCode, playerId, token }` 또는 `{ ok:false, error }`. `token`(영숫자·`_-` 8~64자)은 재접속용이며 없으면 서버가 발급 |
-| `room:rejoin` | `{ roomCode, token }` | 연결이 끊긴 지 유예 시간(기본 60초, `RECONNECT_GRACE_MS`) 안이면 같은 `playerId`·점수·순서로 복귀. ack 형식은 create와 동일. 성공 시 `room:state`와 진행 상황(catch-up)이 개별 전송된다 |
+| `room:rejoin` | `{ roomCode, token }` | 같은 `token`을 가진 플레이어가 방에 있으면(연결 상태 무관) 그 자리로 복귀: 같은 `playerId`·점수·순서 유지. 옛 소켓이 아직 살아 있으면 그쪽에 `session:replaced`를 보내고 떼어낸다(새로고침 경합·다른 탭). 유예 시간(기본 60초, `RECONNECT_GRACE_MS`)이 지나 퇴장된 뒤에는 실패. ack 형식은 create와 동일. 성공 시 `room:state`와 진행 상황(catch-up)이 개별 전송된다 |
 | `react:send` | `{ kind:'up'\|'down' }` | drawing 중 비출제자. 기록되지 않고 방 전체에 `react:show`로 중계. 플레이어당 초당 8회 제한 |
-| `room:join` | `{ roomCode, name, avatar, token? }` | ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명. roomCode는 대문자 정규화 |
+| `room:join` | `{ roomCode, name, avatar, token? }` | 같은 `token`이 이미 그 방에 있으면 새 자리를 만들지 않고 그 자리로 복귀(이름·아바타는 새 값으로 갱신, ack의 `playerId`는 기존 id). ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명. roomCode는 대문자 정규화 |
 | `room:leave` | – | 방 나가기 |
 | `room:settings` | `{ settings }` | 호스트, lobby에서만. 성공 시 모두에게 `room:state` |
 | `game:start` | – | 호스트, lobby, 플레이어 ≥ 2 |
@@ -100,6 +100,8 @@
 - 정답 텍스트 자체는 절대 브로드캐스트하지 않는다.
 
 `player:guessed` `{ id }` — 누가 맞혔는지 (플레이어 목록 하이라이트용). 이후 `room:state`도 갱신됨.
+
+`session:replaced` `{ message }` — 이 소켓의 자리를 같은 토큰의 다른 소켓이 넘겨받았다. 클라이언트는 재접속을 시도하지 말고 랜딩으로 돌아간다.
 
 `react:show` `{ id, kind:'up'|'down' }` — 누군가 👍/👎 반응. 클라이언트는 그 사람 아바타 위에 1초간 표시만 한다(기록 없음).
 

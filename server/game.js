@@ -287,10 +287,10 @@ class Room {
     return this.players.filter((p) => p.connected);
   }
 
-  /** 재접속 대상: 같은 token을 가진, 연결이 끊긴 플레이어 */
-  findDisconnectedByToken(token) {
+  /** 같은 token을 가진 플레이어(연결 상태 무관). 새로고침 직후처럼 옛 소켓의 끊김이 아직 감지되지 않은 경우도 잡는다 */
+  findByToken(token) {
     if (!token) return null;
-    return this.players.find((p) => !p.connected && p.token === token) || null;
+    return this.players.find((p) => p.token === token) || null;
   }
 
   // ── 조회 ───────────────────────────────────────────────────
@@ -401,13 +401,17 @@ class Room {
    * 재접속: 끊긴 플레이어를 새 소켓에 다시 붙인다. playerId·점수·순서는 그대로.
    * @returns {boolean} 성공 여부
    */
-  reconnect(id, socketId) {
+  reconnect(id, socketId, { name, avatar } = {}) {
     const p = this.getPlayer(id);
-    if (!p || p.connected) return false;
+    if (!p) return false;
+    const wasConnected = p.connected;
     this.clearGrace(p);
     p.connected = true;
     p.socketId = socketId;
-    this.systemMessage(`${p.name}님이 다시 연결되었습니다.`);
+    if (name) p.name = name;
+    if (avatar) p.avatar = avatar;
+    // 이미 연결돼 있던 자리를 새 소켓이 넘겨받는 경우(새로고침 경합, 다른 탭)에는 "다시 연결" 안내를 내지 않는다
+    if (!wasConnected) this.systemMessage(`${p.name}님이 다시 연결되었습니다.`);
     this.broadcastState();
     this.sendCatchUp(id);
     if (this.phase === 'drawing' && p.hasGuessed && this.word) {

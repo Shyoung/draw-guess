@@ -197,6 +197,29 @@ io.on('connection', (socket) => {
   };
   const leaveCurrentRoom = () => detachFromRoom('leave');
 
+  /**
+   * 기존 플레이어 자리(p)에 이 소켓을 붙인다. 옛 소켓이 아직 살아 있으면(새로고침 경합·다른 탭)
+   * 그쪽에 session:replaced 를 보내고 방에서 떼어낸다 — 그 소켓의 disconnect 는 이후 no-op 이 된다.
+   */
+  const attachToExisting = (room, p, ack, extra) => {
+    const code = room.code;
+    if (p.connected && p.socketId && p.socketId !== socket.id) {
+      const old = io.sockets.sockets.get(p.socketId);
+      if (old) {
+        old.emit('session:replaced', { message: '다른 탭이나 기기에서 이 자리로 접속해 이 화면은 종료됐어요.' });
+        old.data.roomCode = null;
+        old.data.playerId = null;
+        old.leave(code);
+      }
+    }
+    leaveCurrentRoom();
+    socket.data.roomCode = code;
+    socket.data.playerId = p.id;
+    socket.join(code);
+    ack({ ok: true, roomCode: code, playerId: p.id, token: p.token });
+    room.reconnect(p.id, socket.id, extra || {});
+  };
+
   /** (data, ack) 인자 정규화 — 클라이언트가 data 없이 ack 만 보낸 경우 대비 */
   const normalizeArgs = (data, ack) => {
     if (typeof data === 'function') return [{}, data];
@@ -240,6 +263,13 @@ io.on('connection', (socket) => {
     if (socket.data.roomCode === code && room.getPlayer(pid())) {
       return ack({ ok: false, error: '이미 이 방에 참가 중입니다.' });
     }
+    const token = sanitizeToken(data.token);
+    const existing = room.findByToken(token);
+    if (existing) {
+      // 같은 브라우저(토큰)가 이미 이 방에 있다 → 중복 참가 대신 그 자리로 복귀(이름·아바타는 새 값으로 갱신)
+      attachToExisting(room, existing, ack, { name, avatar });
+      return;
+    }
     if (room.players.length >= MAX_PLAYERS) {
       return ack({ ok: false, error: `방이 가득 찼습니다. (최대 ${MAX_PLAYERS}명)` });
     }
@@ -247,7 +277,6 @@ io.on('connection', (socket) => {
     leaveCurrentRoom(); // 다른 방에 있었다면 먼저 나간다
     if (!rooms.has(code)) return ack({ ok: false, error: '존재하지 않는 방입니다.' });
 
-    const token = sanitizeToken(data.token);
     socket.data.roomCode = code;
     socket.data.playerId = socket.id;
     socket.join(code);
@@ -264,15 +293,9 @@ io.on('connection', (socket) => {
     if (!CODE_RE.test(code) || !token) return ack({ ok: false, error: '재접속 정보가 올바르지 않습니다.' });
     const room = rooms.get(code);
     if (!room) return ack({ ok: false, error: '방이 더 이상 존재하지 않습니다.' });
-    const p = room.findDisconnectedByToken(token);
+    const p = room.findByToken(token);
     if (!p) return ack({ ok: false, error: '이어서 할 수 있는 자리가 없습니다. 다시 참가해 주세요.' });
-
-    leaveCurrentRoom();
-    socket.data.roomCode = code;
-    socket.data.playerId = p.id;
-    socket.join(code);
-    ack({ ok: true, roomCode: code, playerId: p.id, token });
-    room.reconnect(p.id, socket.id);
+    attachToExisting(room, p, ack);
   });
 
   // react:send { kind:'up'|'down' } — drawing 중 비출제자. 초당 REACT_LIMIT_PER_SEC 회까지.
