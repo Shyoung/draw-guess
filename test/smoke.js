@@ -12,7 +12,7 @@
 const path = require('path');
 const { spawn } = require('child_process');
 const { io } = require('socket.io-client');
-const { maskWord, hintChar, normalizeAnswer, levenshtein, computeHintTimes } = require('../server/game');
+const { maskWord, hintChar, normalizeAnswer, levenshtein, computeHintTimes, maxReveals } = require('../server/game');
 const words = require('../server/words');
 
 const PORT = 3123;
@@ -180,8 +180,12 @@ async function main() {
   check('maskWord: 한글은 초성만 공개 "ㅅ _"', maskWord('사과', new Set([0])) === 'ㅅ _');
   check('maskWord: 영문·숫자는 그대로 공개 "G _ 2 _"', maskWord('GS25', new Set([0, 2])) === 'G _ 2 _');
   check('hintChar: 쌍자음·받침 처리', hintChar('빵') === 'ㅃ' && hintChar('닭') === 'ㄷ' && hintChar('힣') === 'ㅎ' && hintChar('a') === 'a');
-  check('hint times: hints=2, drawTime=80 → [53, 27]', JSON.stringify([...computeHintTimes(2, 80)]) === '[53,27]');
-  check('hint times: hints=1, drawTime=30 → [15]', JSON.stringify([...computeHintTimes(1, 30)]) === '[15]');
+  check('hint times: count=2, drawTime=80, endAt=15 → [37, 15] (마지막 힌트는 종료 15초 전)', JSON.stringify([...computeHintTimes(2, 80, 15)]) === '[37,15]', [...computeHintTimes(2, 80, 15)]);
+  check('hint times: count=1, drawTime=30, endAt=15 → [15]', JSON.stringify([...computeHintTimes(1, 30, 15)]) === '[15]');
+  check('hint times: count=3, drawTime=90, endAt=30 → [60, 45, 30] (역산 균등 배치)', JSON.stringify([...computeHintTimes(3, 90, 30)]) === '[60,45,30]', [...computeHintTimes(3, 90, 30)]);
+  check('hint times: 1글자·3글자 단어 모두 마지막 힌트는 같은 시점', Math.min(...computeHintTimes(1, 80, 15)) === Math.min(...computeHintTimes(3, 80, 15)));
+  check('hint times: endAt이 drawTime 이상이면 drawTime-1로 보정', [...computeHintTimes(1, 30, 60)][0] === 29);
+  check('maxReveals: 한글만 → 글자 수, 영문·숫자 포함 → 글자 수-1, 공백 제외', maxReveals('사과') === 2 && maxReveals('GS25') === 3 && maxReveals('ice cream') === 7);
   check('levenshtein basic', levenshtein('apple', 'aple') === 1 && levenshtein('abc', 'abc') === 0 && levenshtein('abc', 'xyz') === 3);
   check('words.ko >= 250 unique', words.ko.length >= 250 && new Set(words.ko).size === words.ko.length, words.ko.length);
   check('words.ko: includes 1-syllable words and brand category', words.ko.includes('곰') && words.ko.includes('스타벅스'));
@@ -228,7 +232,7 @@ async function main() {
     st3,
   );
   check('room:state: name trimmed, avatar color normalized/defaulted', st3.players[0].name === '호스트' && st3.players[0].avatar.color === '#ff0000' && /^#[0-9a-f]{6}$/.test(st3.players[2].avatar.color));
-  check('room:state: default settings', JSON.stringify(st3.settings) === JSON.stringify({ rounds: 3, drawTime: 80, wordCount: 3, hints: 2, customWords: '', customWordsOnly: false }), st3.settings);
+  check('room:state: default settings', JSON.stringify(st3.settings) === JSON.stringify({ rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false }), st3.settings);
 
   const dj = await emitAck(c3, 'room:join', { roomCode: code, name: 'dup', avatar: {} });
   check('double join of same room rejected', dj && dj.ok === false, dj);

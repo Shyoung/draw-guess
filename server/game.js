@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   drawTime: 80,
   wordCount: 3,
   hints: 2,
+  hintEndAt: 15, // 마지막 힌트가 뜨는 시점(종료 N초 전), 5..60
   customWords: '',
   customWordsOnly: false,
 });
@@ -110,13 +111,36 @@ function revealAll(word) {
 }
 
 /** 힌트 시점(잔여 초) 집합. hints=2, drawTime=80 → {53, 27} */
-function computeHintTimes(hints, drawTime) {
+/**
+ * 힌트 시점(잔여 초) 집합 — 종료 endAt초 전을 기준으로 역산한다.
+ * 마지막 힌트는 항상 잔여 endAt초에 뜨고, 그 앞의 힌트들은 시작~마지막 힌트 사이에 균등 배치된다.
+ * 그래서 공개할 글자 수(count)가 1이든 3이든 "모든 힌트가 다 공개되는 시점"은 같다.
+ * 예) count=2, drawTime=80, endAt=15 → {37, 15} / count=1 → {15}
+ * @param {number} count 실제로 공개할 힌트 개수 (설정값과 단어의 공개 가능 글자 수 중 작은 값)
+ * @param {number} drawTime 초
+ * @param {number} [endAt=15] 마지막 힌트가 뜨는 잔여 초
+ */
+function computeHintTimes(count, drawTime, endAt = 15) {
   const times = new Set();
-  for (let i = 1; i <= hints; i++) {
-    const t = Math.round((drawTime * (hints + 1 - i)) / (hints + 1));
+  const n = Math.max(0, Math.floor(count));
+  if (n === 0 || drawTime <= 0) return times;
+  const last = Math.min(Math.max(1, Math.round(endAt)), drawTime - 1);
+  const gap = (drawTime - last) / (n + 1);
+  // 이른 힌트(잔여 초가 큰 쪽)부터 넣어 순회 순서가 시간 순이 되게 한다
+  for (let i = n - 1; i >= 0; i--) {
+    const t = Math.round(last + gap * i);
     if (t > 0 && t < drawTime) times.add(t);
   }
   return times;
+}
+
+/** 이 단어에서 힌트로 공개할 수 있는 최대 글자 수 (revealHint와 같은 규칙) */
+function maxReveals(word) {
+  const chars = Array.from(String(word || ''));
+  const letters = chars.filter((ch) => ch !== ' ');
+  if (!letters.length) return 0;
+  const allHangul = letters.every((ch) => isHangulSyllable(ch));
+  return allHangul ? letters.length : letters.length - 1;
 }
 
 function clampCoord(v, max) {
@@ -649,6 +673,7 @@ class Room {
     if ('drawTime' in patch) s.drawTime = clampInt(patch.drawTime, 30, 180, s.drawTime);
     if ('wordCount' in patch) s.wordCount = clampInt(patch.wordCount, 2, 5, s.wordCount);
     if ('hints' in patch) s.hints = clampInt(patch.hints, 0, 5, s.hints);
+    if ('hintEndAt' in patch) s.hintEndAt = clampInt(patch.hintEndAt, 5, 60, s.hintEndAt);
     if ('customWords' in patch) {
       // 원문은 그대로 보존(입력 중 커서 튐 방지), 파싱/검증은 pickWords 시점에 수행
       const raw = typeof patch.customWords === 'string' ? patch.customWords : '';
@@ -785,7 +810,8 @@ class Room {
     this.currentStroke = null;
     this.drawTime = this.settings.drawTime;
     this.timeLeft = this.drawTime;
-    this.hintTimes = computeHintTimes(this.settings.hints, this.drawTime);
+    // 힌트 개수는 설정값과 이 단어의 공개 가능 글자 수 중 작은 쪽. 마지막 힌트는 항상 종료 hintEndAt초 전
+    this.hintTimes = computeHintTimes(Math.min(this.settings.hints, maxReveals(word)), this.drawTime, this.settings.hintEndAt);
 
     const base = {
       drawerId: this.drawerId,
@@ -1094,5 +1120,6 @@ module.exports = {
   normalizeAnswer,
   levenshtein,
   computeHintTimes,
+  maxReveals,
   clampInt,
 };
