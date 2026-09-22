@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>그려라 맞혀라 — 실시간 그림 맞히기</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%E2%9C%8F%EF%B8%8F%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ================= Landing / 로비 진입 ================= -->
+  <main id="view-landing" class="view landing">
+    <div class="blob blob-a" aria-hidden="true"></div>
+    <div class="blob blob-b" aria-hidden="true"></div>
+    <div class="blob blob-c" aria-hidden="true"></div>
+
+    <section class="landing-card" aria-labelledby="logo">
+      <h1 id="logo" class="logo">
+        <span class="logo-pencil" aria-hidden="true">✏️</span>
+        <span class="logo-text">그려라 <em>맞혀라</em></span>
+      </h1>
+      <p class="tagline">친구들과 함께 그리고, 맞히고, 웃어요!</p>
+
+      <div class="profile">
+        <div id="avatar-preview" class="avatar-preview" style="--av:#bae1ff">
+          <span id="avatar-preview-emoji">😀</span>
+        </div>
+        <label class="field">
+          <span class="field-label">닉네임</span>
+          <input id="nick" type="text" maxlength="12" placeholder="최대 12자" autocomplete="off" spellcheck="false">
+        </label>
+      </div>
+
+      <div class="picker">
+        <div class="picker-label">얼굴</div>
+        <div id="emoji-strip" class="emoji-strip" role="radiogroup" aria-label="아바타 얼굴"></div>
+      </div>
+      <div class="picker">
+        <div class="picker-label">색상</div>
+        <div id="color-row" class="color-row" role="radiogroup" aria-label="아바타 색상"></div>
+      </div>
+
+      <button id="btn-create" class="btn btn-primary btn-lg btn-block" type="button">방 만들기</button>
+
+      <div class="divider"><span>또는 방 코드로 참가</span></div>
+
+      <div class="join-row">
+        <input id="room-code-input" type="text" maxlength="4" placeholder="ABCD" inputmode="latin"
+               autocapitalize="characters" autocomplete="off" spellcheck="false" aria-label="방 코드 4글자">
+        <button id="btn-join" class="btn btn-secondary btn-lg" type="button">참가하기</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================= Room (lobby 단계 + 게임 중 공용) ================= -->
+  <main id="view-room" class="view room" hidden>
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="room-code-chip">
+          <span class="chip-label">방 코드</span>
+          <strong id="room-code">----</strong>
+        </div>
+        <button id="btn-copy" class="btn btn-ghost btn-sm" type="button" title="초대 링크 복사"><span aria-hidden="true">🔗</span><span class="btn-copy-text">초대 링크 복사</span></button>
+      </div>
+
+      <div class="topbar-center">
+        <div id="round-indicator" class="round-indicator">대기실</div>
+        <div id="word-area" class="word-area" aria-live="polite"></div>
+      </div>
+
+      <div class="topbar-right">
+        <div id="timer" class="timer" aria-label="남은 시간">–</div>
+        <button id="btn-leave" class="btn btn-ghost btn-sm" type="button">나가기</button>
+      </div>
+    </header>
+
+    <div class="room-grid">
+      <!-- 왼쪽: 플레이어 -->
+      <aside class="panel players-panel">
+        <h2 class="panel-title">플레이어 <span id="player-count" class="panel-sub"></span></h2>
+        <ul id="player-list" class="player-list"></ul>
+      </aside>
+
+      <!-- 가운데: 캔버스 / 설정 -->
+      <section class="panel center-panel">
+        <!-- lobby 단계: 설정 패널 -->
+        <div id="settings-panel" class="settings-panel">
+          <h2 class="panel-title">게임 설정</h2>
+          <div class="settings-grid">
+            <label class="setting">
+              <span>라운드</span>
+              <select id="set-rounds"></select>
+            </label>
+            <label class="setting">
+              <span>그리기 시간</span>
+              <select id="set-drawTime"></select>
+            </label>
+            <label class="setting">
+              <span>단어 후보 수</span>
+              <select id="set-wordCount"></select>
+            </label>
+            <label class="setting">
+              <span>힌트 횟수</span>
+              <select id="set-hints"></select>
+            </label>
+          </div>
+          <label class="setting setting-wide">
+            <span>사용자 단어 <small>(쉼표로 구분, 각 1~20자)</small></span>
+            <textarea id="set-customWords" rows="3" placeholder="예) 사과, 자전거, 무지개"></textarea>
+          </label>
+          <label class="check">
+            <input id="set-customWordsOnly" type="checkbox">
+            <span>사용자 단어만 사용</span>
+          </label>
+          <div class="start-row">
+            <button id="btn-start" class="btn btn-primary btn-xl btn-block" type="button">게임 시작</button>
+            <p id="start-hint" class="start-hint"></p>
+          </div>
+        </div>
+
+        <!-- 게임 단계: 캔버스 + 오버레이 -->
+        <div id="canvas-wrap" class="canvas-wrap" hidden>
+          <canvas id="canvas" width="800" height="600" aria-label="그림판"></canvas>
+
+          <div id="overlay-choosing" class="overlay" hidden>
+            <div class="card">
+              <h3 id="choosing-title" class="card-title">단어를 골라주세요!</h3>
+              <div id="word-options" class="word-options"></div>
+              <p id="choosing-wait" class="card-wait" hidden>
+                <span class="dots"><i></i><i></i><i></i></span>
+              </p>
+              <div id="choosing-timer" class="overlay-timer">15</div>
+            </div>
+          </div>
+
+          <div id="overlay-turnend" class="overlay" hidden>
+            <div class="card">
+              <p id="turnend-reason" class="card-eyebrow">시간 종료!</p>
+              <h3 class="card-title">정답: <span id="turnend-word" class="answer-word">—</span></h3>
+              <ul id="turnend-deltas" class="delta-list"></ul>
+              <div id="turnend-timer" class="overlay-timer small">5</div>
+            </div>
+          </div>
+
+          <div id="overlay-gameover" class="overlay" hidden>
+            <div class="card card-wide">
+              <p class="card-eyebrow">게임 종료</p>
+              <h3 class="card-title">최종 순위</h3>
+              <div id="podium" class="podium"></div>
+              <ol id="ranking-list" class="ranking-list"></ol>
+              <p class="card-note"><span id="gameover-timer">10</span>초 후 대기실로 돌아갑니다</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 출제자 상태 안내 (관전자용) -->
+        <div id="draw-status" class="draw-status" hidden></div>
+
+        <!-- 도구 모음 (출제자 전용) -->
+        <div id="toolbar" class="toolbar" hidden aria-disabled="true">
+          <div class="tool-group" role="group" aria-label="도구">
+            <button class="tool" data-tool="pen" type="button" title="펜 (B)" aria-label="펜">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            </button>
+            <button class="tool" data-tool="eraser" type="button" title="지우개 (E)" aria-label="지우개">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.24 3.56l4.95 4.94c.78.79.78 2.05 0 2.84L12 20.53a4.008 4.008 0 0 1-5.66 0L2.81 17c-.78-.79-.78-2.05 0-2.84l10.6-10.6c.79-.78 2.05-.78 2.83 0zM4.22 15.58l3.54 3.53c.78.79 2.04.79 2.83 0l3.53-3.53-4.95-4.95-4.95 4.95z"/></svg>
+            </button>
+            <button class="tool" data-tool="fill" type="button" title="채우기 (F)" aria-label="채우기">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.56 8.94L7.62 0 6.21 1.41l2.38 2.38-5.15 5.15c-.59.59-.59 1.54 0 2.12l5.5 5.5c.29.29.68.44 1.06.44s.77-.15 1.06-.44l5.5-5.5c.59-.58.59-1.53 0-2.12zM5.21 10L10 5.21 14.79 10H5.21zM19 11.5s-2 2.17-2 3.5c0 1.1.9 2 2 2s2-.9 2-2c0-1.33-2-3.5-2-3.5z"/></svg>
+            </button>
+          </div>
+
+          <div id="current-color" class="current-color" title="현재 색상" aria-label="현재 색상"></div>
+          <div id="palette" class="palette" role="group" aria-label="색상"></div>
+          <div id="sizes" class="sizes" role="group" aria-label="굵기"></div>
+
+          <div class="tool-group" role="group" aria-label="편집">
+            <button id="btn-undo" class="tool" type="button" title="되돌리기 (Ctrl+Z)" aria-label="되돌리기">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+            </button>
+            <button id="btn-clear" class="tool tool-danger" type="button" title="전체 지우기" aria-label="전체 지우기">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 오른쪽: 채팅 / 정답 -->
+      <aside class="panel chat-panel">
+        <h2 class="panel-title">채팅 · 정답</h2>
+        <div id="chat-list" class="chat-list" aria-live="polite"></div>
+        <form id="chat-form" class="chat-form" autocomplete="off">
+          <input id="chat-input" type="text" maxlength="100" placeholder="정답을 입력하세요…" autocomplete="off">
+          <button class="btn btn-primary btn-sm" type="submit">전송</button>
+        </form>
+      </aside>
+    </div>
+  </main>
+
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    // 개발용 목(mock) 모드: ?mock=1 이면 가짜 io()를 client.js 보다 먼저 로드한다.
+    if (location.search.indexOf('mock=1') !== -1) {
+      document.write('<script src="dev-mock.js"><\/script>');
+    }
+  </script>
+  <script src="client.js"></script>
+</body>
+</html>

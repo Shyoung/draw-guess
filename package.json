@@ -1,0 +1,25 @@
+{
+  "name": "draw-guess",
+  "version": "0.1.0",
+  "description": "skribbl.io 스타일 실시간 멀티플레이 그림 맞추기 게임",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node test/smoke.js",
+    "test:browser": "node test/browser.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.22.3",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "playwright": "^1.63.0",
+    "socket.io-client": "^4.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
