@@ -49,3 +49,26 @@ HEADFUL=1 node test/browser.js   # 창을 띄워서 진행 과정 보기
 
 브라우저 테스트는 `test/shots/e2e-*.png` 에 각 단계 스크린샷을 남깁니다.
 `public/index.html?mock=1` 로 열면 서버 없이 가짜 소켓으로 화면 흐름만 볼 수 있습니다.
+
+## 배포 (무료 상시 서버)
+
+이 게임은 Socket.IO 웹소켓 서버가 계속 떠 있어야 하므로 **Vercel 같은 서버리스 플랫폼에는 올릴 수 없습니다**
+(Vercel Functions는 웹소켓 연결을 유지하지 못하고, 방 상태를 메모리에 두는 구조와도 맞지 않습니다).
+웹소켓을 지원하는 무료 Node 호스팅을 쓰세요.
+
+### Render (권장, 무료)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/shyoung-lee/draw-guess)
+
+1. 위 버튼을 누르고 GitHub 계정으로 Render에 로그인합니다.
+2. 저장소의 `render.yaml`이 자동으로 읽혀 무료 Web Service가 만들어집니다. Apply를 누르면 2~3분 뒤 `https://draw-guess-xxxx.onrender.com` 주소가 나옵니다.
+3. 이후 `main` 브랜치에 push하면 자동으로 재배포됩니다.
+
+무료 플랜은 15분간 아무도 접속하지 않으면 잠들고, 다음 사람이 링크를 열 때 30~60초 정도 기다렸다가 깨어납니다.
+게임을 시작하기 전에 방장이 먼저 링크를 한 번 열어 두면 친구들은 기다리지 않습니다.
+
+### 그 외 선택지
+
+- **Koyeb / Fly.io**: 같은 방식(Node 웹 서비스)으로 배포 가능. 무료 범위와 잠듦 정책은 각 사이트에서 확인.
+- **내 PC + Cloudflare Tunnel**: 플레이할 때만 `npm start` 후 `cloudflared tunnel --url http://localhost:3000`을 실행하면 가입 없이 임시 공개 주소가 생깁니다. PC를 꺼두면 접속이 안 됩니다.
+- **Oracle Cloud Always Free VM**: 진짜 24시간 무료 서버. 대신 리눅스 서버 세팅(pm2, HTTPS)을 직접 해야 합니다.
