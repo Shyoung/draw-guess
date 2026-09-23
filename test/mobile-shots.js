@@ -51,7 +51,7 @@ async function closeSheet(page, sheetId) {
       const file = FILES[stage];
       if (file) await shot(m, file);
       if (stage === 'drawing-drawer') {
-        await openSheet(m, '#chat-ticker', 'sheet-chat');
+        await openSheet(m, '#drawer-chat', 'sheet-chat');
         await shot(m, '13-chat-sheet.png');
         await closeSheet(m, 'sheet-chat');
       }

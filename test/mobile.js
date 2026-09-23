@@ -105,29 +105,37 @@ async function mainRun() {
       check((await m.locator('#btn-start').count()) === 1, '로비(설정): #btn-start 존재');
       check(mm.chatFont >= 16, '채팅 입력 font-size ≥ 16px', mm.chatFont);
       check(mm.sw <= VW, '로비(설정): 가로 스크롤 없음', mm.sw);
-      check(await m.locator('#chat-panel #chat-list').isHidden(), '로비: 채팅 목록은 접힘(숨김)');
-      const bar = await box(m, '#chat-bar');
-      check(inside(bar) && bar.height <= 48, '로비: 접힌 채팅 바가 뷰포트 안(≤48px)', fmt(bar));
-      check((await m.locator('#chat-bar-last').textContent()).includes('입장'), '로비: 접힌 바에 마지막 메시지', (await m.locator('#chat-bar-last').textContent()).trim().slice(0, 30));
-      await openSheet(m, '#btn-chat-expand', 'sheet-chat');
+      // 미니 채팅: 목록(최대 5줄) + 입력창이 보이고, 목록을 터치하면 시트
+      const ml = await m.locator('#chat-panel #chat-list').evaluate((e) => ({ h: Math.round(e.getBoundingClientRect().height), maxH: getComputedStyle(e).maxHeight, vis: getComputedStyle(e).display !== 'none' }));
+      check(ml.vis && ml.h <= 170, '로비: 미니 채팅 목록 표시(≤5줄, ≤170px)', JSON.stringify(ml));
+      check(await m.locator('#chat-panel #chat-form').isVisible(), '로비: 미니 채팅 입력창 표시');
+      check(await m.locator('#chat-bar').isHidden(), '로비: 접힌 바/펼치기 버튼은 없음');
+      check((await m.locator('#chat-panel #chat-list').textContent()).includes('입장'), '로비: 미니 목록에 입장 메시지');
+      await openSheet(m, '#chat-panel #chat-list', 'sheet-chat');
       check((await m.locator('#sheet-chat #chat-list').count()) === 1, '로비: 채팅 펼치기 → #sheet-chat 안에 #chat-list');
       const ci = await box(m, '#sheet-chat #chat-input');
       check(inside(ci), '로비: 채팅 시트 안 #chat-input 보임', fmt(ci));
       const lastMsg = await box(m, '#sheet-chat #chat-list > *:last-child');
       check(inside(lastMsg), '로비: 채팅 시트에 마지막 메시지 보임', fmt(lastMsg));
       await closeSheet(m, 'sheet-chat', 'backdrop');
+      // 입력창을 터치하면 시트가 열리고 시트 안 입력창에 포커스
+      await m.locator('#chat-panel #chat-input').dispatchEvent('pointerdown', { pointerType: 'touch', isPrimary: true, cancelable: true, bubbles: true });
+      await m.waitForSelector('#sheet-chat.open', { timeout: 3000 });
+      await sleep(400);
+      check(await m.evaluate(() => document.activeElement && document.activeElement.id === 'chat-input' && !!document.activeElement.closest('#sheet-chat')), '로비: 입력창 터치 → 시트 열리고 시트 안 입력창에 포커스');
+      await closeSheet(m, 'sheet-chat', 'button');
       // 드래그로 닫기
-      await openSheet(m, '#btn-chat-expand', 'sheet-chat');
+      await openSheet(m, '#chat-panel #chat-list', 'sheet-chat');
       await closeSheet(m, 'sheet-chat', 'drag');
       check(await m.locator('#sheet-chat').isHidden(), '로비: 시트를 아래로 끌어 닫힘');
       // 기기 뒤로가기로 닫기 (방은 유지되어야 함)
       const urlBefore = m.url();
-      await openSheet(m, '#btn-chat-expand', 'sheet-chat');
+      await openSheet(m, '#chat-panel #chat-list', 'sheet-chat');
       await closeSheet(m, 'sheet-chat', 'back');
       check(await m.locator('#sheet-chat').isHidden(), '로비: 뒤로가기로 시트 닫힘');
       check(await m.locator('#view-room').isVisible() && m.url() === urlBefore, '로비: 뒤로가기 후에도 방 화면 유지', m.url());
       // 시트를 ✕로 닫은 뒤 뒤로가기를 눌러도 방을 떠나지 않아야 함 (우리가 넣은 history 항목이 정리됐는지)
-      await openSheet(m, '#btn-chat-expand', 'sheet-chat');
+      await openSheet(m, '#chat-panel #chat-list', 'sheet-chat');
       await closeSheet(m, 'sheet-chat', 'button');
       const histLen = await m.evaluate(() => history.state && history.state.sheet ? 'sheet-state-left' : 'clean');
       check(histLen === 'clean', '로비: ✕로 닫으면 시트용 history 항목이 정리됨', histLen);
@@ -156,7 +164,7 @@ async function mainRun() {
       check(c && t && c.y + c.height <= t.y + 0.5, 'drawing(출제자): 툴바가 캔버스 위에 겹치지 않음', `${fmt(c)} / ${fmt(t)}`);
       check(t && t.y + t.height >= VH - 40, 'drawing(출제자): 툴바(팔레트)가 화면 하단에 고정', t && Math.round(t.y + t.height));
       const cw = await box(m, '#canvas-wrap');
-      check(c && cw && Math.abs((c.y - cw.y) - ((cw.y + cw.height) - (c.y + c.height))) <= 4, 'drawing(출제자): 캔버스가 남는 영역 세로 중앙', `${fmt(c)} in ${fmt(cw)}`);
+      check(c && cw && Math.abs(c.width - cw.width) <= 2, 'drawing(출제자): 캔버스가 래퍼를 채움', `${fmt(c)} in ${fmt(cw)}`);
       const pal = await m.locator('#palette').evaluate((e) => [Math.round(e.getBoundingClientRect().height), e.scrollWidth > e.clientWidth]);
       check(pal[0] <= 40 && pal[1], 'drawing(출제자): 팔레트 한 줄 + 가로 스크롤', pal.join(' '));
       check((await m.locator('#custom-color-input').count()) === 1, 'drawing(출제자): 커스텀 색상 피커 존재');
@@ -164,11 +172,13 @@ async function mainRun() {
       check(px > 300, 'drawing(출제자): 터치/마우스로 그린 획이 캔버스에', px);
       // 채팅 패널은 흐름에 없고 티커가 대신한다
       check((await display(m, '#chat-panel')) === 'none', 'drawing(출제자): #chat-panel 흐름에서 제외(display:none)');
-      const tk = await box(m, '#chat-ticker');
-      const tkText = (await m.locator('#chat-ticker').textContent()).trim();
-      check(inside(tk) && overlaps(tk, c), 'drawing(출제자): #chat-ticker 가 캔버스 위에', fmt(tk));
-      check(tkText.includes('아무말'), 'drawing(출제자): 티커에 최신 메시지', tkText.slice(0, 40));
-      check(await m.locator('#chat-ticker').evaluate((e) => e.classList.contains('fresh')), 'drawing(출제자): 새 메시지 직후 티커 진함(.fresh)');
+      const dc = await box(m, '#drawer-chat'), ts = await box(m, '#turn-strip');
+      const dcText = (await m.locator('#drawer-chat').textContent()).trim();
+      check(inside(dc) && ts && dc.y >= ts.y + ts.height - 0.5 && dc.y + dc.height <= c.y + 0.5, 'drawing(출제자): 채팅 버블 영역이 턴 띠와 캔버스 사이', `${fmt(ts)} / ${fmt(dc)} / ${fmt(c)}`);
+      check(dcText.includes('아무말'), 'drawing(출제자): 버블 영역에 최신 메시지', dcText.slice(0, 40));
+      check((await m.locator('#drawer-chat .chat-bubble').count()) >= 1, 'drawing(출제자): 버블 1개 이상');
+      check(await m.locator('#chat-ticker').isHidden(), 'drawing(출제자): 캔버스 위 티커는 숨김(버블 영역으로 대체)');
+      check(c && Math.abs((c.y + c.height) - t.y) <= 12, 'drawing(출제자): 캔버스와 팔레트가 한 묶음(간격 ≤ 12px)', `${Math.round(c.y + c.height)} vs ${Math.round(t.y)}`);
       // 턴 띠 → 플레이어 시트
       const strip = await box(m, '#turn-strip'), stripText = (await m.locator('#turn-strip').textContent()).replace(/\s+/g, ' ').trim();
       check(inside(strip) && strip.height <= 48, 'drawing(출제자): 턴 띠 한 줄(≤48px)', fmt(strip));
@@ -191,8 +201,8 @@ async function mainRun() {
       check((await m.locator('#sheet-menu #room-code').textContent()).trim().length === 4, 'drawing(출제자): 메뉴 시트의 방 코드 4글자');
       await closeSheet(m, 'sheet-menu', 'button');
       check(await m.locator('#sheet-menu').isHidden(), 'drawing(출제자): 메뉴 시트 닫힘');
-      // 티커 → 채팅 시트(출제자도 정답자와 대화 가능)
-      await openSheet(m, '#chat-ticker', 'sheet-chat');
+      // 버블 영역 → 채팅 시트(출제자도 정답자와 대화 가능)
+      await openSheet(m, '#drawer-chat', 'sheet-chat');
       const sci = await box(m, '#sheet-chat #chat-input'), scl = await box(m, '#sheet-chat #chat-list');
       check(inside(sci), 'drawing(출제자): 채팅 시트 #chat-input 보임', fmt(sci));
       check(scl && scl.height >= 100, 'drawing(출제자): 채팅 시트 목록 충분히 큼(≥100px)', scl && Math.round(scl.height));

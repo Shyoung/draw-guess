@@ -289,6 +289,8 @@ textarea { resize: vertical; min-height: 64px; }
 .react-btn:hover { transform: translateY(-1px); border-color: var(--secondary); }
 .react-btn:active { transform: scale(.9); }
 
+.drawer-chat { display: none; }
+
 /* toolbar */
 .toolbar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center;
@@ -739,9 +741,12 @@ body.sheet-open { overflow: hidden; }
   .btn-chat-expand { flex: 0 0 auto; padding: 6px 10px; font-size: 12px; }
   .room:not([data-phase="lobby"]) .chat-bar { display: none; }
 
-  /* ---- 대기실: 페이지 스크롤. 모드/설정이 먼저, 채팅은 바닥에 붙는 접힌 바(마지막 메시지 + 펼치기) ---- */
-  .room[data-phase="lobby"] .chat-panel { position: sticky; bottom: 8px; z-index: 5; padding: 6px 8px 6px 12px; }
-  .room[data-phase="lobby"] .chat-panel > .chat-list, .room[data-phase="lobby"] .chat-panel > .chat-form { display: none; }
+  /* ---- 대기실: 페이지 스크롤. 모드/설정이 먼저, 그 아래 미니 채팅(최근 최대 5줄 + 입력창).
+     목록이나 입력창을 터치하면 채팅 시트가 열린다(실제 목록·입력은 시트로 옮겨진다) ---- */
+  .room[data-phase="lobby"] .chat-panel { padding: 8px 10px 10px; }
+  .room[data-phase="lobby"] .chat-panel > .chat-list { display: flex; max-height: 160px; min-height: 40px; overflow-y: auto; cursor: pointer; }
+  .room[data-phase="lobby"] .chat-panel > .chat-form { display: flex; }
+  .room[data-phase="lobby"] .chat-bar { display: none; }
   .room[data-phase="lobby"] .btn-chat-expand .btn-chat-expand-text::before { content: "채팅 "; }
   .settings-panel { gap: 10px; }
   .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -771,11 +776,19 @@ body.sheet-open { overflow: hidden; }
   .room:not([data-phase="lobby"]) .draw-status { flex: 0 0 auto; }
   /* 출제자: 채팅 패널은 흐름에서 빼고(캔버스 위 티커로 대체) 가운데 패널이 남은 높이를 채운다.
      툴바(팔레트)는 화면 하단에 고정되고, 캔버스는 그 위 남는 높이의 중앙에 4:3 으로 최대 크기로 놓인다. */
-  .room:not([data-phase="lobby"])[data-role="drawer"] .center-panel { flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; }
+  .room:not([data-phase="lobby"])[data-role="drawer"] .center-panel { flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
+  /* 출제자 채팅 버블 영역: 턴 띠 ↔ 캔버스 사이 남는 높이를 채우고 최근 메시지 3개를 아래 정렬로 보여준다. 누르면 채팅 시트 */
+  .room:not([data-phase="lobby"])[data-role="drawer"] .drawer-chat {
+    display: flex; flex: 1 1 auto; min-height: 44px; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 4px;
+    overflow: hidden; padding: 6px 8px; border: 0; border-radius: 12px; background: #f8f6fc; text-align: left; width: 100%;
+  }
+  .drawer-chat .chat-bubble { -webkit-backdrop-filter: none; backdrop-filter: none; animation: none; }
+  .drawer-chat .dc-empty { font-size: 12px; color: var(--muted); font-weight: 700; align-self: center; }
+  .room:not([data-phase="lobby"])[data-role="drawer"] .chat-ticker { display: none !important; } /* 티커는 버블 영역으로 대체(뒤의 inline-flex 규칙보다 우선) */
   .room:not([data-phase="lobby"])[data-role="drawer"] .chat-panel { display: none; }
   /* 캔버스 래퍼는 4:3 을 유지한 채 JS(fitDrawerCanvas)가 준 --dw 너비로 놓이고, 위아래 auto 마진으로 남는 높이 중앙에 온다.
      티커(.chat-ticker)는 래퍼 기준이므로 항상 캔버스 위에 겹친다. */
-  .room:not([data-phase="lobby"])[data-role="drawer"] .canvas-wrap { flex: 0 0 auto; margin: auto; width: var(--dw, 100%); max-width: 100%; }
+  .room:not([data-phase="lobby"])[data-role="drawer"] .canvas-wrap { flex: 0 0 auto; margin: 0 auto; width: var(--dw, 100%); max-width: 100%; }
   .room:not([data-phase="lobby"])[data-role="drawer"] .toolbar { flex: 0 0 auto; margin-top: 0; position: sticky; bottom: 0; }
   /* 관전자: 채팅 패널이 남은 높이를 전부 차지(목록만 내부 스크롤), 입력줄은 바닥 고정.
      최소 128px = 패딩 14 + 목록 2줄 56 + 여백 6 + 입력줄 ~46 — 이보다 모자라면 가운데 패널이 스크롤로 양보한다 */

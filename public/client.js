@@ -1581,10 +1581,25 @@
   function bindSheetDrag(panel) {
     var handle = panel.querySelector('.sheet-handle'), head = panel.querySelector('.sheet-head'), body = panel.querySelector('.sheet-body');
     var startY = 0, lastY = 0, lastT = 0, dy = 0, active = false, fromBody = false;
+    /** e.target 에서 panel 까지 올라가며 실제로 스크롤되는 요소를 찾는다 (채팅 시트는 #chat-list 가 스크롤러) */
+    function scrollerAt(target) {
+      var n = target;
+      while (n && n !== panel) {
+        if (n.nodeType === 1) {
+          var oy = getComputedStyle(n).overflowY;
+          if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n;
+        }
+        n = n.parentNode;
+      }
+      return null;
+    }
     function onDown(e) {
       if (!openSheetId || e.button > 0) return;
       fromBody = !!(body && body.contains(e.target));
-      if (fromBody && body.scrollTop > 0) return;
+      if (fromBody) {
+        var sc = scrollerAt(e.target);
+        if (sc && sc.scrollTop > 0) return; // 아직 위로 볼 내용이 남아 있으면 스크롤에 맡긴다 (맨 위까지 올린 뒤 끌면 닫힘)
+      }
       if (e.target.closest && e.target.closest('button, input, textarea, select, a')) return;
       active = true; dy = 0; startY = lastY = e.clientY; lastT = e.timeStamp;
       try { panel.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
@@ -1643,7 +1658,7 @@
     var padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
     var gap = parseFloat(cs.rowGap || cs.gap) || 8;
     var innerW = cp.clientWidth - padX;
-    var availH = cp.clientHeight - padY - (tb && !tb.hidden ? tb.offsetHeight + gap : 0);
+    var availH = cp.clientHeight - padY - (tb && !tb.hidden ? tb.offsetHeight + gap : 0) - (44 + gap); // 채팅 버블 영역 최소분
     if (innerW <= 0 || availH <= 0) return;
     var w = Math.max(120, Math.min(innerW, Math.floor(availH * 4 / 3)));
     cw.style.setProperty('--dw', w + 'px');
@@ -1670,6 +1685,19 @@
         tickerTimer = setTimeout(function () { tickerTimer = null; tk.classList.remove('fresh'); }, 4000);
       }
     }
+    var dc = $('drawer-chat');
+    if (dc) {
+      dc.innerHTML = '';
+      if (mobileMq.matches) {
+        if (!recent.length) dc.appendChild(el('span', 'dc-empty', '💬 채팅 열기 ›'));
+        recent.forEach(function (m) {
+          var b = el('div', 'chat-bubble ' + kindClass(m.kind) + (m.mine ? ' mine' : ''));
+          if ((m.kind === 'chat' || m.kind === 'guessed-chat') && m.name) b.appendChild(el('span', 'bb-name', m.name));
+          b.appendChild(document.createTextNode(m.text));
+          dc.appendChild(b);
+        });
+      }
+    }
     var bb = $('chat-bubbles');
     if (bb) {
       bb.innerHTML = '';
@@ -1686,7 +1714,22 @@
     var bm = $('btn-menu'); if (bm) bm.addEventListener('click', function () { openSheet('sheet-menu'); });
     var ts = $('turn-strip'); if (ts) ts.addEventListener('click', function () { openSheet('sheet-players'); });
     var tk = $('chat-ticker'); if (tk) tk.addEventListener('click', function () { openSheet('sheet-chat'); });
+    var dc = $('drawer-chat'); if (dc) dc.addEventListener('click', function () { openSheet('sheet-chat'); });
     var ce = $('btn-chat-expand'); if (ce) ce.addEventListener('click', function () { openSheet('sheet-chat'); });
+    // 대기실(모바일) 미니 채팅: 목록/입력창을 터치하면 시트로 (입력창은 키보드가 먼저 뜨지 않게 pointerdown 을 가로챈다)
+    var inLobbyMini = function (node) { return mobileMq.matches && state.phase === 'lobby' && !openSheetId && node && $('chat-panel') && $('chat-panel').contains(node); };
+    var cl = $('chat-list'); if (cl) cl.addEventListener('click', function () { if (inLobbyMini(cl)) openSheet('sheet-chat'); });
+    var cin = $('chat-input');
+    if (cin) {
+      var openFromInput = function (e) {
+        if (!inLobbyMini(cin)) return;
+        if (e && e.cancelable) e.preventDefault();
+        openSheet('sheet-chat');
+        setTimeout(function () { var i = $('chat-input'); if (i) { try { i.focus({ preventScroll: true }); } catch (err) { /* ignore */ } } }, 260);
+      };
+      cin.addEventListener('pointerdown', openFromInput);
+      cin.addEventListener('focus', function (e) { if (inLobbyMini(cin)) { cin.blur(); openFromInput(e); } });
+    }
     document.querySelectorAll('.sheet [data-sheet-close]').forEach(function (n) { n.addEventListener('click', function () { closeSheet(false); }); });
     document.querySelectorAll('.sheet .sheet-panel').forEach(bindSheetDrag);
     // 메뉴 시트에서 나가기/초대 복사를 누르면 시트를 닫는다
