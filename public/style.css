@@ -528,9 +528,60 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 @media (max-width: 640px) { .gallery-grid { grid-template-columns: repeat(2, 1fr); } .modal { padding: 10px; } .modal-card { padding: 14px; } }
 
 /* =====================================================================
-   모바일 (≤767px) — 게임 중에는 화면 높이에 고정된 앱 셸로 전환한다.
+   모바일 전용 컴포넌트 — 데스크톱/태블릿에서는 존재하지만 렌더링되지 않는다(display:none).
+   ≤767px 미디어 블록에서만 켜진다. #react-bar 가 비어 있으면 gap 만 차지하지 않도록 숨긴다.
+   ===================================================================== */
+.btn-menu, .turn-strip, .chat-bar, .chat-ticker, .chat-bubbles { display: none; }
+#react-bar:empty { display: none; }
+
+/* ---------- 바텀 시트(메뉴 / 플레이어 / 채팅). 높이는 JS 가 유지하는 --vvh(visualViewport) 를 따른다 ---------- */
+.sheet {
+  position: fixed; left: 0; right: 0; top: 0; height: 100vh; height: var(--vvh, 100dvh);
+  transform: translateY(var(--vvt, 0px));
+  z-index: 60; display: flex; flex-direction: column; justify-content: flex-end;
+}
+.sheet-backdrop { position: absolute; inset: 0; background: rgba(43, 45, 66, 0.45); opacity: 0; transition: opacity .2s; }
+.sheet.open .sheet-backdrop { opacity: 1; }
+.sheet-panel {
+  position: relative; max-height: 85%; display: flex; flex-direction: column; min-height: 0;
+  background: var(--card); border-radius: 22px 22px 0 0; box-shadow: 0 -10px 30px rgba(43, 45, 66, 0.18);
+  padding: 6px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  transform: translateY(100%); transition: transform .22s cubic-bezier(.2, .9, .3, 1);
+}
+.sheet.open .sheet-panel { transform: none; }
+.sheet-panel-chat { height: 85%; }
+.sheet-handle { flex: 0 0 auto; width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 4px auto 8px; }
+.sheet-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 8px; }
+.sheet-title { font-size: 16px; font-weight: 800; display: flex; align-items: baseline; gap: 6px; }
+.sheet-close { width: 32px; height: 32px; border-radius: 50%; border: 0; background: rgba(43, 45, 66, 0.06); color: var(--text); font-size: 14px; line-height: 1; }
+.sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+body.sheet-open { overflow: hidden; }
+/* 메뉴 시트: 방 코드 크게 · 초대 링크 · 효과음 · 나가기(빨간색). 노드는 JS 가 헤더에서 옮겨 넣는다 */
+.sheet-menu-body { display: flex; flex-direction: column; gap: 10px; padding: 2px 0 4px; }
+.menu-row { display: flex; align-items: center; }
+.menu-row:empty { display: none; }
+.menu-row .room-code-chip { width: 100%; justify-content: center; padding: 12px 16px; gap: 10px; }
+.menu-row .room-code-chip strong { font-size: 26px; letter-spacing: .22em; }
+.menu-row .chip-label { font-size: 13px; }
+.menu-row .btn { width: 100%; justify-content: center; padding: 12px 16px; font-size: 15px; }
+.menu-row .btn-copy-text { display: inline; }
+.menu-row-split { justify-content: space-between; padding: 2px 6px; font-weight: 700; font-size: 15px; }
+.menu-row-split .btn { width: auto; padding: 8px 16px; font-size: 20px; }
+.menu-row-danger .btn { background: var(--red-soft); color: var(--red); }
+/* 채팅 시트: 기존 #chat-list / #chat-form 을 옮겨 넣는다 */
+.sheet-chat-body { display: flex; flex-direction: column; }
+.sheet-chat-body .chat-list { flex: 1 1 auto; min-height: 0; }
+.sheet-chat-body .chat-form { flex: 0 0 auto; margin-top: 8px; }
+
+/* =====================================================================
+   모바일 (≤767px)
+   - 대기실: 일반 페이지 스크롤. 채팅은 바닥에 접힌 바(마지막 메시지 + 펼치기 → 채팅 시트).
+   - 게임 중: 화면(visualViewport) 높이에 고정된 셸. 헤더(라운드·단어·타이머·⋯) → 턴 띠 → 캔버스(+툴바/상태, 넘치면 스크롤)
+             → [관전자] 채팅 목록 + 바닥 고정 입력창 / [출제자] 캔버스 위 채팅 티커.
+   - 컴팩트 모드(data-compact="1", 키보드로 visualViewport < 520px): 채팅 목록을 숨기고 캔버스를 4:3 유지하며 축소,
+             최근 메시지는 캔버스 위 말풍선으로. 입력창은 visualViewport 바닥에 붙는다.
+   #view-room 에는 client.js 가 data-phase / data-role / data-compact 를 붙여 준다.
    데스크톱(≥1100px)·태블릿(768~1099px) 레이아웃은 건드리지 않는다.
-   #view-room 에는 client.js 가 data-phase / data-role 을 붙여 준다.
    ===================================================================== */
 @media (max-width: 767px) {
   /* iOS: 16px 미만 입력창은 포커스 시 자동 확대되므로 모든 입력을 16px 이상으로 */
@@ -541,30 +592,43 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
   .panel { border-radius: 14px; }
   .room-grid { gap: 8px; }
 
-  /* ---- 상단바: 한 줄(코드·초대·타이머·소리·나가기) + 얇은 두 번째 줄(라운드·단어) ---- */
-  .topbar { gap: 4px 6px; padding: 6px 10px; min-height: 0; margin-bottom: 8px; }
-  .topbar-left { gap: 6px; }
-  .topbar-right { gap: 6px; }
-  .room-code-chip { padding: 4px 9px; gap: 6px; }
+  /* ---- 상단바: 2행 그리드. 1행 라운드 · 타이머 · ⋯ / 2행 단어(마스크·카테고리). 컨테이너 3개는 display:contents 로 풀어 자식이 직접 그리드에 놓인다.
+       방 코드·초대·효과음·나가기는 JS 가 메뉴 시트로 옮긴다(대기실에서는 코드·초대만 헤더에 남김) ---- */
+  .topbar {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "round timer menu" "word word word";
+    align-items: center; gap: 4px 8px; padding: 6px 10px; min-height: 0; margin-bottom: 8px;
+  }
+  .topbar-left, .topbar-center, .topbar-right { display: contents; }
+  .room-code-chip { grid-area: code; padding: 4px 9px; gap: 6px; }
   .room-code-chip strong { font-size: 15px; letter-spacing: .12em; }
   .chip-label { font-size: 11px; }
-  .timer { width: 38px; height: 38px; font-size: 16px; border-width: 3px; }
+  #btn-copy { grid-area: copy; }
+  .round-indicator { grid-area: round; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .word-area { grid-area: word; min-height: 0; gap: 6px; max-width: 100%; }
+  .timer { grid-area: timer; width: 38px; height: 38px; font-size: 16px; border-width: 3px; }
+  .btn-menu { grid-area: menu; display: inline-flex; width: 36px; height: 36px; padding: 0; font-size: 20px; line-height: 1; }
   .topbar .btn-sm { padding: 6px 9px; font-size: 12px; }
   .topbar .btn-icon { padding: 6px 8px; font-size: 15px; }
-  .topbar-center { flex-direction: row; justify-content: center; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .round-indicator { font-size: 12px; }
-  .word-area { min-height: 0; gap: 6px; }
+  .room[data-phase="lobby"] .topbar { grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "code copy . menu"; }
+  .room[data-phase="lobby"] .timer, .room[data-phase="lobby"] .word-area, .room[data-phase="lobby"] .round-indicator { display: none; }
   .word-hint { font-size: 13px; }
-  .mask-box { width: 20px; height: 26px; font-size: 17px; }
-  .word-secret .word { font-size: 20px; }
+  /* 마스크: 글자 수(data-len → data-size s/m/l)에 따라 칸을 줄이고 2줄까지 감싼다 */
+  .mask-wrap { display: inline-flex; flex-wrap: wrap; align-items: flex-end; justify-content: center; gap: 2px 6px; max-width: 100%; }
+  .mask-wrap .mask-len, .mask-wrap .word-category { margin-bottom: 4px; }
+  .mask { flex-wrap: wrap; justify-content: center; gap: 4px; row-gap: 4px; max-width: 100%; }
+  .mask-box { width: 26px; height: 30px; font-size: 19px; }
+  .mask-wrap[data-size="m"] .mask-box { width: 20px; height: 26px; font-size: 16px; border-bottom-width: 2px; }
+  .mask-wrap[data-size="l"] .mask-box { width: 16px; height: 22px; font-size: 13px; border-bottom-width: 2px; }
+  .mask-wrap[data-size="m"] .mask-gap, .mask-wrap[data-size="l"] .mask-gap { width: 8px; }
+  .mask-len { font-size: 12px; margin-left: 0; white-space: nowrap; }
+  .word-category { margin-left: 0; font-size: 11px; }
+  /* 출제자의 단어: 길면 줄어들고 줄바꿈 */
+  .word-secret { flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px 8px; max-width: 100%; }
+  .word-secret .word { font-size: clamp(16px, 5.2vw, 22px); line-height: 1.2; overflow-wrap: anywhere; word-break: break-all; text-align: center; }
   .word-secret .label { font-size: 11px; }
-  .word-answer { font-size: 17px; }
-  .word-category { margin-left: 4px; font-size: 11px; }
-  /* 대기실: 타이머 원과 빈 단어 영역은 자리만 차지하므로 숨긴다 */
-  .room[data-phase="lobby"] .timer,
-  .room[data-phase="lobby"] .word-area { display: none; }
+  .word-answer { font-size: 17px; overflow-wrap: anywhere; text-align: center; }
 
-  /* ---- 플레이어 띠: 44px 한 줄, 가로 스크롤 + 오른쪽 페이드 힌트(.has-more 는 client.js 가 토글) ---- */
+  /* ---- 플레이어(대기실): 44px 한 줄 칩, 가로 스크롤 + 오른쪽 페이드 힌트(.has-more 는 client.js 가 토글) ---- */
   .players-panel { position: relative; padding: 5px 8px; }
   .players-panel::after {
     content: ""; position: absolute; top: 0; bottom: 0; right: 0; width: 34px; pointer-events: none;
@@ -585,13 +649,47 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
   .player .kick { width: 22px; height: 22px; font-size: 12px; opacity: 1; margin-left: -4px; }
   .react-pop { left: 14px; font-size: 18px; }
 
+  /* ---- 플레이어(게임 중): 목록 대신 한 줄 턴 띠 "✏️ 민수 그리는 중 · 다음 지은 · 정답 2/4 ›" → 플레이어 시트 ---- */
+  .room:not([data-phase="lobby"]) .players-panel { padding: 0; background: transparent; box-shadow: none; align-self: stretch; }
+  .room:not([data-phase="lobby"]) .players-panel::after { display: none; }
+  .room:not([data-phase="lobby"]) #player-list { display: none; }
+  .room:not([data-phase="lobby"]) .turn-strip { display: flex; }
+  .turn-strip {
+    position: relative; align-items: center; gap: 6px; width: 100%; min-height: 38px; padding: 6px 10px 6px 12px;
+    border: 0; border-radius: 12px; background: var(--card); box-shadow: var(--shadow-sm);
+    font-weight: 700; font-size: 13px; color: var(--text); text-align: left;
+  }
+  .ts-text { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ts-text b { font-weight: 900; }
+  .ts-sep { color: var(--muted); margin: 0 5px; font-weight: 500; }
+  .ts-muted { color: var(--muted); font-weight: 600; }
+  .ts-guessed { color: #1e9a62; }
+  .ts-chev { flex: 0 0 auto; color: var(--muted); font-size: 20px; line-height: 1; margin-top: -2px; }
+  .turn-strip .react-pop { position: absolute; right: 40px; left: auto; bottom: 30%; transform: translate(0, 0); }
+
+  /* 플레이어 시트 안의 목록은 데스크톱과 같은 세로 목록(순위·아바타·이름·점수·배지·강퇴) */
+  .sheet .player-list { flex-direction: column; overflow: visible; gap: 8px; padding: 0 0 4px; }
+  .sheet .player { grid-template-columns: 22px 40px 1fr auto; gap: 8px; padding: 8px 8px 8px 6px; border-radius: 14px; flex: none; scroll-snap-align: none; }
+  .sheet .player .rank { display: block; }
+  .sheet .player .avatar { width: 40px; height: 40px; font-size: 22px; }
+  .sheet .player .pinfo { flex-direction: column; align-items: stretch; gap: 0; white-space: normal; }
+  .sheet .player .pname { max-width: none; font-size: 14px; }
+  .sheet .player .pscore { font-size: 12px; }
+  .sheet .player .badge-drawer { width: 22px; height: 22px; font-size: 13px; right: -6px; bottom: -6px; }
+  .sheet .player .badge-next { width: 18px; height: 18px; font-size: 10px; left: -6px; top: -6px; }
+  .sheet .player .next-tag, .sheet .player .offline-tag { font-size: 11px; padding: 1px 6px; }
+  .sheet .player .kick { width: 30px; height: 30px; font-size: 14px; opacity: 1; margin-left: 0; background: rgba(43, 45, 66, 0.06); }
+
   /* ---- 가운데: 캔버스 4:3 전체 폭 ---- */
   .center-panel { padding: 8px; gap: 8px; }
   .canvas-wrap { border-radius: 10px; }
 
-  /* 관전자 상태 띠(👍👎) */
-  .draw-status { min-height: 36px; padding: 4px 8px; font-size: 13px; gap: 8px; }
+  /* 관전자 상태 띠: [✏️ ○○님이 그리고 있어요][👍👎][⤢ 펼치기] — 펼치기 버튼은 JS 가 채팅 바에서 옮겨 온다 */
+  .draw-status { min-height: 36px; padding: 4px 6px 4px 10px; font-size: 13px; gap: 8px; flex-wrap: nowrap; justify-content: flex-start; }
+  .draw-status-text { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+  .react-bar { flex: 0 0 auto; }
   .react-btn { width: 36px; height: 30px; }
+  .draw-status .btn-chat-expand { flex: 0 0 auto; padding: 5px 9px; font-size: 12px; }
 
   /* ---- 툴바(출제자): 2줄 격자.
        1줄: 펜·지우개·채우기 | 현재 색 | 되돌리기·전체 지우기
@@ -610,7 +708,6 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
   .palette {
     grid-area: palette; display: flex; flex-wrap: nowrap; gap: 5px; min-width: 0;
     overflow-x: auto; padding: 3px 2px; scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch;
-    /* 오른쪽 끝을 살짝 흐려 더 스크롤할 수 있음을 암시 */
     -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 22px), rgba(0, 0, 0, .25));
     mask-image: linear-gradient(90deg, #000 calc(100% - 22px), rgba(0, 0, 0, .25));
   }
@@ -621,18 +718,26 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
   .size-btn { width: 30px; height: 30px; }
   .size-btn i { transform: scale(.8); }
 
-  /* ---- 채팅: 제목 숨김, 여백 축소 ---- */
+  /* ---- 채팅 패널 공통 ---- */
   .chat-panel { padding: 8px 10px 10px; height: auto; max-height: none; }
   .chat-panel .panel-title { display: none; }
   .chat-list { min-height: 0; gap: 4px; padding: 2px 0; overscroll-behavior: contain; }
+  /* 메시지가 적을 때 목록 바닥에 붙인다(justify-content:flex-end 는 스크롤을 망가뜨리므로 margin-top:auto 로) */
+  .chat-list > :first-child { margin-top: auto; }
   .msg { font-size: 14px; padding: 5px 9px; }
   .msg-system { font-size: 12px; padding: 1px 4px; }
   .chat-form { margin-top: 6px; gap: 6px; }
   .chat-form input { padding: 9px 12px; }
   .chat-form .btn { padding: 0 14px; }
+  .chat-bar { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+  .chat-bar-last { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; color: var(--muted); }
+  .btn-chat-expand { flex: 0 0 auto; padding: 6px 10px; font-size: 12px; }
+  .room:not([data-phase="lobby"]) .chat-bar { display: none; }
 
-  /* 대기실: 페이지 스크롤은 그대로 두되 채팅 목록을 짧게 잡아 모드/설정 패널이 먼저 보이게 */
-  .room[data-phase="lobby"] .chat-list { max-height: 160px; min-height: 72px; }
+  /* ---- 대기실: 페이지 스크롤. 모드/설정이 먼저, 채팅은 바닥에 붙는 접힌 바(마지막 메시지 + 펼치기) ---- */
+  .room[data-phase="lobby"] .chat-panel { position: sticky; bottom: 8px; z-index: 5; padding: 6px 8px 6px 12px; }
+  .room[data-phase="lobby"] .chat-panel > .chat-list, .room[data-phase="lobby"] .chat-panel > .chat-form { display: none; }
+  .room[data-phase="lobby"] .btn-chat-expand .btn-chat-expand-text::before { content: "채팅 "; }
   .settings-panel { gap: 10px; }
   .settings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .setting select, .setting textarea { padding: 9px 11px; }
@@ -641,47 +746,112 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
   .mode-icon { font-size: 26px; }
   .btn-xl { padding: 14px 22px; font-size: 18px; }
 
-  /* ---- 게임 중(choosing/drawing/turnEnd/gameOver): 화면 높이에 고정된 셸 ----
-       상단바 → 플레이어 띠 → 캔버스(+툴바/상태) → 채팅(남은 높이 전부, 목록만 내부 스크롤, 입력은 바닥 고정) */
+  /* ---- 게임 중(choosing/drawing/turnEnd/gameOver): visualViewport 높이에 고정된 셸.
+       --vvh/--vvt 는 client.js 가 visualViewport(resize/scroll) 로 유지한다. iOS 에서 키보드가 열려 페이지가 밀리면 --vvt 로 따라간다. ---- */
   .room:not([data-phase="lobby"]) {
-    height: 100vh; height: 100dvh; min-height: 0; overflow: hidden;
-    display: flex; flex-direction: column;
+    position: fixed; left: 0; right: 0; top: 0; width: auto; max-width: none; margin: 0;
+    height: 100vh; height: var(--vvh, 100dvh); min-height: 0;
+    transform: translateY(var(--vvt, 0px));
+    overflow: hidden; display: flex; flex-direction: column;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 8px calc(8px + env(safe-area-inset-bottom, 0px));
   }
-  .room:not([data-phase="lobby"]) .topbar,
+  body.game-shell { overflow: hidden; min-height: 0; height: 100vh; height: var(--vvh, 100dvh); }
+  .room:not([data-phase="lobby"]) .topbar { flex: 0 0 auto; }
+  .room:not([data-phase="lobby"]) .room-grid { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
   .room:not([data-phase="lobby"]) .players-panel { flex: 0 0 auto; }
-  .room:not([data-phase="lobby"]) .room-grid {
-    flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
-  }
-  /* 가운데 패널은 줄어들 수 있고(캔버스가 양보), 채팅은 남는 높이를 전부 차지한다.
-     채팅 패널 최소 높이 130px = 패딩 18 + 목록 2줄(56) + 입력줄(45) + 여백 — 화면이 아무리 짧아도 입력창은 보인다. */
-  .room:not([data-phase="lobby"]) .center-panel { flex: 0 1 auto; min-height: 0; }
-  .room:not([data-phase="lobby"]) .chat-panel { flex: 1 1 0; min-height: 130px; display: flex; flex-direction: column; }
-  .room:not([data-phase="lobby"]) .chat-list { flex: 1 1 auto; min-height: 56px; }
-  .room:not([data-phase="lobby"]) .chat-form { flex: 0 0 auto; }
-  /* 캔버스: 세로 공간이 모자라면 4:3 비율을 지키며 작아진다 (canvas 요소의 고유 비율 800x600 + max-height 로 처리, JS 없음) */
-  .room:not([data-phase="lobby"]) .canvas-wrap { flex: 0 1 auto; min-height: 96px; aspect-ratio: auto; width: 100%; max-width: none; display: block; }
-  .room:not([data-phase="lobby"]) #canvas { display: block; width: auto; height: auto; max-width: 100%; max-height: 100%; margin: 0 auto; }
+  /* 가운데(캔버스 + 툴바/상태 띠): 남는 높이보다 크면 찌부러지지 않고 내부 스크롤 */
+  .room:not([data-phase="lobby"]) .center-panel { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .room:not([data-phase="lobby"]) .canvas-wrap { flex: 0 0 auto; }
   .room:not([data-phase="lobby"]) .toolbar,
   .room:not([data-phase="lobby"]) .draw-status { flex: 0 0 auto; }
+  /* 출제자: 채팅 패널은 흐름에서 빼고(캔버스 위 티커로 대체) 가운데 패널이 남은 높이를 채운다 */
+  .room:not([data-phase="lobby"])[data-role="drawer"] .center-panel { flex: 1 1 auto; }
+  .room:not([data-phase="lobby"])[data-role="drawer"] .chat-panel { display: none; }
+  /* 관전자: 채팅 패널이 남은 높이를 전부 차지(목록만 내부 스크롤), 입력줄은 바닥 고정.
+     최소 128px = 패딩 14 + 목록 2줄 56 + 여백 6 + 입력줄 ~46 — 이보다 모자라면 가운데 패널이 스크롤로 양보한다 */
+  .room:not([data-phase="lobby"])[data-role="guesser"] .chat-panel { flex: 1 1 0; min-height: 128px; display: flex; flex-direction: column; padding: 6px 10px 8px; }
+  .room:not([data-phase="lobby"])[data-role="guesser"] .chat-panel > .chat-list { flex: 1 1 auto; min-height: 56px; }
+  .room:not([data-phase="lobby"])[data-role="guesser"] .chat-panel > .chat-form { flex: 0 0 auto; margin-top: 6px; }
+
+  /* 출제자용 채팅 티커: 캔버스 왼쪽 아래 한 줄. 새 메시지에 .fresh 로 진해지고 ~4초 뒤 옅어진다(누르면 채팅 시트) */
+  .chat-ticker {
+    position: absolute; left: 8px; bottom: 8px; z-index: 2; max-width: calc(100% - 16px);
+    align-items: center; gap: 6px; padding: 6px 11px; border: 0; border-radius: 999px;
+    background: rgba(43, 45, 66, 0.72); color: #fff; font-size: 13px; font-weight: 700; text-align: left;
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+    opacity: .5; transition: opacity .7s ease, background .2s;
+  }
+  .room:not([data-phase="lobby"])[data-role="drawer"] .chat-ticker { display: inline-flex; }
+  .chat-ticker.fresh { opacity: 1; transition: opacity .12s; }
+  .chat-ticker .tk-icon { flex: 0 0 auto; }
+  .chat-ticker .tk-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-ticker .tk-name { font-weight: 900; opacity: .9; margin-right: 4px; }
+  .chat-ticker.kind-correct { background: rgba(30, 154, 98, 0.9); }
+  .chat-ticker.kind-close { background: rgba(214, 140, 0, 0.9); }
+  .chat-ticker.kind-system { background: rgba(108, 111, 133, 0.72); }
+  .chat-ticker.kind-guessed { background: rgba(74, 120, 212, 0.88); }
+
+  /* 관전자 컴팩트 모드 말풍선: 캔버스 아래쪽에 최근 2~3개 (라이브 방송 채팅 느낌) */
+  .chat-bubbles { position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 2; flex-direction: column; align-items: flex-start; gap: 4px; pointer-events: none; }
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .chat-bubbles { display: flex; }
+  .chat-bubble {
+    max-width: 100%; padding: 4px 10px; border-radius: 12px; background: rgba(43, 45, 66, 0.66); color: #fff;
+    font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); animation: bubble-in .2s ease-out;
+  }
+  .chat-bubble .bb-name { font-weight: 800; opacity: .85; margin-right: 4px; }
+  .chat-bubble.kind-correct { background: rgba(30, 154, 98, 0.88); }
+  .chat-bubble.kind-close { background: rgba(214, 140, 0, 0.88); }
+  .chat-bubble.kind-system { background: rgba(108, 111, 133, 0.62); font-style: italic; font-weight: 500; }
+  .chat-bubble.kind-guessed { background: rgba(74, 120, 212, 0.85); }
+  .chat-bubble.mine { background: rgba(91, 141, 239, 0.78); }
+  @keyframes bubble-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ---- 컴팩트 모드(키보드 열림, 관전자): 채팅 목록·상태 띠를 숨기고 캔버스가 4:3 을 지키며 남은 높이에 맞게 줄어든다(최소 120px).
+       캔버스 폭은 화면 폭을 넘지 않게 max-height 로 묶어 letterbox 가 생기지 않는다. 입력줄은 그대로 바닥(visualViewport 하단). ---- */
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .chat-panel > .chat-list { display: none; }
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .chat-panel { flex: 0 0 auto; min-height: 0; padding-top: 0; }
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .chat-panel > .chat-form { margin-top: 0; }
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .draw-status { display: none; }
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .center-panel { flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; align-items: center; padding: 6px; position: relative; }
+  /* 말풍선은 캔버스 폭이 아니라 패널 폭에 맞춰(캔버스 아래쪽에 겹치게) — 캔버스 래퍼의 position 을 풀어 패널 기준으로 놓는다 */
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .canvas-wrap { position: static; }
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .chat-bubbles { left: 10px; right: 10px; bottom: 10px; }
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .canvas-wrap {
+    flex: 1 1 auto; min-height: 120px; width: auto; max-width: 100%; max-height: calc((100vw - 28px) * 0.75); aspect-ratio: 4 / 3;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] #canvas { width: auto; height: auto; max-width: 100%; max-height: 100%; margin: auto; }
 
   /* 토스트: 바닥에 두면 채팅 입력창을 가리므로 모바일에서는 위쪽에 띄운다 */
   .toasts { top: calc(10px + env(safe-area-inset-top, 0px)); bottom: auto; }
   .toast { transform: translateY(-10px); }
   .toast.show { transform: translateY(0); }
 
-  /* ---- 오버레이(단어 선택 / 턴 종료 / 게임 종료): 캔버스 안이 아니라 화면 전체를 덮는다 ---- */
+  /* ---- 오버레이(단어 선택 / 턴 종료): 캔버스 안이 아니라 셸 전체를 덮는다(셸이 transform 을 가지므로 fixed 기준 = 셸) ---- */
   .overlay { position: fixed; inset: 0; z-index: 40; padding: 16px; align-items: center; line-height: 1.45; }
-  .card { width: min(100%, 420px); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); padding: 18px 16px; gap: 12px; }
+  .card { width: min(100%, 420px); max-height: calc(100vh - 32px); max-height: calc(var(--vvh, 100dvh) - 32px); padding: 18px 16px; gap: 12px; }
   .card-wide { width: min(100%, 560px); }
   .card-title { font-size: 20px; }
-  .word-option { font-size: 17px; padding: 11px 16px; }
+  .word-option { font-size: 17px; padding: 11px 16px; max-width: 100%; overflow-wrap: anywhere; }
   .ranking-list { max-height: none; overflow: visible; }
   .podium-slot .avatar { width: 40px; height: 40px; font-size: 22px; }
   .podium-slot .pname { font-size: 13px; }
 
-  /* ---- 갤러리 모달: 2열, 메타 한 줄 + PNG 버튼 아래 오른쪽 ---- */
-  .modal { padding: 10px; align-items: start; padding-top: max(10px, env(safe-area-inset-top, 0px)); }
-  .modal-card { max-height: calc(100vh - 20px); max-height: calc(100dvh - 20px); padding: 12px 12px 14px; gap: 10px; }
+  /* ---- 모달(결과 / 갤러리): visualViewport 높이 기준, 카드 안에서 스크롤 ---- */
+  .modal {
+    inset: auto; left: 0; right: 0; top: 0; height: 100vh; height: var(--vvh, 100dvh); transform: translateY(var(--vvt, 0px));
+    padding: 10px; align-items: start; padding-top: max(10px, env(safe-area-inset-top, 0px));
+  }
+  .modal-card { max-height: calc(100vh - 20px); max-height: calc(var(--vvh, 100dvh) - 20px); padding: 12px 12px 14px; gap: 10px; }
+  .card-results { overflow-y: auto; -webkit-overflow-scrolling: touch; gap: 8px; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  .card-results .ranking-list { max-height: none; overflow: visible; flex: 0 0 auto; }
+  .card-results .podium { flex: 0 0 auto; }
+  .card-results .podium-slot.p1 .podium-bar { height: 48px; }
+  .card-results .podium-slot.p2 .podium-bar { height: 34px; }
+  .card-results .podium-slot.p3 .podium-bar { height: 24px; }
+  .results-actions { flex: 0 0 auto; width: 100%; }
+  .results-actions .btn { flex: 1 1 auto; }
   .modal-head { gap: 8px; }
   .modal-head .card-title { font-size: 18px; }
   .gallery-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }

@@ -48,7 +48,8 @@ async function say(page, text) {
 
 /**
  * @param {(stage:string, ctx:{mobile:import('playwright').Page, desktop:import('playwright').Page, word?:string}) => Promise<void>} hook
- * @param {{ onPageError?: (nick:string, msg:string)=>void }} [opts]
+ * @param {{ onPageError?: (nick:string, msg:string)=>void, customWords?: string, wordCount?: number }} [opts]
+ *   customWords 를 주면 "사용자 단어만 사용" 을 켜고 wordCount(기본 2)개 후보로 진행한다 → 긴 단어 헤더 검증용.
  */
 async function runMobileFlow(hook, opts) {
   opts = opts || {};
@@ -90,6 +91,12 @@ async function runMobileFlow(hook, opts) {
     await mobile.selectOption('#set-rounds', '1');
     await mobile.selectOption('#set-drawTime', '40');
     await mobile.selectOption('#set-hints', '1');
+    if (opts.customWords) {
+      await mobile.selectOption('#set-wordCount', String(opts.wordCount || 2));
+      await mobile.fill('#set-customWords', opts.customWords);
+      await mobile.check('#set-customWordsOnly'); // change → 설정 전송(텍스트 영역 값 포함)
+      await mobile.waitForFunction((w) => (window.__dg.state.settings.customWords || '') === w && window.__dg.state.settings.customWordsOnly, opts.customWords, { timeout: 3000 });
+    }
     await sleep(500);
     await hook('lobby-settings', ctx);
 
@@ -151,4 +158,4 @@ async function runMobileFlow(hook, opts) {
   }
 }
 
-module.exports = { runMobileFlow, sleep, URL, PORT };
+module.exports = { runMobileFlow, say, sleep, URL, PORT };

@@ -16,7 +16,13 @@
   var room = { roomCode: 'MOCK', hostId: ME, phase: 'lobby', round: 0, totalRounds: 3, drawerId: null,
     settings: { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null }, lobbyStep: 'settings' };
   var timeLeft = 0, word = '';
-  function st() { players.forEach(function (p) { p.isDrawing = p.id === room.drawerId; }); return Object.assign({}, room, { players: players }); }
+  function st() {
+    players.forEach(function (p) { p.isDrawing = p.id === room.drawerId; });
+    // 다음 출제자(모바일 턴 띠 "다음 ○○" 확인용): 참가 순서상 현재 출제자의 다음 사람
+    var di = players.findIndex(function (p) { return p.id === room.drawerId; });
+    var next = (room.phase === 'choosing' || room.phase === 'drawing' || room.phase === 'turnEnd') && di >= 0 ? players[(di + 1) % players.length].id : null;
+    return Object.assign({}, room, { players: players, nextDrawerId: next, fixedDrawerId: null });
+  }
   function chat(kind, text, p) { fire('chat:message', p ? { id: p.id, name: p.name, avatar: p.avatar, text: text, kind: kind } : { text: text, kind: kind }); }
   function setPhase(ph, drawer) { room.phase = ph; room.drawerId = drawer || null; fire('room:state', st()); }
   function circle(cx, cy, r) { var pts = []; for (var a = 0; a <= 64; a++) pts.push([Math.round(cx + r * Math.cos(a / 32 * Math.PI)), Math.round(cy + r * Math.sin(a / 32 * Math.PI))]); return pts; }

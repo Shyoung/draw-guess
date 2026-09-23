@@ -74,6 +74,8 @@
         <div id="timer" class="timer" aria-label="남은 시간">–</div>
         <button id="btn-sound" class="btn btn-ghost btn-sm btn-icon" type="button" aria-pressed="false" title="효과음 끄기">🔊</button>
         <button id="btn-leave" class="btn btn-ghost btn-sm" type="button">나가기</button>
+        <!-- 모바일 전용: 방 코드·초대·효과음·나가기를 담는 메뉴 시트를 연다 (CSS 로 데스크톱에서는 숨김) -->
+        <button id="btn-menu" class="btn btn-ghost btn-sm btn-icon btn-menu" type="button" aria-label="방 메뉴" aria-haspopup="dialog" aria-controls="sheet-menu">⋯</button>
       </div>
     </header>
 
@@ -81,6 +83,10 @@
       <!-- 왼쪽: 플레이어 -->
       <aside class="panel players-panel">
         <h2 class="panel-title">플레이어 <span id="player-count" class="panel-sub"></span></h2>
+        <!-- 모바일 게임 중: 플레이어 목록 대신 한 줄 턴 띠. 누르면 플레이어 시트가 열린다 -->
+        <button id="turn-strip" class="turn-strip" type="button" aria-haspopup="dialog" aria-controls="sheet-players">
+          <span id="turn-strip-text" class="ts-text"></span><span class="ts-chev" aria-hidden="true">›</span>
+        </button>
         <ul id="player-list" class="player-list"></ul>
       </aside>
 
@@ -177,11 +183,17 @@
             </div>
           </div>
 
-          </div>
+          <!-- 모바일 출제자: 최신 채팅 한 줄을 캔버스 왼쪽 아래에 띄운다. 누르면 채팅 시트 -->
+          <button id="chat-ticker" class="chat-ticker" type="button" aria-label="채팅 열기" aria-haspopup="dialog" aria-controls="sheet-chat"></button>
+          <!-- 모바일 관전자 컴팩트 모드(키보드): 최근 메시지 2~3개를 캔버스 아래쪽에 말풍선으로 -->
+          <div id="chat-bubbles" class="chat-bubbles" aria-hidden="true"></div>
         </div>
 
         <!-- 출제자 상태 안내 (관전자용) -->
-        <div id="draw-status" class="draw-status" hidden></div>
+        <div id="draw-status" class="draw-status" hidden>
+          <span id="draw-status-text" class="draw-status-text"></span>
+          <span id="react-bar" class="react-bar"></span>
+        </div>
 
         <!-- 도구 모음 (출제자 전용) -->
         <div id="toolbar" class="toolbar" hidden aria-disabled="true">
@@ -217,8 +229,13 @@
       </section>
 
       <!-- 오른쪽: 채팅 / 정답 -->
-      <aside class="panel chat-panel">
+      <aside id="chat-panel" class="panel chat-panel">
         <h2 class="panel-title">채팅 · 정답</h2>
+        <!-- 모바일 대기실: 접힌 채팅 바(마지막 메시지 + 펼치기). 펼치기 버튼은 게임 중엔 JS 가 상태 띠로 옮긴다 -->
+        <div id="chat-bar" class="chat-bar">
+          <span id="chat-bar-last" class="chat-bar-last">아직 채팅이 없어요</span>
+          <button id="btn-chat-expand" class="btn btn-ghost btn-sm btn-chat-expand" type="button" aria-haspopup="dialog" aria-controls="sheet-chat"><span aria-hidden="true">⤢</span> <span class="btn-chat-expand-text">펼치기</span></button>
+        </div>
         <div id="chat-list" class="chat-list" aria-live="polite"></div>
         <form id="chat-form" class="chat-form" autocomplete="off">
           <input id="chat-input" type="text" maxlength="100" placeholder="정답을 입력하세요…" autocomplete="off">
@@ -255,6 +272,51 @@
         </div>
       </header>
       <div id="gallery-grid" class="gallery-grid"></div>
+    </div>
+  </div>
+
+  <!-- ================= 모바일 바텀 시트 (메뉴 / 플레이어 / 채팅) =================
+       공용 .sheet: 배경 탭 · ESC · 닫기 버튼으로 닫힌다. 본문은 client.js 가 채운다(메뉴·채팅은 기존 노드를 옮겨 넣음). -->
+  <div id="sheet-menu" class="sheet" hidden>
+    <div class="sheet-backdrop" data-sheet-close></div>
+    <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-menu-title">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <header class="sheet-head">
+        <h3 id="sheet-menu-title" class="sheet-title">방 메뉴</h3>
+        <button class="sheet-close" type="button" aria-label="닫기" data-sheet-close>✕</button>
+      </header>
+      <div class="sheet-body sheet-menu-body">
+        <div class="menu-row" id="menu-slot-code"></div>
+        <div class="menu-row" id="menu-slot-copy"></div>
+        <div class="menu-row menu-row-split"><span class="menu-label">효과음</span><span id="menu-slot-sound"></span></div>
+        <div class="menu-row menu-row-danger" id="menu-slot-leave"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="sheet-players" class="sheet" hidden>
+    <div class="sheet-backdrop" data-sheet-close></div>
+    <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-players-title">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <header class="sheet-head">
+        <h3 id="sheet-players-title" class="sheet-title">플레이어 <span id="sheet-player-count" class="panel-sub"></span></h3>
+        <button class="sheet-close" type="button" aria-label="닫기" data-sheet-close>✕</button>
+      </header>
+      <div class="sheet-body">
+        <ul id="sheet-player-list" class="player-list player-list-full"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div id="sheet-chat" class="sheet" hidden>
+    <div class="sheet-backdrop" data-sheet-close></div>
+    <div class="sheet-panel sheet-panel-chat" role="dialog" aria-modal="true" aria-labelledby="sheet-chat-title">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <header class="sheet-head">
+        <h3 id="sheet-chat-title" class="sheet-title">채팅 · 정답</h3>
+        <button class="sheet-close" type="button" aria-label="닫기" data-sheet-close>✕</button>
+      </header>
+      <div class="sheet-body sheet-chat-body" id="sheet-chat-body"></div>
     </div>
   </div>
 

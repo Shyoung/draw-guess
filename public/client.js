@@ -109,7 +109,8 @@
     drawerName: '', timeLeft: null, turnEnd: null, ranking: null, optionsKey: '',
     gallery: null,      // 가장 최근 게임의 갤러리 [{ round, word, category, drawerName, guessed, ops }]
     galleryOpen: false,
-    galleryThumbs: []   // 렌더링한 썸네일 dataURL 캐시 (gallery와 같은 인덱스)
+    galleryThumbs: [],  // 렌더링한 썸네일 dataURL 캐시 (gallery와 같은 인덱스)
+    recentChat: []      // 최근 채팅 3개 { kind, name, text, mine } — 모바일 티커/말풍선/접힌 채팅 바용
   };
 
   var profile = { name: '', emoji: EMOJIS[0], color: AV_COLORS[4] };
@@ -788,7 +789,8 @@
     // 모바일 CSS가 단계/역할별로 레이아웃을 바꿀 수 있도록 루트에 표시한다 (JS 레이아웃 코드 없이 CSS만으로 전환)
     var vr = $('view-room');
     if (vr) { vr.setAttribute('data-phase', state.phase); vr.setAttribute('data-role', isDrawer() ? 'drawer' : 'guesser'); }
-    renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery();
+    placeMobileChrome();
+    renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderChatPeek();
   }
 
   function renderTopbar() {
@@ -845,13 +847,27 @@
     }
     wrap.appendChild(m);
     var len = wordLength || boxes;
+    // 모바일 CSS 가 글자 수에 따라 칸 크기를 줄일 수 있게 표시한다 (≤8 s, 9~14 m, 15+ l)
+    wrap.setAttribute('data-len', String(boxes));
+    wrap.setAttribute('data-size', boxes <= 8 ? 's' : boxes <= 14 ? 'm' : 'l');
     if (len) wrap.appendChild(el('span', 'mask-len', '(' + len + '글자' + (words > 1 ? ' · ' + words + '단어' : '') + ')'));
     return wrap;
   }
 
   function renderPlayers() {
     var list = $('player-list'); if (!list) return;
-    var count = $('player-count'); if (count) count.textContent = state.players.length ? state.players.length + ' / 12' : '';
+    var countText = state.players.length ? state.players.length + ' / 12' : '';
+    var count = $('player-count'); if (count) count.textContent = countText;
+    var sheetCount = $('sheet-player-count'); if (sheetCount) sheetCount.textContent = countText;
+    renderPlayerList(list);
+    // 모바일 플레이어 시트가 열려 있으면 같은 렌더링으로 그 안의 목록도 갱신한다
+    var sheet = $('sheet-players'), sheetList = $('sheet-player-list');
+    if (sheet && sheetList) { if (!sheet.hidden) renderPlayerList(sheetList); else sheetList.innerHTML = ''; }
+    renderTurnStrip();
+    updatePlayerStripFade();
+  }
+  /** 순위 정렬된 플레이어 <li> 들을 list 에 채운다 (데스크톱 목록과 모바일 시트가 공유) */
+  function renderPlayerList(list) {
     var sorted = state.players.slice().sort(function (a, b) { return b.score - a.score; });
     list.innerHTML = '';
     var prevScore = null, rank = 0;
@@ -886,7 +902,29 @@
       }
       list.appendChild(li);
     });
-    updatePlayerStripFade();
+  }
+  /** 모바일 게임 중 턴 띠: "✏️ 민수 그리는 중 · 다음 지은 · 정답 2/4" (fixed 모드는 '다음' 없음) */
+  function renderTurnStrip() {
+    var t = $('turn-strip-text'); if (!t) return;
+    t.innerHTML = '';
+    if (state.phase === 'lobby') return;
+    function sep() { t.appendChild(el('span', 'ts-sep', '·')); }
+    var dn = playerName(state.drawerId, ui.drawerName || '출제자');
+    if (state.phase === 'gameOver') { t.appendChild(document.createTextNode('🏁 게임 종료')); return; }
+    if (state.phase === 'turnEnd') { t.appendChild(document.createTextNode('⏳ ')); t.appendChild(el('b', null, dn)); t.appendChild(document.createTextNode(' 턴 종료')); }
+    else {
+      t.appendChild(document.createTextNode('✏️ ')); t.appendChild(el('b', null, dn + (state.drawerId === myId ? '(나)' : '')));
+      t.appendChild(document.createTextNode(state.phase === 'choosing' ? ' 단어 고르는 중' : ' 그리는 중'));
+    }
+    if (state.settings.mode !== 'fixed' && state.nextDrawerId && state.nextDrawerId !== state.drawerId) {
+      var np = findPlayer(state.nextDrawerId);
+      if (np) { sep(); var nx = el('span', 'ts-muted', '다음 '); nx.appendChild(el('b', null, np.name)); t.appendChild(nx); }
+    }
+    if (state.phase === 'drawing') {
+      var guessers = state.players.filter(function (p) { return p.id !== state.drawerId && p.connected !== false; });
+      var got = guessers.filter(function (p) { return p.hasGuessed; }).length;
+      sep(); t.appendChild(el('span', 'ts-guessed', '정답 ' + got + '/' + guessers.length));
+    }
   }
   /** 모바일 가로 스크롤 플레이어 띠: 오른쪽에 더 있으면 패널에 .has-more 를 붙여 CSS 페이드로 힌트를 준다 */
   function updatePlayerStripFade() {
@@ -910,18 +948,21 @@
         var txt = state.phase === 'drawing' ? '✏️ ' + dn + '님이 그리고 있어요'
           : state.phase === 'choosing' ? '✏️ ' + dn + '님의 차례예요'
           : '⏳ 다음 턴을 준비하고 있어요';
-        ds.innerHTML = '';
-        ds.appendChild(el('span', 'draw-status-text', txt));
-        if (state.phase === 'drawing') {
-          var rb = el('span', 'react-bar');
-          [['up', '👍', '좋아요'], ['down', '👎', '아쉬워요']].forEach(function (d) {
-            var b = el('button', 'react-btn react-' + d[0], d[1]); b.type = 'button'; b.title = d[2]; b.setAttribute('aria-label', d[2]);
-            b.addEventListener('click', function () { sendReact(d[0]); });
-            rb.appendChild(b);
-          });
-          ds.appendChild(rb);
+        // 자식은 정적(#draw-status-text, #react-bar [+ 모바일에서 옮겨 온 #btn-chat-expand]) — innerHTML 로 갈아엎지 않는다
+        var dst = $('draw-status-text'); if (dst) dst.textContent = txt;
+        var rb = $('react-bar');
+        if (rb) {
+          var wantReact = state.phase === 'drawing';
+          if (!wantReact) rb.innerHTML = '';
+          else if (!rb.childElementCount) {
+            [['up', '👍', '좋아요'], ['down', '👎', '아쉬워요']].forEach(function (d) {
+              var b = el('button', 'react-btn react-' + d[0], d[1]); b.type = 'button'; b.title = d[2]; b.setAttribute('aria-label', d[2]);
+              b.addEventListener('click', function () { sendReact(d[0]); });
+              rb.appendChild(b);
+            });
+          }
         }
-      }
+      } else { var rb0 = $('react-bar'); if (rb0) rb0.innerHTML = ''; }
     }
     if (canvas) canvas.classList.toggle('can-draw', canDraw());
     if (lobby) { renderModePanel(); renderSettings(); }
@@ -1122,8 +1163,13 @@
     list.appendChild(node);
     while (list.children.length > 300) list.removeChild(list.firstChild);
     if (atBottom) list.scrollTop = list.scrollHeight;
+    // 모바일 요약(티커 · 말풍선 · 접힌 채팅 바)용 최근 메시지
+    ui.recentChat.push({ kind: kind, name: m.name ? String(m.name) : '', text: text, mine: !!(m.id && m.id === myId) });
+    while (ui.recentChat.length > 3) ui.recentChat.shift();
+    renderChatPeek(true);
   }
-  function clearChat() { var list = $('chat-list'); if (list) list.innerHTML = ''; }
+  function clearChat() { var list = $('chat-list'); if (list) list.innerHTML = ''; ui.recentChat = []; renderChatPeek(false); }
+  function scrollChatBottom() { var list = $('chat-list'); if (list) list.scrollTop = list.scrollHeight; }
 
   // ------------------------------------------------------------------
   // Landing / room navigation
@@ -1254,14 +1300,18 @@
   /** 반응(👍/👎)을 보낸 사람의 아바타 위에 1초간 띄운다. 연타하면 겹쳐서 여러 개 뜬다. */
   function onReactShow(p) {
     if (!p || !p.id) return;
-    var li = document.querySelector('#player-list li[data-id="' + String(p.id).replace(/"/g, '') + '"]');
-    var av = li && li.querySelector('.avatar');
-    if (!av) return;
-    var pop = el('span', 'react-pop ' + (p.kind === 'down' ? 'down' : 'up'), p.kind === 'down' ? '👎' : '👍');
-    pop.style.left = (30 + Math.round((Math.random() - 0.5) * 36)) + 'px';
-    pop.style.setProperty('--rot', ((Math.random() - 0.5) * 30).toFixed(1) + 'deg');
-    av.appendChild(pop);
-    setTimeout(function () { if (pop.parentNode) pop.parentNode.removeChild(pop); }, 1000);
+    var sel = 'li[data-id="' + String(p.id).replace(/"/g, '') + '"] .avatar';
+    var targets = [document.querySelector('#player-list ' + sel), document.querySelector('#sheet-player-list ' + sel)];
+    // 모바일 게임 중에는 플레이어 목록이 숨겨져 있으므로 턴 띠 위에도 띄운다
+    var strip = $('turn-strip'); if (strip && mobileMq.matches && state.phase !== 'lobby') targets.push(strip);
+    targets.forEach(function (av) {
+      if (!av) return;
+      var pop = el('span', 'react-pop ' + (p.kind === 'down' ? 'down' : 'up'), p.kind === 'down' ? '👎' : '👍');
+      if (av !== strip) pop.style.left = (30 + Math.round((Math.random() - 0.5) * 36)) + 'px';
+      pop.style.setProperty('--rot', ((Math.random() - 0.5) * 30).toFixed(1) + 'deg');
+      av.appendChild(pop);
+      setTimeout(function () { if (pop.parentNode) pop.parentNode.removeChild(pop); }, 1000);
+    });
   }
   function sendReact(kind) {
     if (state.phase !== 'drawing' || isDrawer()) return;
@@ -1290,6 +1340,7 @@
     if (sendLeave) emit('room:leave');
     inRoom = false;
     rejoinTarget = null;
+    closeSheet(true);
     clearLastRoom();
     cancelLocalStroke(false);
     state.roomCode = null; state.hostId = null; state.phase = 'lobby'; state.round = 0; state.totalRounds = 0;
@@ -1404,7 +1455,12 @@
       catch (e) { toast('이미지를 만들지 못했어요', 'error'); }
     });
     var gm = $('overlay-gallery'); if (gm) gm.addEventListener('click', function (e) { if (e.target === gm) closeGallery(); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && ui.galleryOpen) closeGallery(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (openSheetId) { closeSheet(false); return; }
+      if (ui.galleryOpen) closeGallery();
+    });
+    buildMobileChrome();
 
     var plist = $('player-list'); if (plist) plist.addEventListener('scroll', updatePlayerStripFade, { passive: true });
     window.addEventListener('resize', updatePlayerStripFade);
@@ -1420,6 +1476,145 @@
       });
     }
     buildToolbar();
+  }
+
+  // ------------------------------------------------------------------
+  // Mobile chrome (≤767px) — 바텀 시트 · 노드 재배치 · visualViewport 추적 · 채팅 티커/말풍선
+  //   데스크톱/태블릿에서는 아무 노드도 옮기지 않고 시트도 열리지 않는다(CSS 가 모바일 전용 요소를 display:none 처리).
+  // ------------------------------------------------------------------
+  var mobileMq = window.matchMedia ? window.matchMedia('(max-width: 767px)') : { matches: false, addEventListener: null, addListener: null };
+  var COMPACT_MAX_H = 520; // visualViewport 높이가 이보다 짧으면(키보드) 컴팩트 모드
+  var openSheetId = null, sheetTimer = null, tickerTimer = null, lastCompact = false;
+
+  /** node 를 parent 안(before 앞, 없으면 끝)으로 옮긴다. 이미 그 자리면 건드리지 않는다(포커스 유지). */
+  function placeNode(node, parent, before) {
+    if (!node || !parent) return;
+    if (node.parentNode === parent && (before ? node.nextElementSibling === before : node.nextElementSibling === null)) return;
+    if (before && before.parentNode === parent) parent.insertBefore(node, before); else parent.appendChild(node);
+  }
+  /**
+   * 브레이크포인트/단계/역할에 맞게 헤더 노드와 채팅 펼치기 버튼을 옮긴다.
+   *  - 모바일: 효과음·나가기는 항상 메뉴 시트. 방 코드·초대 링크는 게임 중에만 메뉴 시트(대기실에서는 헤더에 남겨 공유하기 쉽게).
+   *  - 모바일 게임 중 관전자: #btn-chat-expand 를 상태 띠(#draw-status)로. 그 외에는 채팅 바(#chat-bar).
+   *  - 데스크톱: 모두 원래 자리로, 열린 시트는 닫는다.
+   */
+  function placeMobileChrome() {
+    var mobile = mobileMq.matches, game = state.phase !== 'lobby';
+    var chip = document.querySelector('.room-code-chip');
+    var copy = $('btn-copy'), sound = $('btn-sound'), leave = $('btn-leave'), menu = $('btn-menu');
+    var left = document.querySelector('.topbar-left'), right = document.querySelector('.topbar-right');
+    if (mobile && game) { placeNode(chip, $('menu-slot-code')); placeNode(copy, $('menu-slot-copy')); }
+    else { placeNode(chip, left, copy && copy.parentNode === left ? copy : null); placeNode(copy, left); }
+    if (mobile) { placeNode(sound, $('menu-slot-sound')); placeNode(leave, $('menu-slot-leave')); }
+    else { placeNode(sound, right, leave && leave.parentNode === right ? leave : menu); placeNode(leave, right, menu); }
+    var expand = $('btn-chat-expand');
+    if (mobile && game && !isDrawer()) placeNode(expand, $('draw-status')); else placeNode(expand, $('chat-bar'));
+    if (!mobile && openSheetId) closeSheet(true);
+    // 게임 셸(position:fixed)이 떠 있는 동안 문서 자체는 스크롤/바운스되지 않게 (iOS 주소창·키보드 대응)
+    document.body.classList.toggle('game-shell', mobile && game && inRoom);
+  }
+
+  /** #chat-list / #chat-form 을 컨테이너(채팅 시트 본문 또는 채팅 패널)로 옮긴다 */
+  function moveChatInto(container) {
+    if (!container) return;
+    placeNode($('chat-list'), container); placeNode($('chat-form'), container);
+  }
+
+  function openSheet(id) {
+    if (!mobileMq.matches) return;
+    var s = $(id); if (!s) return;
+    if (openSheetId && openSheetId !== id) closeSheet(true);
+    if (sheetTimer) { clearTimeout(sheetTimer); sheetTimer = null; }
+    openSheetId = id;
+    if (id === 'sheet-chat') moveChatInto($('sheet-chat-body'));
+    s.hidden = false;
+    document.body.classList.add('sheet-open');
+    if (id === 'sheet-players') renderPlayers();
+    requestAnimationFrame(function () { s.classList.add('open'); });
+    if (id === 'sheet-chat') { scrollChatBottom(); setTimeout(scrollChatBottom, 250); }
+    var cb = s.querySelector('.sheet-close');
+    if (cb) { try { cb.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+  }
+  function closeSheet(immediate) {
+    var id = openSheetId; if (!id) return;
+    var s = $(id); openSheetId = null;
+    document.body.classList.remove('sheet-open');
+    if (!s) return;
+    s.classList.remove('open');
+    var done = function () {
+      sheetTimer = null; s.hidden = true;
+      if (id === 'sheet-chat') { moveChatInto($('chat-panel')); scrollChatBottom(); }
+      if (id === 'sheet-players') { var sl = $('sheet-player-list'); if (sl) sl.innerHTML = ''; }
+    };
+    if (immediate) done(); else sheetTimer = setTimeout(done, 220);
+  }
+
+  /** --vvh/--vvt(visualViewport) 갱신 + 컴팩트 모드 판정 */
+  function updateViewportVars() {
+    var vv = window.visualViewport;
+    var h = vv && vv.height ? vv.height : window.innerHeight;
+    var top = vv && vv.offsetTop ? vv.offsetTop : 0;
+    var rs = document.documentElement.style;
+    rs.setProperty('--vvh', Math.round(h) + 'px');
+    rs.setProperty('--vvt', Math.round(top) + 'px');
+    var compact = mobileMq.matches && h < COMPACT_MAX_H;
+    var vr = $('view-room');
+    if (vr) { if (compact) vr.setAttribute('data-compact', '1'); else vr.removeAttribute('data-compact'); }
+    if (compact !== lastCompact) { lastCompact = compact; if (!compact) setTimeout(scrollChatBottom, 0); renderChatPeek(false); }
+  }
+
+  /** 채팅 요약: 접힌 채팅 바(마지막 메시지) · 출제자 티커(최신 1개) · 컴팩트 말풍선(최근 3개). fresh=true 면 티커를 4초간 진하게 */
+  function summarize(m) { return (m.kind === 'chat' || m.kind === 'guessed-chat') && m.name ? m.name + ': ' + m.text : m.text; }
+  function kindClass(kind) { return kind === 'correct' ? 'kind-correct' : kind === 'close' ? 'kind-close' : kind === 'system' ? 'kind-system' : kind === 'guessed-chat' ? 'kind-guessed' : 'kind-chat'; }
+  function renderChatPeek(fresh) {
+    var recent = ui.recentChat, last = recent[recent.length - 1];
+    var bar = $('chat-bar-last'); if (bar) bar.textContent = last ? summarize(last) : '아직 채팅이 없어요';
+    var tk = $('chat-ticker');
+    if (tk) {
+      tk.className = 'chat-ticker ' + (last ? kindClass(last.kind) : 'kind-system') + (tk.classList.contains('fresh') ? ' fresh' : '');
+      tk.innerHTML = '';
+      tk.appendChild(el('span', 'tk-icon', last ? (last.kind === 'correct' ? '🎉' : last.kind === 'close' ? '🔥' : last.kind === 'guessed-chat' ? '🔒' : '💬') : '💬'));
+      var tt = el('span', 'tk-text');
+      if (last && (last.kind === 'chat' || last.kind === 'guessed-chat') && last.name) { tt.appendChild(el('span', 'tk-name', last.name)); tt.appendChild(document.createTextNode(last.text)); }
+      else tt.textContent = last ? last.text : '채팅 열기';
+      tk.appendChild(tt);
+      if (fresh && last) {
+        tk.classList.add('fresh');
+        if (tickerTimer) clearTimeout(tickerTimer);
+        tickerTimer = setTimeout(function () { tickerTimer = null; tk.classList.remove('fresh'); }, 4000);
+      }
+    }
+    var bb = $('chat-bubbles');
+    if (bb) {
+      bb.innerHTML = '';
+      if (mobileMq.matches) recent.forEach(function (m) {
+        var b = el('div', 'chat-bubble ' + kindClass(m.kind) + (m.mine ? ' mine' : ''));
+        if ((m.kind === 'chat' || m.kind === 'guessed-chat') && m.name) b.appendChild(el('span', 'bb-name', m.name));
+        b.appendChild(document.createTextNode(m.text));
+        bb.appendChild(b);
+      });
+    }
+  }
+
+  function buildMobileChrome() {
+    var bm = $('btn-menu'); if (bm) bm.addEventListener('click', function () { openSheet('sheet-menu'); });
+    var ts = $('turn-strip'); if (ts) ts.addEventListener('click', function () { openSheet('sheet-players'); });
+    var tk = $('chat-ticker'); if (tk) tk.addEventListener('click', function () { openSheet('sheet-chat'); });
+    var ce = $('btn-chat-expand'); if (ce) ce.addEventListener('click', function () { openSheet('sheet-chat'); });
+    document.querySelectorAll('.sheet [data-sheet-close]').forEach(function (n) { n.addEventListener('click', function () { closeSheet(false); }); });
+    // 메뉴 시트에서 나가기/초대 복사를 누르면 시트를 닫는다
+    var bl = $('btn-leave'); if (bl) bl.addEventListener('click', function () { closeSheet(true); });
+    var bc = $('btn-copy'); if (bc) bc.addEventListener('click', function () { if (openSheetId === 'sheet-menu') closeSheet(false); });
+    var onMq = function () { placeMobileChrome(); updateViewportVars(); renderChatPeek(false); };
+    if (mobileMq.addEventListener) mobileMq.addEventListener('change', onMq); else if (mobileMq.addListener) mobileMq.addListener(onMq);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updateViewportVars);
+      window.visualViewport.addEventListener('scroll', updateViewportVars);
+    }
+    window.addEventListener('resize', updateViewportVars);
+    window.addEventListener('orientationchange', function () { setTimeout(updateViewportVars, 60); });
+    updateViewportVars();
+    placeMobileChrome();
   }
 
   // ------------------------------------------------------------------
