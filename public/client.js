@@ -1662,9 +1662,10 @@
     var grid = cp.parentElement, gs = grid ? getComputedStyle(grid) : null;
     var gridGap = gs ? (parseFloat(gs.rowGap || gs.gap) || 8) : 8;
     var players = grid ? grid.querySelector('.players-panel') : null;
-    var DC_MIN = 60; // 채팅 버블 카드 최소 높이(.drawer-chat min-height)
+    var dc = $('drawer-chat');
+    var dcH = dc && dc.offsetParent ? dc.offsetHeight : 44; // 채팅 버블 카드는 내용 크기(핏) — 실제 높이를 뺀다
     var gridH = grid ? grid.clientHeight : cp.clientHeight;
-    var availH = gridH - (players ? players.offsetHeight + gridGap : 0) - (DC_MIN + gridGap) - padY - (tb && !tb.hidden ? tb.offsetHeight + gap : 0);
+    var availH = gridH - (players ? players.offsetHeight + gridGap : 0) - (dcH + gridGap) - padY - (tb && !tb.hidden ? tb.offsetHeight + gap : 0);
     if (innerW <= 0 || availH <= 0) return;
     var w = Math.max(120, Math.min(innerW, Math.floor(availH * 4 / 3)));
     cw.style.setProperty('--dw', w + 'px');
@@ -1693,6 +1694,7 @@
     }
     var dc = $('drawer-chat');
     if (dc) {
+      requestAnimationFrame(fitDrawerCanvas); // 버블 수가 바뀌면 카드 높이가 바뀌므로 캔버스 크기 재계산
       dc.innerHTML = '';
       if (mobileMq.matches) {
         if (!recent.length) dc.appendChild(el('span', 'dc-empty', '💬 채팅 열기 ›'));

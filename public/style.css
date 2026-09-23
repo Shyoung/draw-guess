@@ -777,11 +777,11 @@ body.sheet-open { overflow: hidden; }
   /* 출제자: 채팅 패널은 흐름에서 빼고(캔버스 위 티커로 대체) 가운데 패널이 남은 높이를 채운다.
      툴바(팔레트)는 화면 하단에 고정되고, 캔버스는 그 위 남는 높이의 중앙에 4:3 으로 최대 크기로 놓인다. */
   /* 출제자: 가운데 패널은 캔버스+팔레트만 담고 내용 크기만큼(하단 묶음). 남는 높이는 아래 채팅 버블 카드가 차지한다 */
-  .room:not([data-phase="lobby"])[data-role="drawer"] .center-panel { flex: 0 0 auto; overflow: hidden; display: flex; flex-direction: column; }
+  .room:not([data-phase="lobby"])[data-role="drawer"] .center-panel { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
   /* 출제자 채팅 버블 카드: 턴 띠 ↔ (캔버스+팔레트) 사이의 독립 패널. 남는 높이를 채우고 최근 메시지 3개를 아래 정렬. 누르면 채팅 시트 */
   .room:not([data-phase="lobby"])[data-role="drawer"] .drawer-chat {
-    display: flex; flex: 1 1 auto; min-height: 60px; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 4px;
-    overflow: hidden; padding: 10px 12px; border: 0; text-align: left; width: 100%;
+    display: flex; flex: 0 0 auto; min-height: 44px; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 4px;
+    overflow: hidden; padding: 8px 12px; border: 0; text-align: left; width: 100%;
     background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-sm);
   }
   .drawer-chat:active { background: #f8f6fc; }
@@ -791,7 +791,8 @@ body.sheet-open { overflow: hidden; }
   .room:not([data-phase="lobby"])[data-role="drawer"] .chat-panel { display: none; }
   /* 캔버스 래퍼는 4:3 을 유지한 채 JS(fitDrawerCanvas)가 준 --dw 너비로 놓이고, 위아래 auto 마진으로 남는 높이 중앙에 온다.
      티커(.chat-ticker)는 래퍼 기준이므로 항상 캔버스 위에 겹친다. */
-  .room:not([data-phase="lobby"])[data-role="drawer"] .canvas-wrap { flex: 0 0 auto; margin: 0 auto; width: var(--dw, 100%); max-width: 100%; }
+  /* 남는 여백은 캔버스 카드 위쪽으로 보내고(margin-top:auto) 캔버스와 팔레트는 바닥에 붙은 한 묶음으로 */
+  .room:not([data-phase="lobby"])[data-role="drawer"] .canvas-wrap { flex: 0 0 auto; margin: auto auto 0; width: var(--dw, 100%); max-width: 100%; }
   .room:not([data-phase="lobby"])[data-role="drawer"] .toolbar { flex: 0 0 auto; margin-top: 0; position: sticky; bottom: 0; }
   /* 관전자: 채팅 패널이 남은 높이를 전부 차지(목록만 내부 스크롤), 입력줄은 바닥 고정.
      최소 128px = 패딩 14 + 목록 2줄 56 + 여백 6 + 입력줄 ~46 — 이보다 모자라면 가운데 패널이 스크롤로 양보한다 */
