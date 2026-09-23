@@ -371,6 +371,14 @@ io.on('connection', (socket) => {
     if (err) fail(err);
   });
 
+  // lobby:step { step:'mode'|'settings' } — 호스트, lobby
+  on('lobby:step', (data) => {
+    const room = currentRoom();
+    if (!room) return fail('방에 참가하지 않았습니다.');
+    const err = room.setLobbyStep(pid(), data && data.step);
+    if (err) fail(err);
+  });
+
   // game:start — 호스트, lobby, 2명 이상
   on('game:start', () => {
     const room = currentRoom();

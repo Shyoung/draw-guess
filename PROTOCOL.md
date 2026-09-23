@@ -30,7 +30,9 @@
   hints: 2,           // 턴당 자동 힌트(초성 공개) 횟수, 0..5 (단어의 공개 가능 글자 수가 더 적으면 그만큼만)
   hintEndAt: 15,      // 마지막 힌트가 뜨는 시점(종료 N초 전), 5..60
   customWords: '',    // 쉼표 구분 사용자 단어, 각 단어 1..20자
-  customWordsOnly: false
+  customWordsOnly: false,
+  mode: 'classic',    // 'classic' 돌아가며 그리기(기본) | 'fixed' 한 명이 계속 그리기(지정 출제자)
+  fixedDrawerId: null // fixed 모드 출제자 id. 방에 없는 id/null 이면 호스트가 출제자
 }
 ```
 서버는 범위를 벗어나면 clamp 한다.
@@ -47,7 +49,8 @@
 | `room:join` | `{ roomCode, name, avatar, token? }` | 같은 `token`이 이미 그 방에 있으면 새 자리를 만들지 않고 그 자리로 복귀(이름·아바타는 새 값으로 갱신, ack의 `playerId`는 기존 id). ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명. roomCode는 대문자 정규화 |
 | `room:leave` | – | 방 나가기 |
 | `room:settings` | `{ settings }` | 호스트, lobby에서만. 성공 시 모두에게 `room:state` |
-| `game:start` | – | 호스트, lobby, 플레이어 ≥ 2 |
+| `lobby:step` | `{ step:'mode'\|'settings' }` | 호스트, lobby. 대기실 화면 단계 전환. 방을 만들면 `mode`, 게임이 끝나 돌아오면 `settings`(모드 유지) |
+| `game:start` | – | 호스트, lobby, 접속 플레이어 ≥ 2. fixed 모드는 출제자가 접속 중이어야 함 |
 | `word:choose` | `{ word }` | 출제자, choosing 단계, 제시된 후보 중 하나여야 함 |
 | `draw:start` | `{ tool:'pen'\|'eraser', color:'#rrggbb', size:number, x, y }` | 출제자, drawing 단계 |
 | `draw:move` | `{ pts: [[x,y], ...] }` | 배치(≈16~30ms 단위) |
@@ -67,7 +70,9 @@
   drawerId,                 // 현재 출제자 (lobby면 null)
   settings,
   players: [{ id, name, avatar, score, isDrawing, hasGuessed, connected }],  // 참가 순서. connected=false 는 유예 중(재접속 대기)
-  nextDrawerId              // 다음 턴에 출제할 사람. lobby/gameOver거나 이번이 마지막 턴이면 null
+  nextDrawerId,             // 다음 턴에 출제할 사람. lobby/gameOver거나 이번이 마지막 턴이면 null
+  lobbyStep,                // 'mode' | 'settings' — 대기실 화면 단계
+  fixedDrawerId             // fixed 모드의 실제 출제자(지정 없으면 호스트). classic 이면 null
 }
 ```
 
@@ -79,7 +84,7 @@
 | `game:hint` | `{ wordMask, category? }` | 초성 공개 갱신 (출제자·이미 정답을 맞힌 사람 제외). 누군가 정답을 맞히면 그 사람에게만 별도로 `wordMask`가 실제 글자로 전체 공개된 `game:hint`가 온다(초성이 아님) |
 | `game:timer` | `{ timeLeft }` | 매 1초 (choosing / drawing 단계) |
 | `game:turnEnd` | `{ word, reason:'time'\|'allGuessed'\|'drawerLeft'\|'notEnoughPlayers', deltas:[{ id, delta }], timeLeft }` | 5초간 표시. `deltas`에는 이번 턴 획득 점수(0 포함 전원) |
-| `game:over` | `{ ranking:[{ id, name, avatar, score }], gallery:[{ round, word, category, drawerId, drawerName, guessed, ops, trimmed? }] }` | 점수 내림차순. `gallery`는 이 게임에서 실제로 그린 턴들의 (제시어, 그림 ops) 기록 — 클라이언트가 갤러리로 렌더링하고 PNG로 저장. 전체가 약 1.5MB를 넘으면 오래된 턴의 `ops`를 비우고 `trimmed:true`. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
+| `game:over` | `{ ranking:[{ id, name, avatar, score }], mode, drawer?:{ id, name, avatar }, gallery:[{ round, word, category, drawerId, drawerName, guessed, ops, trimmed? }] }` | 점수 내림차순. `gallery`는 이 게임에서 실제로 그린 턴들의 (제시어, 그림 ops) 기록 — 클라이언트가 갤러리로 렌더링하고 PNG로 저장. 전체가 약 1.5MB를 넘으면 오래된 턴의 `ops`를 비우고 `trimmed:true`. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
 
 ### 드로잉 (출제자를 제외한 방 전체에 그대로 중계)
 `draw:start`, `draw:move`, `draw:end`, `draw:fill`, `draw:clear`, `draw:undo` — 페이로드는 C→S와 동일.
@@ -129,6 +134,10 @@
 - 정답자: `Math.round(100 + 300 * timeLeft / drawTime)` (최소 100), 먼저 맞힐수록 높음. 
 - 출제자: 턴 종료 시 `Math.round(300 * guessedCount / (playerCount - 1))` (모두 맞히면 300). 아무도 못 맞히면 0.
 - `game:turnEnd.deltas` 에 위 값을 담는다.
+
+## 게임 모드
+- **classic (돌아가며 그리기)**: 아래 턴/라운드 흐름 그대로. 라운드마다 모든 플레이어가 한 번씩 출제.
+- **fixed (한 명이 그리기)**: `fixedDrawerId`(없으면 호스트)가 모든 턴을 출제. 라운드 순서는 `[fixedDrawerId]` 하나이므로 `rounds` = 그릴 단어 수. 출제자는 점수를 받지 않고 `game:over.ranking`에서 제외되며 `drawer`로 따로 전달된다. 출제자가 끊기면 유예 동안 기다리고(`turnEnd` 유지), 유예가 끝나 나가면 지정이 해제되어 호스트가 이어서 그린다. 중간 참가자는 바로 맞히기에 참여한다.
 
 ## 턴/라운드 흐름
 1. `game:start` → phase `choosing`. 출제 순서는 참가 순서 (players 배열 순). 각 라운드마다 모든 플레이어가 1회씩 출제.

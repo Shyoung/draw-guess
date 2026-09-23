@@ -341,6 +341,23 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
 .check input { width: 18px; height: 18px; accent-color: var(--primary); }
 .start-row { margin-top: 6px; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+/* 모드 선택 */
+.settings-head { display: flex; align-items: center; gap: 12px; }
+.settings-head .panel-title { margin: 0; }
+.mode-badge { font-size: 12px; font-weight: 700; color: var(--secondary-dark); background: var(--secondary-soft); padding: 2px 10px; border-radius: 999px; margin-left: 8px; vertical-align: middle; }
+.mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.mode-card {
+  display: flex; flex-direction: column; gap: 8px; text-align: left; padding: 18px 18px 16px;
+  border: 2px solid var(--line); border-radius: 18px; background: #fbfaff; transition: transform .1s, border-color .15s, box-shadow .15s;
+}
+.mode-card:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--secondary); box-shadow: var(--shadow-sm); }
+.mode-card.selected { border-color: var(--primary); background: var(--primary-soft); }
+.mode-card:disabled { cursor: default; opacity: .8; }
+.mode-icon { font-size: 30px; line-height: 1; }
+.mode-name { font-weight: 900; font-size: 17px; color: var(--text); }
+.mode-desc { font-size: 13px; color: var(--muted); line-height: 1.45; }
+.mode-meta { font-size: 11px; font-weight: 700; color: var(--secondary-dark); }
+.fixed-tag { color: #b3261e; font-weight: 700; font-size: 11px; background: var(--primary-soft); padding: 1px 6px; border-radius: 8px; }
 .start-hint { font-size: 13px; color: var(--muted); min-height: 1.4em; text-align: center; }
 
 /* ---------- Overlays ---------- */

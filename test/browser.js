@@ -105,6 +105,18 @@ async function say(page, text) {
     check((await p2.locator('#chat-list').textContent()).includes('지은'), '입장 시스템 메시지 수신');
     check(await p2.locator('#set-rounds').isDisabled(), '비호스트 설정 비활성');
 
+    // 모드 선택 단계: 호스트만 카드 활성, 비호스트는 대기 문구. 기본 모드 카드 선택 → 설정 화면
+    check(await host.locator('#mode-panel').isVisible() && await host.locator('#settings-panel').isHidden(), '새 방은 모드 선택 화면부터');
+    check(await p2.locator('#mode-panel .mode-card[data-mode="classic"]').isDisabled(), '비호스트는 모드 카드 비활성');
+    check((await p2.locator('#mode-hint').textContent()).includes('고르고 있어요'), '비호스트 모드 대기 문구');
+    await host.click('#mode-panel .mode-card[data-mode="classic"]');
+    await host.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
+    await p2.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
+    check(await p2.locator('#settings-panel').isVisible(), '모드 선택 후 모든 참가자가 설정 화면으로');
+    check((await host.locator('#mode-badge').textContent()).includes('돌아가며'), '설정 화면 모드 배지');
+    check(await host.locator('#btn-mode-back').isVisible() && await p2.locator('#btn-mode-back').isHidden(), '모드 선택으로 돌아가기 버튼은 호스트만');
+    check(await host.locator('#set-fixedDrawer-wrap').isHidden(), '기본 모드에서는 출제자 선택 숨김');
+
     // 설정 변경 → 다른 클라이언트에 반영
     await host.selectOption('#set-rounds', '1');
     await host.selectOption('#set-drawTime', '30');
@@ -401,6 +413,7 @@ async function say(page, text) {
     await host.waitForSelector('#settings-panel:not([hidden])', { timeout: 15000 });
     check(await host.locator('#btn-start').isVisible(), '게임 종료 후 로비 복귀');
     check(await host.locator('#btn-gallery-lobby').isVisible(), '로비에 "지난 게임 그림 갤러리" 버튼 유지');
+    check(await host.locator('#mode-panel').isHidden() && (await host.locator('#mode-badge').textContent()).includes('돌아가며'), '게임 종료 후 대기실은 설정 화면 + 모드 유지');
 
     // 나가기 → 호스트 이전
     await host.click('#btn-leave');

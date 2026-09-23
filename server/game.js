@@ -34,7 +34,11 @@ const DEFAULT_SETTINGS = Object.freeze({
   hintEndAt: 15, // 마지막 힌트가 뜨는 시점(종료 N초 전), 5..60
   customWords: '',
   customWordsOnly: false,
+  mode: 'classic',      // 'classic' 돌아가며 그리기 | 'fixed' 한 명이 계속 그리기(지정 출제자)
+  fixedDrawerId: null,  // fixed 모드의 출제자. null 이면 호스트
 });
+const MODES = ['classic', 'fixed'];
+const LOBBY_STEPS = ['mode', 'settings'];
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 // ── 순수 헬퍼 ───────────────────────────────────────────────────
@@ -204,6 +208,7 @@ class Room {
     this.settings = { ...DEFAULT_SETTINGS };
 
     this.phase = 'lobby';
+    this.lobbyStep = 'mode'; // 대기실 단계: 'mode'(모드 선택) → 'settings'(게임 설정). 게임이 끝나고 돌아오면 'settings'
     this.round = 0;
     this.totalRounds = this.settings.rounds;
     this.turnOrder = []; // 현재 라운드의 출제 순서 (player id)
@@ -249,6 +254,7 @@ class Room {
       hostId: this.hostId,
       settings: { ...this.settings },
       phase: this.phase,
+      lobbyStep: this.lobbyStep,
       round: this.round,
       totalRounds: this.totalRounds,
       turnOrder: this.turnOrder.slice(),
@@ -287,6 +293,7 @@ class Room {
     room.hostId = s.hostId;
     room.settings = { ...DEFAULT_SETTINGS, ...(s.settings || {}) };
     room.phase = s.phase || 'lobby';
+    room.lobbyStep = LOBBY_STEPS.includes(s.lobbyStep) ? s.lobbyStep : 'settings';
     room.round = s.round || 0;
     room.totalRounds = s.totalRounds || room.settings.rounds;
     room.turnOrder = Array.isArray(s.turnOrder) ? s.turnOrder.slice() : [];
@@ -484,6 +491,8 @@ class Room {
       totalRounds: this.totalRounds,
       drawerId: this.phase === 'lobby' ? null : this.drawerId,
       nextDrawerId: this.computeNextDrawerId(),
+      lobbyStep: this.lobbyStep,
+      fixedDrawerId: this.settings.mode === 'fixed' ? this.fixedDrawerId() : null,
       settings: { ...this.settings },
       players: this.players.map((p) => ({
         id: p.id,
@@ -650,6 +659,7 @@ class Room {
       const next = this.connectedPlayers()[0] || this.players[0];
       this.hostId = next.id;
     }
+    if (this.settings.fixedDrawerId === id) this.settings = { ...this.settings, fixedDrawerId: null };
 
     this.systemMessage(
       reason === 'kicked' ? `${p.name}님이 강퇴되었습니다.` : `${p.name}님이 나갔습니다.`,
@@ -678,6 +688,39 @@ class Room {
    * 설정 변경 (호스트, lobby). 범위 밖 값은 clamp. 성공 시 room:state 브로드캐스트.
    * @returns {string|null} 오류 메시지 또는 null
    */
+  /** 대기실 단계 전환 (호스트, lobby). 'mode' ↔ 'settings' */
+  setLobbyStep(id, step) {
+    if (!this.isHost(id)) return '호스트만 단계를 바꿀 수 있습니다.';
+    if (this.phase !== 'lobby') return '게임 중에는 바꿀 수 없습니다.';
+    if (!LOBBY_STEPS.includes(step)) return '잘못된 단계입니다.';
+    this.lobbyStep = step;
+    this.broadcastState();
+    return null;
+  }
+
+  /** fixed 모드의 실제 출제자 id: 지정된 사람이 방에 있으면 그 사람, 아니면 호스트 */
+  fixedDrawerId() {
+    const id = this.settings.fixedDrawerId;
+    return id && this.getPlayer(id) ? id : this.hostId;
+  }
+
+  /** 모드별 라운드 출제 순서 */
+  buildTurnOrder() {
+    if (this.settings.mode === 'fixed') return [this.fixedDrawerId()];
+    return this.players.map((p) => p.id);
+  }
+
+  /** 재접속을 기다리는 짧은 대기(2초) 뒤 nextTurn 재시도 */
+  waitForReconnect(message) {
+    if (!this._waitingNotice) {
+      this._waitingNotice = true;
+      this.systemMessage(message);
+    }
+    this.phase = 'turnEnd';
+    this.setPhaseTimeout(2000, () => this.nextTurn());
+    this.broadcastState();
+  }
+
   updateSettings(id, patch) {
     if (!this.isHost(id)) return '호스트만 설정을 변경할 수 있습니다.';
     if (this.phase !== 'lobby') return '게임 중에는 설정을 변경할 수 없습니다.';
@@ -695,6 +738,11 @@ class Room {
       s.customWords = raw.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').slice(0, MAX_CUSTOM_WORDS_LEN);
     }
     if ('customWordsOnly' in patch) s.customWordsOnly = Boolean(patch.customWordsOnly);
+    if ('mode' in patch && MODES.includes(patch.mode)) s.mode = patch.mode;
+    if ('fixedDrawerId' in patch) {
+      // 방에 있는 사람만 출제자로 지정 가능. 아니면 null(=호스트)
+      s.fixedDrawerId = typeof patch.fixedDrawerId === 'string' && this.getPlayer(patch.fixedDrawerId) ? patch.fixedDrawerId : null;
+    }
 
     this.settings = s;
     this.totalRounds = s.rounds;
@@ -709,6 +757,10 @@ class Room {
     if (!this.isHost(id)) return '호스트만 게임을 시작할 수 있습니다.';
     if (this.phase !== 'lobby') return '이미 게임이 진행 중입니다.';
     if (this.connectedPlayers().length < 2) return '게임을 시작하려면 2명 이상이 필요합니다.';
+    if (this.settings.mode === 'fixed') {
+      const fd = this.getPlayer(this.fixedDrawerId());
+      if (!fd || !fd.connected) return '출제자가 접속 중이어야 시작할 수 있습니다.';
+    }
 
     this.clearTimers();
     for (const p of this.players) {
@@ -721,7 +773,7 @@ class Room {
     this.gallery = [];
     this.round = 1;
     this.totalRounds = this.settings.rounds;
-    this.turnOrder = this.players.map((p) => p.id);
+    this.turnOrder = this.buildTurnOrder();
     this.turnIndex = -1;
     this.lastTurnEnd = null;
     this.lastGameOver = null;
@@ -737,18 +789,14 @@ class Room {
     if (this.connectedPlayers().length < 2) {
       // 유예 중인(곧 돌아올 수 있는) 사람이 있어 전체 인원은 2명 이상이면 잠시 기다린다.
       // 유예가 끝나 실제로 퇴장하면 players 가 줄어 아래 gameOver 로 내려온다.
-      if (this.players.length >= 2) {
-        if (!this._waitingNotice) {
-          this._waitingNotice = true;
-          this.systemMessage('다른 참가자의 재접속을 기다리고 있어요…');
-        }
-        this.phase = 'turnEnd';
-        this.setPhaseTimeout(2000, () => this.nextTurn());
-        this.broadcastState();
-        return;
-      }
+      if (this.players.length >= 2) { this.waitForReconnect('다른 참가자의 재접속을 기다리고 있어요…'); return; }
       this.gameOver();
       return;
+    }
+    if (this.settings.mode === 'fixed') {
+      // 지정 출제자가 끊겨 있으면 기다린다. 유예가 끝나 나가면 fixedDrawerId()가 호스트로 바뀌어 이어진다.
+      const fd = this.getPlayer(this.fixedDrawerId());
+      if (fd && !fd.connected) { this.waitForReconnect(`출제자 ${fd.name}님의 재접속을 기다리고 있어요…`); return; }
     }
     this._waitingNotice = false;
     // 무한 루프 방지: 최대 (turnOrder + players) 만큼만 탐색
@@ -763,8 +811,8 @@ class Room {
           }
           this.round += 1;
         }
-        // 새 라운드 출제 순서: 현재 참가 순서 (중간 참가자는 여기서부터 포함)
-        this.turnOrder = this.players.map((p) => p.id);
+        // 새 라운드 출제 순서: 모드별 (classic: 현재 참가 순서, 중간 참가자는 여기서부터 포함 / fixed: 지정 출제자)
+        this.turnOrder = this.buildTurnOrder();
         this.turnIndex = 0;
       }
       const drawerId = this.turnOrder[this.turnIndex];
@@ -923,6 +971,7 @@ class Room {
    */
   computeNextDrawerId() {
     if (this.phase === 'lobby' || this.phase === 'gameOver' || !this.turnOrder.length) return null;
+    if (this.settings.mode === 'fixed') return this.round < this.totalRounds ? this.fixedDrawerId() : null;
     for (let i = this.turnIndex + 1; i < this.turnOrder.length; i++) {
       const cand = this.getPlayer(this.turnOrder[i]);
       if (cand && cand.connected) return this.turnOrder[i];
@@ -965,7 +1014,8 @@ class Room {
 
     // 출제자 점수: round(300 * guessedCount / (playerCount - 1)), 최대 300
     const drawer = this.getPlayer(this.drawerId);
-    if (drawer && this.phase === 'drawing') {
+    if (drawer && this.phase === 'drawing' && this.settings.mode !== 'fixed') {
+      // (fixed 모드의 지정 출제자는 경쟁하지 않으므로 점수를 받지 않는다)
       // 연결이 끊긴 사람은 맞힐 수 없으므로 분모에서 뺀다(단, 이미 맞힌 뒤 끊긴 사람은 분자·분모 모두 포함)
       const guessers = this.players.filter((p) => p.id !== this.drawerId && (p.connected || p.hasGuessed)).length;
       const guessed = this.players.filter((p) => p.id !== this.drawerId && p.hasGuessed).length;
@@ -1017,11 +1067,18 @@ class Room {
       p.isDrawing = false;
       p.hasGuessed = false;
     }
+    const fixed = this.settings.mode === 'fixed' ? this.getPlayer(this.fixedDrawerId()) : null;
     const ranking = this.players
+      .filter((p) => !fixed || p.id !== fixed.id)
       .slice()
       .sort((a, b) => b.score - a.score)
       .map((p) => ({ id: p.id, name: p.name, avatar: { ...p.avatar }, score: p.score }));
-    this.lastGameOver = { ranking, gallery: this.gallery };
+    this.lastGameOver = {
+      ranking,
+      gallery: this.gallery,
+      mode: this.settings.mode,
+      drawer: fixed ? { id: fixed.id, name: fixed.name, avatar: { ...fixed.avatar } } : null,
+    };
     this.emitAll('game:over', this.lastGameOver);
     this.broadcastState();
     this.setPhaseTimeout(GAME_OVER_TIME * 1000, () => this.backToLobby());
@@ -1031,6 +1088,7 @@ class Room {
   backToLobby() {
     this.clearTimers();
     this.phase = 'lobby';
+    this.lobbyStep = 'settings'; // 게임이 끝나고 돌아오면 모드는 그대로, 설정 화면으로
     this.round = 0;
     this.totalRounds = this.settings.rounds;
     this.turnOrder = [];

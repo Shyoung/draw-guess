@@ -232,7 +232,7 @@ async function main() {
     st3,
   );
   check('room:state: name trimmed, avatar color normalized/defaulted', st3.players[0].name === '호스트' && st3.players[0].avatar.color === '#ff0000' && /^#[0-9a-f]{6}$/.test(st3.players[2].avatar.color));
-  check('room:state: default settings', JSON.stringify(st3.settings) === JSON.stringify({ rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false }), st3.settings);
+  check('room:state: default settings', JSON.stringify(st3.settings) === JSON.stringify({ rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null }), st3.settings);
 
   const dj = await emitAck(c3, 'room:join', { roomCode: code, name: 'dup', avatar: {} });
   check('double join of same room rejected', dj && dj.ok === false, dj);

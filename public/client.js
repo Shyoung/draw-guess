@@ -19,7 +19,7 @@
   ];
   var SIZES = [4, 10, 20, 36];
   var SFX = window.SFX || { play: function () {}, isMuted: function () { return true; }, setMuted: function () {}, toggle: function () { return true; } };
-  var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false };
+  var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null };
   var REASON_TEXT = { time: '시간 종료!', allGuessed: '모두 맞혔어요!', drawerLeft: '출제자가 나갔어요', notEnoughPlayers: '플레이어가 부족해요' };
   var STORAGE_KEY = 'drawguess.profile';
   var TOKEN_KEY = 'drawguess.token';      // 재접속용 토큰(브라우저별 1개)
@@ -62,8 +62,15 @@
   // ------------------------------------------------------------------
   var state = {
     roomCode: null, hostId: null, phase: 'lobby', round: 0, totalRounds: 0,
-    drawerId: null, settings: Object.assign({}, DEFAULT_SETTINGS), players: []
+    drawerId: null, settings: Object.assign({}, DEFAULT_SETTINGS), players: [],
+    lobbyStep: 'mode', fixedDrawerId: null
   };
+  var MODE_NAMES = { classic: '돌아가며 그리기', fixed: '한 명이 그리기' };
+  /** fixed 모드에서 실제 출제자(지정된 사람이 없으면 호스트). classic 이면 null */
+  function fixedDrawerId() {
+    if (state.settings.mode !== 'fixed') return null;
+    return state.fixedDrawerId || (state.settings.fixedDrawerId && findPlayer(state.settings.fixedDrawerId) ? state.settings.fixedDrawerId : state.hostId);
+  }
   var myId = null;
   var inRoom = false;
   var socket = null;
@@ -520,6 +527,8 @@
       toast('방에서 나가게 되었어요', 'error'); resetToLanding(false); return;
     }
     state.nextDrawerId = s.nextDrawerId == null ? null : s.nextDrawerId;
+    if (s.lobbyStep === 'mode' || s.lobbyStep === 'settings') state.lobbyStep = s.lobbyStep;
+    state.fixedDrawerId = s.fixedDrawerId == null ? null : s.fixedDrawerId;
     if (state.phase === 'lobby' && prevPhase !== 'lobby') {
       resetCanvasState(); ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.chosenWord = null;
       ui.turnEnd = null; ui.ranking = null; setTimeLeft(null);
@@ -593,6 +602,7 @@
       return { id: r.id, name: String(r.name || playerName(r.id, '?')), avatar: safeAvatar(r.avatar), score: num(r.score, 0) };
     }).sort(function (a, b) { return b.score - a.score; });
     ui.turnEnd = null;
+    ui.gameOverDrawer = p && p.drawer && typeof p.drawer === 'object' ? { name: String(p.drawer.name || '?'), avatar: safeAvatar(p.drawer.avatar) } : null;
     if (Array.isArray(p && p.gallery)) {
       ui.gallery = p.gallery.filter(function (g) { return g && typeof g === 'object' && typeof g.word === 'string'; }).map(function (g) {
         return {
@@ -836,7 +846,8 @@
     var prevScore = null, rank = 0;
     sorted.forEach(function (p, i) {
       if (p.score !== prevScore) { rank = i + 1; prevScore = p.score; }
-      var isMe = p.id === myId, isDr = p.id === state.drawerId && state.phase !== 'lobby';
+      var fixedId = fixedDrawerId();
+      var isMe = p.id === myId, isDr = (p.id === state.drawerId && state.phase !== 'lobby') || (state.phase === 'lobby' && fixedId === p.id);
       var isNext = !isDr && state.phase !== 'lobby' && state.phase !== 'gameOver' && p.id === state.nextDrawerId;
       var li = el('li', 'player' + (isMe ? ' me' : '') + (p.hasGuessed ? ' guessed' : '') + (isDr ? ' drawing' : '') + (isNext ? ' next' : '') + (p.connected === false ? ' offline' : ''));
       li.setAttribute('data-id', p.id);
@@ -853,7 +864,7 @@
       if (isNext) { name.appendChild(document.createTextNode(' ')); var nt = el('span', 'next-tag', '다음 차례'); nt.title = '다음 턴에 그릴 차례예요'; name.appendChild(nt); }
       if (p.connected === false) { name.appendChild(document.createTextNode(' ')); var ot = el('span', 'offline-tag', '연결 끊김'); ot.title = '잠시 후 돌아올 수 있어요'; name.appendChild(ot); }
       info.appendChild(name);
-      info.appendChild(el('span', 'pscore', p.score + '점' + (p.hasGuessed ? ' · 정답!' : '')));
+      info.appendChild(el('span', 'pscore', (fixedId === p.id ? '출제자' : p.score + '점') + (p.hasGuessed ? ' · 정답!' : '')));
       li.appendChild(info);
       if (isHost() && !isMe) {
         var k = el('button', 'kick', '✕'); k.type = 'button'; k.title = p.name + ' 강퇴'; k.setAttribute('aria-label', p.name + ' 강퇴');
@@ -868,8 +879,9 @@
 
   function renderCenter() {
     var lobby = state.phase === 'lobby';
-    var sp = $('settings-panel'), cw = $('canvas-wrap'), tb = $('toolbar'), ds = $('draw-status');
-    if (sp) sp.hidden = !lobby;
+    var sp = $('settings-panel'), mp = $('mode-panel'), cw = $('canvas-wrap'), tb = $('toolbar'), ds = $('draw-status');
+    if (mp) mp.hidden = !(lobby && state.lobbyStep === 'mode');
+    if (sp) sp.hidden = !(lobby && state.lobbyStep !== 'mode');
     if (cw) cw.hidden = lobby;
     var drawer = isDrawer();
     if (tb) { tb.hidden = lobby || !drawer; tb.setAttribute('aria-disabled', canDraw() ? 'false' : 'true'); }
@@ -894,7 +906,18 @@
       }
     }
     if (canvas) canvas.classList.toggle('can-draw', canDraw());
-    if (lobby) renderSettings();
+    if (lobby) { renderModePanel(); renderSettings(); }
+  }
+
+  function renderModePanel() {
+    var mp = $('mode-panel'); if (!mp) return;
+    var host = isHost();
+    mp.querySelectorAll('.mode-card').forEach(function (b) {
+      b.classList.toggle('selected', b.getAttribute('data-mode') === state.settings.mode);
+      b.disabled = !host;
+    });
+    var hint = $('mode-hint');
+    if (hint) hint.textContent = host ? '어떤 방식으로 놀지 골라주세요. 고르면 게임 설정으로 넘어가요.' : '호스트가 게임 모드를 고르고 있어요…';
   }
 
   function renderSettings() {
@@ -907,17 +930,38 @@
     setVal('set-rounds', s.rounds); setVal('set-drawTime', s.drawTime); setVal('set-wordCount', s.wordCount);
     setVal('set-hints', s.hints); setVal('set-hintEndAt', s.hintEndAt);
     setVal('set-customWords', s.customWords || ''); setVal('set-customWordsOnly', s.customWordsOnly);
-    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWords', 'set-customWordsOnly'].forEach(function (id) {
+    var fixed = s.mode === 'fixed';
+    var badge = $('mode-badge'); if (badge) badge.textContent = MODE_NAMES[s.mode] || s.mode;
+    var back = $('btn-mode-back'); if (back) back.hidden = !isHost();
+    var rl = $('set-rounds-label'); if (rl) rl.textContent = fixed ? '단어 수' : '라운드';
+    var fw = $('set-fixedDrawer-wrap'); if (fw) fw.hidden = !fixed;
+    var fsel = $('set-fixedDrawer');
+    if (fsel && fixed) {
+      var want = fixedDrawerId();
+      var key = state.players.map(function (p) { return p.id + ':' + p.name; }).join('|');
+      if (fsel.getAttribute('data-key') !== key) {
+        fsel.setAttribute('data-key', key); fsel.innerHTML = '';
+        state.players.forEach(function (p) {
+          var o = el('option', null, p.name + (p.id === myId ? ' (나)' : '') + (p.connected === false ? ' · 연결 끊김' : '')); o.value = p.id; fsel.appendChild(o);
+        });
+      }
+      if (document.activeElement !== fsel) fsel.value = want || '';
+    }
+    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWords', 'set-customWordsOnly', 'set-fixedDrawer'].forEach(function (id) {
       var n = $(id); if (n) n.disabled = !editable;
     });
     var btn = $('btn-start'), hint = $('start-hint');
     var enough = state.players.length >= 2;
+    var fd = fixed ? findPlayer(fixedDrawerId()) : null;
+    var drawerOk = !fixed || (fd && fd.connected !== false);
     if (btn) {
-      btn.disabled = !(isHost() && enough);
+      btn.disabled = !(isHost() && enough && drawerOk);
       btn.textContent = isHost() ? '게임 시작' : '호스트를 기다리는 중…';
     }
     if (hint) {
-      hint.textContent = !enough ? '플레이어가 2명 이상이어야 시작할 수 있어요' : (isHost() ? '' : '호스트가 게임을 시작하면 바로 시작돼요');
+      hint.textContent = !enough ? '플레이어가 2명 이상이어야 시작할 수 있어요'
+        : !drawerOk ? '출제자가 접속 중이어야 시작할 수 있어요'
+        : (isHost() ? (fixed && fd ? '✏️ ' + fd.name + '님이 ' + s.rounds + '개의 단어를 그려요' : '') : '호스트가 게임을 시작하면 바로 시작돼요');
     }
   }
 
@@ -975,6 +1019,8 @@
     if (og) {
       og.hidden = !(ph === 'gameOver' && ui.ranking);
       if (!og.hidden) {
+        var gd = $('gameover-drawer');
+        if (gd) { gd.hidden = !ui.gameOverDrawer; if (ui.gameOverDrawer) gd.textContent = '✏️ 출제자: ' + ui.gameOverDrawer.name + ' (순위에 포함되지 않아요)'; }
         var pod = $('podium'), rl = $('ranking-list');
         var rk = ui.ranking, medals = ['🥇', '🥈', '🥉'];
         if (pod) {
@@ -1223,6 +1269,7 @@
     state.drawerId = null; state.players = []; state.settings = Object.assign({}, DEFAULT_SETTINGS);
     ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null; ui.optionsKey = '';
     ui.gallery = null; ui.galleryThumbs = []; ui.galleryOpen = false;
+    state.lobbyStep = 'mode'; state.fixedDrawerId = null;
     setTimeLeft(null);
     resetCanvasState(); clearChat();
     var vl = $('view-landing'), vr = $('view-room');
@@ -1269,6 +1316,7 @@
     if (g('set-hintEndAt')) s.hintEndAt = clamp(num(g('set-hintEndAt').value, 15), 5, 60);
     if (g('set-customWords')) s.customWords = String(g('set-customWords').value || '').slice(0, 2000);
     if (g('set-customWordsOnly')) s.customWordsOnly = !!g('set-customWordsOnly').checked;
+    if (s.mode === 'fixed' && g('set-fixedDrawer') && g('set-fixedDrawer').value) s.fixedDrawerId = g('set-fixedDrawer').value;
     return s;
   }
   function sendSettings() {
@@ -1287,8 +1335,24 @@
     fillSelect('set-hints', range(0, 5), function (v) { return v === 0 ? '없음' : v + '회'; });
     fillSelect('set-hintEndAt', [5, 10, 15, 20, 30, 45, 60], function (v) { return '종료 ' + v + '초 전'; });
 
-    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWordsOnly'].forEach(function (id) {
+    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWordsOnly', 'set-fixedDrawer'].forEach(function (id) {
       var n = $(id); if (n) n.addEventListener('change', sendSettings);
+    });
+    document.querySelectorAll('#mode-panel .mode-card').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (!isHost() || state.phase !== 'lobby') return;
+        var mode = b.getAttribute('data-mode');
+        state.settings = Object.assign({}, state.settings, { mode: mode });
+        emit('room:settings', { settings: state.settings });
+        emit('lobby:step', { step: 'settings' });
+        state.lobbyStep = 'settings'; renderAll();
+      });
+    });
+    var mb = $('btn-mode-back');
+    if (mb) mb.addEventListener('click', function () {
+      if (!isHost() || state.phase !== 'lobby') return;
+      emit('lobby:step', { step: 'mode' });
+      state.lobbyStep = 'mode'; renderAll();
     });
     var cw = $('set-customWords');
     if (cw) { cw.addEventListener('input', sendSettingsDebounced); cw.addEventListener('blur', sendSettings); }
