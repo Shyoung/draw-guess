@@ -9,6 +9,8 @@
     "dev": "node --watch server/index.js",
     "test": "node test/smoke.js && node test/reconnect.js && node test/persist.js && node test/modes.js",
     "test:modes": "node test/modes.js",
+    "test:mobile": "node test/mobile.js",
+    "shots:mobile": "node test/mobile-shots.js",
     "test:persist": "node test/persist.js",
     "test:reconnect": "node test/reconnect.js",
     "test:browser": "node test/browser.js"

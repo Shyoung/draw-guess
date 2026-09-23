@@ -63,8 +63,10 @@
   var state = {
     roomCode: null, hostId: null, phase: 'lobby', round: 0, totalRounds: 0,
     drawerId: null, settings: Object.assign({}, DEFAULT_SETTINGS), players: [],
-    lobbyStep: 'mode', fixedDrawerId: null
+    lobbyStep: 'mode', fixedDrawerId: null,
+    allowSolo: false // 서버가 ALLOW_SOLO=1 로 떠 있으면 true(최소 인원 1명). room:state 로 내려온다
   };
+  function minPlayers() { return state.allowSolo ? 1 : 2; }
   var MODE_NAMES = { classic: '돌아가며 그리기', fixed: '한 명이 그리기' };
   /** fixed 모드에서 실제 출제자(지정된 사람이 없으면 호스트). classic 이면 null */
   function fixedDrawerId() {
@@ -529,6 +531,7 @@
     state.nextDrawerId = s.nextDrawerId == null ? null : s.nextDrawerId;
     if (s.lobbyStep === 'mode' || s.lobbyStep === 'settings') state.lobbyStep = s.lobbyStep;
     state.fixedDrawerId = s.fixedDrawerId == null ? null : s.fixedDrawerId;
+    if (typeof s.allowSolo === 'boolean') state.allowSolo = s.allowSolo;
     if (state.phase === 'lobby' && prevPhase !== 'lobby') {
       resetCanvasState(); ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.chosenWord = null;
       ui.turnEnd = null; ui.ranking = null; setTimeLeft(null);
@@ -715,7 +718,7 @@
       if (g.category) wd.appendChild(el('span', 'gallery-cat', g.category));
       meta.appendChild(wd);
       var sub = el('div', 'gallery-sub');
-      sub.appendChild(el('span', '', (g.round ? g.round + 'R · ' : '') + '✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘'));
+      sub.appendChild(el('span', 'gallery-by', (g.round ? g.round + 'R · ' : '') + '✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘'));
       var dl = el('button', 'btn btn-secondary btn-sm', 'PNG 저장'); dl.type = 'button';
       dl.addEventListener('click', function () {
         try { downloadDataUrl(galleryItemPng(i), safeFile('그림맞추기_' + (state.roomCode || '') + '_' + (i + 1) + '_' + g.word) + '.png'); }
@@ -777,6 +780,9 @@
   // Rendering
   // ------------------------------------------------------------------
   function renderAll() {
+    // 모바일 CSS가 단계/역할별로 레이아웃을 바꿀 수 있도록 루트에 표시한다 (JS 레이아웃 코드 없이 CSS만으로 전환)
+    var vr = $('view-room');
+    if (vr) { vr.setAttribute('data-phase', state.phase); vr.setAttribute('data-role', isDrawer() ? 'drawer' : 'guesser'); }
     renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery();
   }
 
@@ -875,6 +881,13 @@
       }
       list.appendChild(li);
     });
+    updatePlayerStripFade();
+  }
+  /** 모바일 가로 스크롤 플레이어 띠: 오른쪽에 더 있으면 패널에 .has-more 를 붙여 CSS 페이드로 힌트를 준다 */
+  function updatePlayerStripFade() {
+    var list = $('player-list'); var panel = list && list.parentNode; if (!panel || !panel.classList) return;
+    var more = list.scrollWidth - list.clientWidth - list.scrollLeft > 4;
+    panel.classList.toggle('has-more', more);
   }
 
   function renderCenter() {
@@ -951,7 +964,8 @@
       var n = $(id); if (n) n.disabled = !editable;
     });
     var btn = $('btn-start'), hint = $('start-hint');
-    var enough = state.players.length >= 2;
+    var need = minPlayers();
+    var enough = state.players.length >= need;
     var fd = fixed ? findPlayer(fixedDrawerId()) : null;
     var drawerOk = !fixed || (fd && fd.connected !== false);
     if (btn) {
@@ -959,7 +973,7 @@
       btn.textContent = isHost() ? '게임 시작' : '호스트를 기다리는 중…';
     }
     if (hint) {
-      hint.textContent = !enough ? '플레이어가 2명 이상이어야 시작할 수 있어요'
+      hint.textContent = !enough ? '플레이어가 ' + need + '명 이상이어야 시작할 수 있어요'
         : !drawerOk ? '출제자가 접속 중이어야 시작할 수 있어요'
         : (isHost() ? (fixed && fd ? '✏️ ' + fd.name + '님이 ' + s.rounds + '개의 단어를 그려요' : '') : '호스트가 게임을 시작하면 바로 시작돼요');
     }
@@ -1360,7 +1374,7 @@
     var bs = $('btn-start');
     if (bs) bs.addEventListener('click', function () {
       if (!isHost()) return;
-      if (state.players.length < 2) { toast('플레이어가 2명 이상이어야 시작할 수 있어요', 'error'); return; }
+      if (state.players.length < minPlayers()) { toast('플레이어가 ' + minPlayers() + '명 이상이어야 시작할 수 있어요', 'error'); return; }
       emit('game:start');
     });
     var bc = $('btn-copy'); if (bc) bc.addEventListener('click', copyInvite);
@@ -1375,6 +1389,9 @@
     });
     var gm = $('overlay-gallery'); if (gm) gm.addEventListener('click', function (e) { if (e.target === gm) closeGallery(); });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && ui.galleryOpen) closeGallery(); });
+
+    var plist = $('player-list'); if (plist) plist.addEventListener('scroll', updatePlayerStripFade, { passive: true });
+    window.addEventListener('resize', updatePlayerStripFade);
 
     var form = $('chat-form'), input = $('chat-input');
     if (form && input) {

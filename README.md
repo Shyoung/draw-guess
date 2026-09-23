@@ -50,6 +50,8 @@ PROTOCOL.md       서버-클라이언트 이벤트 계약
 npm test                 # socket.io-client 시뮬레이션: smoke(약 1분) + reconnect(약 20초) + persist(서버 재시작 복원, 약 20초)
 node test/browser.js     # 시스템 Chrome 4탭으로 실제 UI까지 검증 (약 2분, playwright + Chrome 필요)
 HEADFUL=1 node test/browser.js   # 창을 띄워서 진행 과정 보기
+npm run test:mobile      # iPhone 13 크기에서 게임 중 캔버스·채팅 입력이 한 화면에 들어오는지 등 64개 검사
+npm run shots:mobile     # 모바일 화면 스크린샷 10장 → test/shots/mobile/
 ```
 
 브라우저 테스트는 `test/shots/e2e-*.png` 에 각 단계 스크린샷을 남깁니다.
