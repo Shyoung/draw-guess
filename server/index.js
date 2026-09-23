@@ -56,7 +56,7 @@ function sendIndex(req, res) {
 app.get(['/', '/index.html'], sendIndex);
 
 // 헬스체크 / keep-alive 핑 대상 (정적 파일보다 가볍게)
-app.get('/healthz', (req, res) => res.json({ ok: true, version: ASSET_VERSION, store: store.kind, rooms: rooms.size, uptime: Math.round(process.uptime()) }));
+app.get('/healthz', (req, res) => res.json({ ok: true, env: process.env.APP_ENV || 'production', version: ASSET_VERSION, store: store.kind, rooms: rooms.size, allowSolo: process.env.ALLOW_SOLO === '1', uptime: Math.round(process.uptime()) }));
 
 // js/css는 URL에 버전이 붙으므로 1년 캐시(immutable)해도 안전하다. 그 외 파일은 매번 재검증.
 app.use(express.static(PUBLIC_DIR, {
@@ -469,7 +469,7 @@ server.on('error', (err) => {
 
 // Render 무료 플랜은 15분간 요청이 없으면 잠든다. 공개 URL이 있으면 10분마다 스스로 핑을 보내 깨어 있게 한다.
 // Render는 RENDER_EXTERNAL_URL 을 자동으로 넣어 준다. 다른 호스팅에서는 KEEP_ALIVE_URL 로 지정.
-const KEEP_ALIVE_URL = process.env.KEEP_ALIVE_URL || process.env.RENDER_EXTERNAL_URL || '';
+const KEEP_ALIVE_URL = process.env.KEEP_ALIVE === '0' ? '' : (process.env.KEEP_ALIVE_URL || process.env.RENDER_EXTERNAL_URL || '');
 const KEEP_ALIVE_MS = 10 * 60 * 1000;
 function startKeepAlive() {
   if (!KEEP_ALIVE_URL) return;

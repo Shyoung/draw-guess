@@ -2,11 +2,13 @@
 # GitHub 레포를 Render에 연결하면 이 파일대로 무료 Web Service가 만들어진다.
 # 무료 플랜은 15분간 접속이 없으면 잠들지만, 서버가 RENDER_EXTERNAL_URL 로 10분마다 자기 자신을 핑해 깨어 있게 한다.
 services:
+  # ── 프로덕션: main 브랜치 ──
   - type: web
     name: draw-guess
     runtime: node
     plan: free
     region: singapore
+    branch: main
     buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /healthz
@@ -20,6 +22,29 @@ services:
           type: keyvalue
           name: draw-guess-kv
           property: connectionString
+
+  # ── 스테이징: develop 브랜치. 기능을 먼저 올려 실제 폰/브라우저로 확인한 뒤 main 에 머지한다 ──
+  # ALLOW_SOLO=1 이라 혼자서도 게임을 시작해 화면을 볼 수 있고, KEEP_ALIVE=0 이라 안 쓸 때는 잠들어 무료 시간을 거의 쓰지 않는다.
+  # 저장소를 붙이지 않아(REDIS_URL 없음) 재배포하면 방이 사라진다 — 스테이징에서는 그래도 된다.
+  - type: web
+    name: draw-guess-staging
+    runtime: node
+    plan: free
+    region: singapore
+    branch: develop
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: APP_ENV
+        value: staging
+      - key: ALLOW_SOLO
+        value: "1"
+      - key: KEEP_ALIVE
+        value: "0"
 
   # 방 상태 저장용 Redis 호환 인스턴스(무료 25MB). 웹 서비스가 재배포되어도 이 인스턴스는 유지되므로
   # 진행 중인 게임이 이어진다. 무료 플랜은 디스크 영속화가 없어 이 인스턴스 자체가 재시작되면 비워진다.

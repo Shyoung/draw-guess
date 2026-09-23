@@ -72,7 +72,8 @@
   players: [{ id, name, avatar, score, isDrawing, hasGuessed, connected }],  // 참가 순서. connected=false 는 유예 중(재접속 대기)
   nextDrawerId,             // 다음 턴에 출제할 사람. lobby/gameOver거나 이번이 마지막 턴이면 null
   lobbyStep,                // 'mode' | 'settings' — 대기실 화면 단계
-  fixedDrawerId             // fixed 모드의 실제 출제자(지정 없으면 호스트). classic 이면 null
+  fixedDrawerId,            // fixed 모드의 실제 출제자(지정 없으면 호스트). classic 이면 null
+  allowSolo                 // 서버가 ALLOW_SOLO=1(스테이징)로 떠 있으면 true: 최소 인원 1명. 프로덕션은 false(2명)
 }
 ```
 

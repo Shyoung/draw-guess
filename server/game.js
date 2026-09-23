@@ -20,6 +20,9 @@ const GAME_OVER_TIME = 10; // 초
 const RECONNECT_GRACE_MS = process.env.RECONNECT_GRACE_MS != null
   ? Math.max(0, Number(process.env.RECONNECT_GRACE_MS) || 0)
   : 60000;
+// 게임을 시작/진행하는 데 필요한 최소 접속 인원. ALLOW_SOLO=1 (스테이징·개발 서버) 이면 혼자서도 시작해 화면을 확인할 수 있다.
+const ALLOW_SOLO = process.env.ALLOW_SOLO === '1';
+const MIN_PLAYERS = ALLOW_SOLO ? 1 : 2;
 
 const MAX_OPS = 3000; // 턴당 op 상한 (메모리 보호)
 const MAX_STROKE_POINTS = 5000; // stroke 하나의 점 상한
@@ -493,6 +496,7 @@ class Room {
       nextDrawerId: this.computeNextDrawerId(),
       lobbyStep: this.lobbyStep,
       fixedDrawerId: this.settings.mode === 'fixed' ? this.fixedDrawerId() : null,
+      allowSolo: ALLOW_SOLO,
       settings: { ...this.settings },
       players: this.players.map((p) => ({
         id: p.id,
@@ -666,7 +670,7 @@ class Room {
     );
 
     if (this.phase === 'choosing' || this.phase === 'drawing') {
-      if (this.connectedPlayers().length < 2) {
+      if (this.connectedPlayers().length < MIN_PLAYERS) {
         this.endTurn('notEnoughPlayers');
       } else if (id === this.drawerId) {
         this.endTurn('drawerLeft');
@@ -756,7 +760,7 @@ class Room {
   start(id) {
     if (!this.isHost(id)) return '호스트만 게임을 시작할 수 있습니다.';
     if (this.phase !== 'lobby') return '이미 게임이 진행 중입니다.';
-    if (this.connectedPlayers().length < 2) return '게임을 시작하려면 2명 이상이 필요합니다.';
+    if (this.connectedPlayers().length < MIN_PLAYERS) return `게임을 시작하려면 ${MIN_PLAYERS}명 이상이 필요합니다.`;
     if (this.settings.mode === 'fixed') {
       const fd = this.getPlayer(this.fixedDrawerId());
       if (!fd || !fd.connected) return '출제자가 접속 중이어야 시작할 수 있습니다.';
@@ -786,10 +790,10 @@ class Room {
   /** 다음 출제자로 진행. 라운드 종료/게임 종료 판정 포함 */
   nextTurn() {
     if (this.destroyed) return;
-    if (this.connectedPlayers().length < 2) {
+    if (this.connectedPlayers().length < MIN_PLAYERS) {
       // 유예 중인(곧 돌아올 수 있는) 사람이 있어 전체 인원은 2명 이상이면 잠시 기다린다.
       // 유예가 끝나 실제로 퇴장하면 players 가 줄어 아래 gameOver 로 내려온다.
-      if (this.players.length >= 2) { this.waitForReconnect('다른 참가자의 재접속을 기다리고 있어요…'); return; }
+      if (this.players.length >= MIN_PLAYERS) { this.waitForReconnect('다른 참가자의 재접속을 기다리고 있어요…'); return; }
       this.gameOver();
       return;
     }
@@ -1243,6 +1247,8 @@ module.exports = {
   TURN_END_TIME,
   GAME_OVER_TIME,
   RECONNECT_GRACE_MS,
+  MIN_PLAYERS,
+  ALLOW_SOLO,
   // 테스트/재사용을 위한 순수 헬퍼
   maskWord,
   revealAll,
