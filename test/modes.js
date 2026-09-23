@@ -138,6 +138,9 @@ const lastState = (c) => { const e = c.log.filter((x) => x.ev === 'room:state').
 
   const lobbyP = waitNext(c1, 'room:state', (s) => s.phase === 'lobby', 15000, 'back to lobby');
   const stLobby = await lobbyP;
+  const doneP = waitNext(c1, 'room:state', (s) => s.players.every((p) => !p.atResults), 5000, 'results done');
+  for (const c of [c1, c2, c3]) c.emit('results:done');
+  await doneP;
   check('back in lobby: lobbyStep=settings, mode kept (fixed), fixedDrawerId kept', stLobby.lobbyStep === 'settings' && stLobby.settings.mode === 'fixed' && stLobby.fixedDrawerId === P2, stLobby);
 
   // ── 지정 출제자가 나가면 → 호스트로 ─────────────────────────────

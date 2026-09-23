@@ -177,16 +177,6 @@
             </div>
           </div>
 
-          <div id="overlay-gameover" class="overlay" hidden>
-            <div class="card card-wide">
-              <p class="card-eyebrow">게임 종료</p>
-              <h3 class="card-title">최종 순위</h3>
-              <div id="podium" class="podium"></div>
-              <ol id="ranking-list" class="ranking-list"></ol>
-              <p id="gameover-drawer" class="card-note" hidden></p>
-              <button id="btn-gallery-open" class="btn btn-secondary" type="button" hidden>🖼 그림 갤러리 보기</button>
-              <p class="card-note"><span id="gameover-timer">10</span>초 후 대기실로 돌아갑니다</p>
-            </div>
           </div>
         </div>
 
@@ -237,6 +227,22 @@
       </aside>
     </div>
   </main>
+
+  <!-- 게임 종료 결과 (전체화면 모달). 각자 "대기실로 돌아가기"를 눌러야 닫힌다 -->
+  <div id="overlay-gameover" class="modal modal-results" hidden>
+    <div class="modal-card card-results">
+      <p class="card-eyebrow">게임 종료</p>
+      <h3 class="card-title">최종 순위</h3>
+      <div id="podium" class="podium"></div>
+      <ol id="ranking-list" class="ranking-list"></ol>
+      <p id="gameover-drawer" class="card-note" hidden></p>
+      <div class="results-actions">
+        <button id="btn-gallery-open" class="btn btn-secondary" type="button" hidden>🖼 그림 갤러리 보기</button>
+        <button id="btn-results-done" class="btn btn-primary" type="button">대기실로 돌아가기</button>
+      </div>
+      <p id="results-waiting" class="card-note"></p>
+    </div>
+  </div>
 
   <!-- 게임 종료 후 그림 갤러리 (phase와 무관하게 열고 닫는 모달) -->
   <div id="overlay-gallery" class="modal" hidden>

@@ -49,6 +49,7 @@
 | `room:join` | `{ roomCode, name, avatar, token? }` | 같은 `token`이 이미 그 방에 있으면 새 자리를 만들지 않고 그 자리로 복귀(이름·아바타는 새 값으로 갱신, ack의 `playerId`는 기존 id). ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명. roomCode는 대문자 정규화 |
 | `room:leave` | – | 방 나가기 |
 | `room:settings` | `{ settings }` | 호스트, lobby에서만. 성공 시 모두에게 `room:state` |
+| `results:done` | – | 게임 종료 결과 화면을 닫음(본인). `players[].atResults` 가 false 로 바뀜 |
 | `lobby:step` | `{ step:'mode'\|'settings' }` | 호스트, lobby. 대기실 화면 단계 전환. 방을 만들면 `mode`, 게임이 끝나 돌아오면 `settings`(모드 유지) |
 | `game:start` | – | 호스트, lobby, 접속 플레이어 ≥ 2. fixed 모드는 출제자가 접속 중이어야 함 |
 | `word:choose` | `{ word }` | 출제자, choosing 단계, 제시된 후보 중 하나여야 함 |
@@ -69,7 +70,7 @@
   roomCode, hostId, phase, round, totalRounds,
   drawerId,                 // 현재 출제자 (lobby면 null)
   settings,
-  players: [{ id, name, avatar, score, isDrawing, hasGuessed, connected }],  // 참가 순서. connected=false 는 유예 중(재접속 대기)
+  players: [{ id, name, avatar, score, isDrawing, hasGuessed, connected, atResults }],  // 참가 순서. connected=false 는 유예 중(재접속 대기). atResults=true 는 게임 종료 결과 화면을 아직 닫지 않음
   nextDrawerId,             // 다음 턴에 출제할 사람. lobby/gameOver거나 이번이 마지막 턴이면 null
   lobbyStep,                // 'mode' | 'settings' — 대기실 화면 단계
   fixedDrawerId,            // fixed 모드의 실제 출제자(지정 없으면 호스트). classic 이면 null
@@ -85,7 +86,7 @@
 | `game:hint` | `{ wordMask, category? }` | 초성 공개 갱신 (출제자·이미 정답을 맞힌 사람 제외). 누군가 정답을 맞히면 그 사람에게만 별도로 `wordMask`가 실제 글자로 전체 공개된 `game:hint`가 온다(초성이 아님) |
 | `game:timer` | `{ timeLeft }` | 매 1초 (choosing / drawing 단계) |
 | `game:turnEnd` | `{ word, reason:'time'\|'allGuessed'\|'drawerLeft'\|'notEnoughPlayers', deltas:[{ id, delta }], timeLeft }` | 5초간 표시. `deltas`에는 이번 턴 획득 점수(0 포함 전원) |
-| `game:over` | `{ ranking:[{ id, name, avatar, score }], mode, drawer?:{ id, name, avatar }, gallery:[{ round, word, category, drawerId, drawerName, guessed, ops, trimmed? }] }` | 점수 내림차순. `gallery`는 이 게임에서 실제로 그린 턴들의 (제시어, 그림 ops) 기록 — 클라이언트가 갤러리로 렌더링하고 PNG로 저장. 전체가 약 1.5MB를 넘으면 오래된 턴의 `ops`를 비우고 `trimmed:true`. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
+| `game:over` | `{ ranking:[{ id, name, avatar, score }], mode, drawer?:{ id, name, avatar }, gallery:[{ round, word, category, drawerId, drawerName, guessed, ops, trimmed? }] }` | 점수 내림차순. 이후 방은 **즉시** lobby 로 돌아가지만 모든 플레이어의 `atResults` 가 true 로 설정되어 각자 `results:done` 을 보낼 때까지 결과 화면을 유지한다. 접속 중인 누군가가 `atResults` 이면 `game:start` 는 거부된다. `gallery`는 이 게임에서 실제로 그린 턴들의 (제시어, 그림 ops) 기록 — 클라이언트가 갤러리로 렌더링하고 PNG로 저장. 전체가 약 1.5MB를 넘으면 오래된 턴의 `ops`를 비우고 `trimmed:true`. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
 
 ### 드로잉 (출제자를 제외한 방 전체에 그대로 중계)
 `draw:start`, `draw:move`, `draw:end`, `draw:fill`, `draw:clear`, `draw:undo` — 페이로드는 C→S와 동일.
@@ -144,7 +145,7 @@
 1. `game:start` → phase `choosing`. 출제 순서는 참가 순서 (players 배열 순). 각 라운드마다 모든 플레이어가 1회씩 출제.
 2. choosing: 15초. 시간 초과 시 첫 후보를 자동 선택. 단어 후보는 한국어 기본 사전 + customWords에서 중복 없이 선택. 한 게임 내 이미 나온 단어는 피한다(가능하면).
 3. drawing: `drawTime`초. 모두 맞히면 즉시 종료(`allGuessed`). 출제자가 나가면 `drawerLeft`. 인원이 2명 미만이 되면 `notEnoughPlayers` 후 game over 처리(lobby 복귀).
-4. turnEnd: 5초. 다음 출제자로. 마지막 라운드의 마지막 턴 후 `game:over`.
+4. turnEnd: 5초. 다음 출제자로. 마지막 라운드의 마지막 턴 후 `game:over` → 방은 바로 lobby(자동 복귀 10초 없음). 결과 화면은 각자 `results:done` 으로 닫는다.
 5. 중간 참가자는 현재 턴에는 정답 맞히기 참여 가능, 출제는 다음 라운드부터(현재 라운드 출제 순서에 끼워 넣지 않는다).
 6. 게임 종료 후 lobby로 돌아가도 점수는 다음 `game:start` 때까지 유지 표시, `game:start` 시 0으로 초기화.
 

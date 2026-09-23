@@ -404,13 +404,23 @@ async function say(page, text) {
     await host.click('#btn-gallery-close');
     check(await host.locator('#overlay-gallery').isHidden(), '갤러리 닫기');
 
+    // 결과 화면은 각자 닫는다. 호스트가 먼저 닫으면 다른 사람이 아직 보고 있어 시작 불가
+    await host.click('#btn-results-done');
+    await host.waitForSelector('#overlay-gameover', { state: 'hidden', timeout: 3000 });
+    await sleep(400);
+    check(await host.locator('#btn-start').isDisabled(), '다른 사람이 결과를 보는 동안 시작 버튼 비활성');
+    check((await host.locator('#start-hint').textContent()).includes('결과 화면'), '시작 힌트에 결과 보는 사람 안내', (await host.locator('#start-hint').textContent()).trim());
+    for (const pg of names.slice(1)) { await pg.click('#btn-results-done'); }
+    await host.waitForFunction(() => !document.getElementById('btn-start').disabled, null, { timeout: 5000 }).catch(() => {});
+    check(!(await host.locator('#btn-start').isDisabled()), '모두 결과를 닫으면 시작 버튼 활성');
+
     // 랭킹 내림차순
     const scores = await host.$$eval('#ranking-list li', (els) =>
       els.map((e) => parseInt((e.textContent.match(/(\d+)\s*점/) || [0, 0])[1], 10)));
     check(scores.length >= 3 && scores.every((s, i) => i === 0 || s <= scores[i - 1]), '랭킹 점수 내림차순', scores.join(','));
 
     // 10초 후 로비 복귀
-    await host.waitForSelector('#settings-panel:not([hidden])', { timeout: 15000 });
+    await host.waitForSelector('#settings-panel:not([hidden])', { timeout: 5000 });
     check(await host.locator('#btn-start').isVisible(), '게임 종료 후 로비 복귀');
     check(await host.locator('#btn-gallery-lobby').isVisible(), '로비에 "지난 게임 그림 갤러리" 버튼 유지');
     check(await host.locator('#mode-panel').isHidden() && (await host.locator('#mode-badge').textContent()).includes('돌아가며'), '게임 종료 후 대기실은 설정 화면 + 모드 유지');

@@ -498,6 +498,13 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 /* 근접 정답 안내 라벨 */
 .msg-close .msg-note { margin-left: 6px; font-size: 12px; font-weight: 700; opacity: .85; white-space: nowrap; }
 
+/* ---------- 게임 종료 결과 모달 ---------- */
+.modal-results { z-index: 45; }
+.card-results { width: min(96%, 560px); align-items: center; text-align: center; gap: 10px; }
+.card-results .ranking-list { max-height: 30vh; }
+.results-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
+#results-waiting:empty { display: none; }
+
 /* ---------- 그림 갤러리 모달 ---------- */
 .modal {
   position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 20px;

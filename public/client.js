@@ -521,7 +521,7 @@
     if (s.settings && typeof s.settings === 'object') state.settings = Object.assign({}, DEFAULT_SETTINGS, s.settings);
     if (Array.isArray(s.players)) {
       state.players = s.players.filter(function (p) { return p && typeof p === 'object' && p.id != null; }).map(function (p) {
-        return { id: p.id, name: String(p.name || '?'), avatar: safeAvatar(p.avatar), score: num(p.score, 0), isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed, connected: p.connected !== false };
+        return { id: p.id, name: String(p.name || '?'), avatar: safeAvatar(p.avatar), score: num(p.score, 0), isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed, connected: p.connected !== false, atResults: !!p.atResults };
       });
     }
     if (inRoom && myId && state.players.length && !findPlayer(myId)) {
@@ -534,8 +534,11 @@
     if (typeof s.allowSolo === 'boolean') state.allowSolo = s.allowSolo;
     if (state.phase === 'lobby' && prevPhase !== 'lobby') {
       resetCanvasState(); ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.chosenWord = null;
-      ui.turnEnd = null; ui.ranking = null; setTimeLeft(null);
+      ui.turnEnd = null; setTimeLeft(null);
+      // ui.ranking 은 유지 — 결과 화면은 내가 "대기실로 돌아가기"를 누를 때까지 보여야 한다
     }
+    var meNow = findPlayer(myId);
+    if (meNow && !meNow.atResults && ui.ranking && !ui.resultsPending) ui.ranking = null; // 서버가 결과 확인을 반영하면 정리
     if (state.phase !== 'choosing') { ui.wordOptions = null; ui.chosenWord = null; }
     if (state.phase !== 'drawing' && drawing) cancelLocalStroke(false);
     renderAll();
@@ -616,7 +619,9 @@
       });
       ui.galleryThumbs = [];
     }
-    setTimeLeft(10, false);
+    ui.resultsPending = true; // room:state 의 atResults 가 도착하기 전까지는 결과 화면 유지
+    setTimeout(function () { ui.resultsPending = false; }, 1500);
+    setTimeLeft(null);
     renderAll();
   }
 
@@ -968,12 +973,14 @@
     var enough = state.players.length >= need;
     var fd = fixed ? findPlayer(fixedDrawerId()) : null;
     var drawerOk = !fixed || (fd && fd.connected !== false);
+    var viewing = state.players.filter(function (p) { return p.connected !== false && p.atResults; }).map(function (p) { return p.name + (p.id === myId ? '(나)' : ''); });
     if (btn) {
-      btn.disabled = !(isHost() && enough && drawerOk);
+      btn.disabled = !(isHost() && enough && drawerOk && !viewing.length);
       btn.textContent = isHost() ? '게임 시작' : '호스트를 기다리는 중…';
     }
     if (hint) {
-      hint.textContent = !enough ? '플레이어가 ' + need + '명 이상이어야 시작할 수 있어요'
+      hint.textContent = viewing.length ? '결과 화면을 보고 있는 사람이 있어요: ' + viewing.join(', ')
+        : !enough ? '플레이어가 ' + need + '명 이상이어야 시작할 수 있어요'
         : !drawerOk ? '출제자가 접속 중이어야 시작할 수 있어요'
         : (isHost() ? (fixed && fd ? '✏️ ' + fd.name + '님이 ' + s.rounds + '개의 단어를 그려요' : '') : '호스트가 게임을 시작하면 바로 시작돼요');
     }
@@ -1031,8 +1038,14 @@
       }
     }
     if (og) {
-      og.hidden = !(ph === 'gameOver' && ui.ranking);
+      var meR = findPlayer(myId);
+      og.hidden = !(ui.ranking && (ph === 'gameOver' || (meR && meR.atResults) || ui.resultsPending));
       if (!og.hidden) {
+        var rw = $('results-waiting');
+        if (rw) {
+          var others = state.players.filter(function (p) { return p.id !== myId && p.connected !== false && p.atResults; }).map(function (p) { return p.name; });
+          rw.textContent = others.length ? '아직 결과를 보는 중: ' + others.join(', ') : '';
+        }
         var gd = $('gameover-drawer');
         if (gd) { gd.hidden = !ui.gameOverDrawer; if (ui.gameOverDrawer) gd.textContent = '✏️ 출제자: ' + ui.gameOverDrawer.name + ' (순위에 포함되지 않아요)'; }
         var pod = $('podium'), rl = $('ranking-list');
@@ -1381,6 +1394,9 @@
     var bl = $('btn-leave'); if (bl) bl.addEventListener('click', function () { resetToLanding(true); });
     var bs = $('btn-sound'); if (bs) { renderSoundButton(bs); bs.addEventListener('click', function () { SFX.toggle(); renderSoundButton(bs); }); }
     var go = $('btn-gallery-open'); if (go) go.addEventListener('click', openGallery);
+    var rd = $('btn-results-done'); if (rd) rd.addEventListener('click', function () {
+      ui.resultsPending = false; ui.ranking = null; emit('results:done'); renderAll();
+    });
     var gl = $('btn-gallery-lobby'); if (gl) gl.addEventListener('click', openGallery);
     var gc = $('btn-gallery-close'); if (gc) gc.addEventListener('click', closeGallery);
     var gs = $('btn-gallery-sheet'); if (gs) gs.addEventListener('click', function () {

@@ -520,9 +520,18 @@ async function main() {
   const goState = await waitFor(c1, 'room:state', (s) => s.phase === 'gameOver', 3000).catch(() => c1.log.map((e) => e.payload).filter((p) => p && p.phase === 'gameOver').pop());
   check('room:state phase gameOver with drawerId null, scores match ranking', goState && goState.drawerId === null && goState.players.every((p) => byId(ranking, p.id).score === p.score), goState);
 
-  const lobbyP = waitFor(c1, 'room:state', (s) => s.phase === 'lobby', 13000, 'lobby after 10s');
-  const lobby = await lobbyP;
-  check('back to lobby ~10s after game:over; scores retained; round 0; drawerId null; no isDrawing/hasGuessed', lobby.round === 0 && lobby.drawerId === null && lobby.players.some((p) => p.score > 0) && lobby.players.every((p) => p.score === byId(ranking, p.id).score && !p.isDrawing && !p.hasGuessed), lobby);
+  // lobby 상태는 game:over 직후 동기적으로 오므로 이미 로그에 있을 수 있다 → 로그 우선, 없으면 대기
+  const lobbyLogged = c1.log.map((e) => e.ev === 'room:state' ? e.payload : null).filter((p) => p && p.phase === 'lobby' && p.round === 0).pop();
+  const lobby = lobbyLogged || await waitFor(c1, 'room:state', (s) => s.phase === 'lobby' && s.round === 0, 5000, 'lobby right after game:over');
+  check('back to lobby immediately after game:over; scores retained; round 0; drawerId null; no isDrawing/hasGuessed', lobby.round === 0 && lobby.drawerId === null && lobby.players.some((p) => p.score > 0) && lobby.players.every((p) => p.score === byId(ranking, p.id).score && !p.isDrawing && !p.hasGuessed), lobby);
+  check('everyone is atResults right after game over', lobby.players.every((p) => p.atResults === true), lobby.players.map((p) => p.atResults));
+  const blockedP = waitFor(c1, 'error:msg', (m) => /결과 화면/.test(m.message), 3000, 'start blocked');
+  c1.emit('game:start');
+  check('game:start refused while players are still viewing results', /결과 화면/.test((await blockedP).message));
+  const clearedP = waitFor(c1, 'room:state', (s) => s.players.every((p) => !p.atResults), 5000, 'all results:done');
+  for (const c of active) c.emit('results:done');
+  await clearedP;
+  check('results:done from everyone clears atResults', true);
 
   // 6) 호스트 승계 / 강퇴 / 출제자 이탈 / 인원 부족
   const hostP = waitFor(c2, 'room:state', (s) => s.hostId === c2.id && s.players.length === 3);

@@ -371,6 +371,14 @@ io.on('connection', (socket) => {
     if (err) fail(err);
   });
 
+  // results:done — 게임 종료 결과 화면을 닫고 대기실로 (본인만)
+  on('results:done', () => {
+    const room = currentRoom();
+    if (!room) return;
+    const err = room.leaveResults(pid());
+    if (err) fail(err);
+  });
+
   // lobby:step { step:'mode'|'settings' } — 호스트, lobby
   on('lobby:step', (data) => {
     const room = currentRoom();

@@ -281,7 +281,7 @@ class Room {
       lastGameOver: this.lastGameOver,
       players: this.players.map((p) => ({
         id: p.id, name: p.name, avatar: { ...p.avatar }, score: p.score,
-        isDrawing: p.isDrawing, hasGuessed: p.hasGuessed, token: p.token,
+        isDrawing: p.isDrawing, hasGuessed: p.hasGuessed, token: p.token, atResults: !!p.atResults,
       })),
       savedAt: Date.now(),
     };
@@ -324,7 +324,7 @@ class Room {
     room.players = (s.players || []).map((p) => ({
       id: p.id, name: p.name, avatar: { ...p.avatar }, score: p.score || 0,
       isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed, token: p.token || null,
-      connected: false, socketId: null, _graceTimer: null,
+      connected: false, socketId: null, _graceTimer: null, atResults: !!p.atResults,
     }));
     return room;
   }
@@ -506,6 +506,7 @@ class Room {
         isDrawing: p.isDrawing,
         hasGuessed: p.hasGuessed,
         connected: p.connected,
+        atResults: !!p.atResults,
       })),
     };
   }
@@ -526,6 +527,7 @@ class Room {
     const p = {
       id, name, avatar, score: 0, isDrawing: false, hasGuessed: false,
       token: token || null, connected: true, socketId: socketId || id, _graceTimer: null,
+      atResults: false, // 게임 종료 결과 화면을 아직 보고 있는지 (직접 "대기실로" 를 눌러야 false)
     };
     this.players.push(p);
     if (!this.hostId) this.hostId = id;
@@ -636,6 +638,9 @@ class Room {
       });
     } else if (this.phase === 'gameOver' && this.lastGameOver) {
       this.emitTo(id, 'game:over', this.lastGameOver);
+    } else if (this.phase === 'lobby' && this.lastGameOver) {
+      const me = this.getPlayer(id);
+      if (me && me.atResults) this.emitTo(id, 'game:over', this.lastGameOver); // 결과 화면 보던 중 재접속
     }
   }
 
@@ -760,6 +765,8 @@ class Room {
   start(id) {
     if (!this.isHost(id)) return '호스트만 게임을 시작할 수 있습니다.';
     if (this.phase !== 'lobby') return '이미 게임이 진행 중입니다.';
+    const viewing = this.playersAtResults();
+    if (viewing.length) return `아직 결과 화면을 보고 있는 사람이 있어요: ${viewing.map((p) => p.name).join(', ')}`;
     if (this.connectedPlayers().length < MIN_PLAYERS) return `게임을 시작하려면 ${MIN_PLAYERS}명 이상이 필요합니다.`;
     if (this.settings.mode === 'fixed') {
       const fd = this.getPlayer(this.fixedDrawerId());
@@ -771,7 +778,9 @@ class Room {
       p.score = 0;
       p.hasGuessed = false;
       p.isDrawing = false;
+      p.atResults = false;
     }
+    this.lastGameOver = null;
     this.usedWords = new Set();
     this.offeredWords = new Set();
     this.gallery = [];
@@ -1083,9 +1092,26 @@ class Room {
       mode: this.settings.mode,
       drawer: fixed ? { id: fixed.id, name: fixed.name, avatar: { ...fixed.avatar } } : null,
     };
+    for (const p of this.players) p.atResults = true; // 각자 결과를 확인하고 직접 대기실로 돌아온다
     this.emitAll('game:over', this.lastGameOver);
     this.broadcastState();
-    this.setPhaseTimeout(GAME_OVER_TIME * 1000, () => this.backToLobby());
+    // 방은 바로 대기실로 돌아가되, 결과 화면을 보고 있는 사람이 있으면 새 게임은 시작할 수 없다(start 참고).
+    this.backToLobby();
+  }
+
+  /** 결과 화면 닫기 (results:done). 대기실 시작 조건에 반영된다 */
+  leaveResults(id) {
+    const p = this.getPlayer(id);
+    if (!p) return '방에 참가하지 않았습니다.';
+    if (!p.atResults) return null;
+    p.atResults = false;
+    this.broadcastState();
+    return null;
+  }
+
+  /** 아직 결과 화면을 보고 있는 접속자 이름들 */
+  playersAtResults() {
+    return this.players.filter((p) => p.connected && p.atResults);
   }
 
   /** lobby 복귀 (점수는 다음 game:start 까지 유지) */
@@ -1104,13 +1130,13 @@ class Room {
     this.ops = [];
     this.currentStroke = null;
     this.lastTurnEnd = null;
-    this.lastGameOver = null;
+    // lastGameOver 는 유지: 결과 화면을 보는 중 재접속한 사람에게 다시 보내야 한다. 다음 start() 에서 정리.
     for (const p of this.players) {
       p.isDrawing = false;
       p.hasGuessed = false;
     }
     this.broadcastState();
-    this.systemMessage('로비로 돌아왔습니다.');
+    this.systemMessage('게임이 끝났어요. 결과를 확인한 뒤 대기실로 돌아와 주세요.');
   }
 
   // ── 채팅 / 정답 판정 ───────────────────────────────────────

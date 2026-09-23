@@ -118,12 +118,11 @@ async function noPageScroll(page, label) {
         check(inside(lastBox), 'drawing(관전자): 마지막 채팅이 보임(자동 스크롤)', fmt(lastBox));
       }
       if (stage === 'gameover') {
-        await noPageScroll(m, 'gameOver');
-        const rl = await box(m, '#ranking-list'), bg = await box(m, '#btn-gallery-open'), pod = await box(m, '#podium'), tm = await box(m, '#gameover-timer');
+        const rl = await box(m, '#ranking-list'), bg = await box(m, '#btn-gallery-open'), pod = await box(m, '#podium'), tm = await box(m, '#btn-results-done');
         check(inside(rl), 'gameOver: #ranking-list 뷰포트 안', fmt(rl));
         check(inside(bg), 'gameOver: #btn-gallery-open 뷰포트 안', fmt(bg));
         check(inside(pod), 'gameOver: 포디움 뷰포트 안', fmt(pod));
-        check(inside(tm), 'gameOver: 카운트다운 뷰포트 안', fmt(tm));
+        check(inside(tm), 'gameOver: "대기실로 돌아가기" 버튼 뷰포트 안', fmt(tm));
         check(await m.locator('#btn-gallery-open').isVisible(), 'gameOver: 갤러리 버튼 visible');
       }
       if (stage === 'gallery') {
