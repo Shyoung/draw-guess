@@ -776,12 +776,15 @@ body.sheet-open { overflow: hidden; }
   .room:not([data-phase="lobby"]) .draw-status { flex: 0 0 auto; }
   /* 출제자: 채팅 패널은 흐름에서 빼고(캔버스 위 티커로 대체) 가운데 패널이 남은 높이를 채운다.
      툴바(팔레트)는 화면 하단에 고정되고, 캔버스는 그 위 남는 높이의 중앙에 4:3 으로 최대 크기로 놓인다. */
-  .room:not([data-phase="lobby"])[data-role="drawer"] .center-panel { flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; }
-  /* 출제자 채팅 버블 영역: 턴 띠 ↔ 캔버스 사이 남는 높이를 채우고 최근 메시지 3개를 아래 정렬로 보여준다. 누르면 채팅 시트 */
+  /* 출제자: 가운데 패널은 캔버스+팔레트만 담고 내용 크기만큼(하단 묶음). 남는 높이는 아래 채팅 버블 카드가 차지한다 */
+  .room:not([data-phase="lobby"])[data-role="drawer"] .center-panel { flex: 0 0 auto; overflow: hidden; display: flex; flex-direction: column; }
+  /* 출제자 채팅 버블 카드: 턴 띠 ↔ (캔버스+팔레트) 사이의 독립 패널. 남는 높이를 채우고 최근 메시지 3개를 아래 정렬. 누르면 채팅 시트 */
   .room:not([data-phase="lobby"])[data-role="drawer"] .drawer-chat {
-    display: flex; flex: 1 1 auto; min-height: 44px; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 4px;
-    overflow: hidden; padding: 6px 8px; border: 0; border-radius: 12px; background: #f8f6fc; text-align: left; width: 100%;
+    display: flex; flex: 1 1 auto; min-height: 60px; flex-direction: column; justify-content: flex-end; align-items: flex-start; gap: 4px;
+    overflow: hidden; padding: 10px 12px; border: 0; text-align: left; width: 100%;
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-sm);
   }
+  .drawer-chat:active { background: #f8f6fc; }
   .drawer-chat .chat-bubble { -webkit-backdrop-filter: none; backdrop-filter: none; animation: none; }
   .drawer-chat .dc-empty { font-size: 12px; color: var(--muted); font-weight: 700; align-self: center; }
   .room:not([data-phase="lobby"])[data-role="drawer"] .chat-ticker { display: none !important; } /* 티커는 버블 영역으로 대체(뒤의 inline-flex 규칙보다 우선) */

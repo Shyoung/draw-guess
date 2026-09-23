@@ -177,6 +177,9 @@ async function mainRun() {
       check(inside(dc) && ts && dc.y >= ts.y + ts.height - 0.5 && dc.y + dc.height <= c.y + 0.5, 'drawing(출제자): 채팅 버블 영역이 턴 띠와 캔버스 사이', `${fmt(ts)} / ${fmt(dc)} / ${fmt(c)}`);
       check(dcText.includes('아무말'), 'drawing(출제자): 버블 영역에 최신 메시지', dcText.slice(0, 40));
       check((await m.locator('#drawer-chat .chat-bubble').count()) >= 1, 'drawing(출제자): 버블 1개 이상');
+      check((await m.locator('.center-panel #drawer-chat').count()) === 0 && (await m.locator('.room-grid > #drawer-chat').count()) === 1, 'drawing(출제자): 채팅 버블 영역이 캔버스 패널과 분리된 독립 카드');
+      const cpBox = await box(m, '.center-panel');
+      check(dc && cpBox && dc.y + dc.height <= cpBox.y + 0.5, 'drawing(출제자): 버블 카드가 캔버스 패널 위쪽에 있고 겹치지 않음', `${fmt(dc)} / ${fmt(cpBox)}`);
       check(await m.locator('#chat-ticker').isHidden(), 'drawing(출제자): 캔버스 위 티커는 숨김(버블 영역으로 대체)');
       check(c && Math.abs((c.y + c.height) - t.y) <= 12, 'drawing(출제자): 캔버스와 팔레트가 한 묶음(간격 ≤ 12px)', `${Math.round(c.y + c.height)} vs ${Math.round(t.y)}`);
       // 턴 띠 → 플레이어 시트

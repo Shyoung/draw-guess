@@ -90,6 +90,9 @@
         <ul id="player-list" class="player-list"></ul>
       </aside>
 
+      <!-- 모바일 출제자 전용: 턴 띠와 캔버스 사이의 독립 카드. 최근 채팅 버블(누르면 채팅 시트). 데스크톱/관전자는 CSS로 숨김 -->
+      <button id="drawer-chat" class="panel drawer-chat" type="button" aria-label="채팅 열기" aria-haspopup="dialog" aria-controls="sheet-chat"></button>
+
       <!-- 가운데: 캔버스 / 설정 -->
       <section class="panel center-panel">
         <!-- lobby 1단계: 모드 선택 -->
@@ -160,8 +163,6 @@
         </div>
 
         <!-- 게임 단계: 캔버스 + 오버레이 -->
-        <!-- 모바일 출제자: 턴 띠와 캔버스 사이 최근 채팅 버블 영역(누르면 채팅 시트). 데스크톱/관전자는 CSS로 숨김 -->
-        <button id="drawer-chat" class="drawer-chat" type="button" aria-label="채팅 열기" aria-haspopup="dialog" aria-controls="sheet-chat"></button>
         <div id="canvas-wrap" class="canvas-wrap" hidden>
           <canvas id="canvas" width="800" height="600" aria-label="그림판"></canvas>
 

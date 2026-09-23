@@ -1647,7 +1647,8 @@
 
   /**
    * 출제자(모바일): 툴바를 화면 하단에 두고 캔버스는 그 위 남는 높이에 4:3 최대 크기로 맞춘다.
-   * 가운데 패널 높이 - 툴바 높이 - 간격 = 캔버스 최대 높이 → 너비 = min(패널 너비, 높이 × 4/3). 결과를 --dw 로 넘긴다.
+   * room-grid 높이에서 턴 띠 카드·채팅 버블 카드 최소 높이·패널 패딩·툴바·간격을 뺀 것이 캔버스 최대 높이
+   * → 너비 = min(패널 너비, 높이 × 4/3). 결과를 --dw 로 넘긴다. (채팅 카드는 남는 높이를 flex 로 채운다)
    */
   function fitDrawerCanvas() {
     var vr = $('view-room'), cp = document.querySelector('.center-panel'), cw = $('canvas-wrap'), tb = $('toolbar');
@@ -1658,7 +1659,12 @@
     var padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
     var gap = parseFloat(cs.rowGap || cs.gap) || 8;
     var innerW = cp.clientWidth - padX;
-    var availH = cp.clientHeight - padY - (tb && !tb.hidden ? tb.offsetHeight + gap : 0) - (44 + gap); // 채팅 버블 영역 최소분
+    var grid = cp.parentElement, gs = grid ? getComputedStyle(grid) : null;
+    var gridGap = gs ? (parseFloat(gs.rowGap || gs.gap) || 8) : 8;
+    var players = grid ? grid.querySelector('.players-panel') : null;
+    var DC_MIN = 60; // 채팅 버블 카드 최소 높이(.drawer-chat min-height)
+    var gridH = grid ? grid.clientHeight : cp.clientHeight;
+    var availH = gridH - (players ? players.offsetHeight + gridGap : 0) - (DC_MIN + gridGap) - padY - (tb && !tb.hidden ? tb.offsetHeight + gap : 0);
     if (innerW <= 0 || availH <= 0) return;
     var w = Math.max(120, Math.min(innerW, Math.floor(availH * 4 / 3)));
     cw.style.setProperty('--dw', w + 'px');
