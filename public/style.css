@@ -549,6 +549,11 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
   transform: translateY(100%); transition: transform .22s cubic-bezier(.2, .9, .3, 1);
 }
 .sheet.open .sheet-panel { transform: none; }
+.sheet-panel.dragging { transition: none; }
+/* 드래그로 닫기: 손잡이·머리 영역은 브라우저 스크롤 제스처를 막고 우리가 처리 */
+.sheet-handle, .sheet-head { touch-action: none; cursor: grab; }
+.sheet-handle { position: relative; }
+.sheet-handle::before { content: ""; position: absolute; left: -60px; right: -60px; top: -10px; bottom: -10px; } /* 손잡이 터치 영역 확대 */
 .sheet-panel-chat { height: 85%; }
 .sheet-handle { flex: 0 0 auto; width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 4px auto 8px; }
 .sheet-head { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 8px; }
@@ -764,9 +769,14 @@ body.sheet-open { overflow: hidden; }
   .room:not([data-phase="lobby"]) .canvas-wrap { flex: 0 0 auto; }
   .room:not([data-phase="lobby"]) .toolbar,
   .room:not([data-phase="lobby"]) .draw-status { flex: 0 0 auto; }
-  /* 출제자: 채팅 패널은 흐름에서 빼고(캔버스 위 티커로 대체) 가운데 패널이 남은 높이를 채운다 */
-  .room:not([data-phase="lobby"])[data-role="drawer"] .center-panel { flex: 1 1 auto; }
+  /* 출제자: 채팅 패널은 흐름에서 빼고(캔버스 위 티커로 대체) 가운데 패널이 남은 높이를 채운다.
+     툴바(팔레트)는 화면 하단에 고정되고, 캔버스는 그 위 남는 높이의 중앙에 4:3 으로 최대 크기로 놓인다. */
+  .room:not([data-phase="lobby"])[data-role="drawer"] .center-panel { flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; }
   .room:not([data-phase="lobby"])[data-role="drawer"] .chat-panel { display: none; }
+  /* 캔버스 래퍼는 4:3 을 유지한 채 JS(fitDrawerCanvas)가 준 --dw 너비로 놓이고, 위아래 auto 마진으로 남는 높이 중앙에 온다.
+     티커(.chat-ticker)는 래퍼 기준이므로 항상 캔버스 위에 겹친다. */
+  .room:not([data-phase="lobby"])[data-role="drawer"] .canvas-wrap { flex: 0 0 auto; margin: auto; width: var(--dw, 100%); max-width: 100%; }
+  .room:not([data-phase="lobby"])[data-role="drawer"] .toolbar { flex: 0 0 auto; margin-top: 0; position: sticky; bottom: 0; }
   /* 관전자: 채팅 패널이 남은 높이를 전부 차지(목록만 내부 스크롤), 입력줄은 바닥 고정.
      최소 128px = 패딩 14 + 목록 2줄 56 + 여백 6 + 입력줄 ~46 — 이보다 모자라면 가운데 패널이 스크롤로 양보한다 */
   .room:not([data-phase="lobby"])[data-role="guesser"] .chat-panel { flex: 1 1 0; min-height: 128px; display: flex; flex-direction: column; padding: 6px 10px 8px; }

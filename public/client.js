@@ -934,6 +934,7 @@
   }
 
   function renderCenter() {
+    requestAnimationFrame(fitDrawerCanvas); // 레이아웃 확정 후 출제자 캔버스 크기 맞춤(모바일)
     var lobby = state.phase === 'lobby';
     var sp = $('settings-panel'), mp = $('mode-panel'), cw = $('canvas-wrap'), tb = $('toolbar'), ds = $('draw-status');
     if (mp) mp.hidden = !(lobby && state.lobbyStep === 'mode');
@@ -1520,12 +1521,33 @@
     placeNode($('chat-list'), container); placeNode($('chat-form'), container);
   }
 
+  // 기기 뒤로가기로 시트 닫기: 열 때 history 항목을 하나 넣고, popstate 가 오면 닫는다.
+  // UI(✕·배경·드래그·ESC)로 닫을 때는 우리가 넣은 항목을 history.back() 으로 걷어내며, 그때 오는 popstate 는 무시한다.
+  var sheetPopGuard = false;
+  function sheetHistoryPush(id) {
+    try {
+      if (history.state && history.state.sheet) history.replaceState({ sheet: id }, '');
+      else history.pushState({ sheet: id }, '');
+    } catch (e) { /* ignore */ }
+  }
+  function sheetHistoryPop() {
+    try {
+      if (history.state && history.state.sheet) { sheetPopGuard = true; history.back(); }
+    } catch (e) { sheetPopGuard = false; }
+  }
+  window.addEventListener('popstate', function () {
+    if (sheetPopGuard) { sheetPopGuard = false; return; }
+    if (openSheetId) closeSheet(false, true);
+  });
+
   function openSheet(id) {
     if (!mobileMq.matches) return;
     var s = $(id); if (!s) return;
-    if (openSheetId && openSheetId !== id) closeSheet(true);
+    if (openSheetId && openSheetId !== id) closeSheet(true, true);
     if (sheetTimer) { clearTimeout(sheetTimer); sheetTimer = null; }
     openSheetId = id;
+    sheetHistoryPush(id);
+    var panel0 = s.querySelector('.sheet-panel'); if (panel0) { panel0.style.transform = ''; panel0.classList.remove('dragging'); }
     if (id === 'sheet-chat') moveChatInto($('sheet-chat-body'));
     s.hidden = false;
     document.body.classList.add('sheet-open');
@@ -1535,11 +1557,14 @@
     var cb = s.querySelector('.sheet-close');
     if (cb) { try { cb.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
   }
-  function closeSheet(immediate) {
+  function closeSheet(immediate, fromHistory) {
     var id = openSheetId; if (!id) return;
     var s = $(id); openSheetId = null;
     document.body.classList.remove('sheet-open');
+    if (!fromHistory) sheetHistoryPop();
     if (!s) return;
+    var panel = s.querySelector('.sheet-panel');
+    if (panel) { panel.classList.remove('dragging'); panel.style.transform = ''; }
     s.classList.remove('open');
     var done = function () {
       sheetTimer = null; s.hidden = true;
@@ -1547,6 +1572,47 @@
       if (id === 'sheet-players') { var sl = $('sheet-player-list'); if (sl) sl.innerHTML = ''; }
     };
     if (immediate) done(); else sheetTimer = setTimeout(done, 220);
+  }
+
+  /**
+   * 시트를 아래로 끌어 닫기. 손잡이·머리는 어디서든, 본문은 맨 위(scrollTop 0)에서 아래로 끌 때만 잡는다.
+   * 90px 이상 내리거나 빠르게 튕기면 닫고, 아니면 제자리로.
+   */
+  function bindSheetDrag(panel) {
+    var handle = panel.querySelector('.sheet-handle'), head = panel.querySelector('.sheet-head'), body = panel.querySelector('.sheet-body');
+    var startY = 0, lastY = 0, lastT = 0, dy = 0, active = false, fromBody = false;
+    function onDown(e) {
+      if (!openSheetId || e.button > 0) return;
+      fromBody = !!(body && body.contains(e.target));
+      if (fromBody && body.scrollTop > 0) return;
+      if (e.target.closest && e.target.closest('button, input, textarea, select, a')) return;
+      active = true; dy = 0; startY = lastY = e.clientY; lastT = e.timeStamp;
+      try { panel.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      panel.classList.add('dragging');
+    }
+    function onMove(e) {
+      if (!active) return;
+      var d = e.clientY - startY;
+      if (fromBody && d < 0) { cancel(); return; } // 본문에서 위로 = 스크롤 의도
+      dy = Math.max(0, d); lastY = e.clientY; lastT = e.timeStamp;
+      panel.style.transform = 'translateY(' + dy + 'px)';
+      if (dy > 0 && e.cancelable) e.preventDefault();
+    }
+    function onUp(e) {
+      if (!active) return;
+      active = false;
+      var dt = Math.max(1, e.timeStamp - lastT), v = (e.clientY - lastY) / dt; // px/ms (아래 방향 +)
+      panel.classList.remove('dragging');
+      if (dy > 90 || (dy > 24 && v > 0.5)) { closeSheet(false); return; }
+      panel.style.transform = '';
+    }
+    function cancel() { active = false; panel.classList.remove('dragging'); panel.style.transform = ''; }
+    [handle, head, body].forEach(function (el) { if (el) el.addEventListener('pointerdown', onDown); });
+    panel.addEventListener('pointermove', onMove);
+    panel.addEventListener('pointerup', onUp);
+    panel.addEventListener('pointercancel', cancel);
+    // 본문에서 아래로 끌 때 브라우저의 당겨서-새로고침/스크롤을 막는다
+    if (body) body.addEventListener('touchmove', function (e) { if (active && dy > 0 && e.cancelable) e.preventDefault(); }, { passive: false });
   }
 
   /** --vvh/--vvt(visualViewport) 갱신 + 컴팩트 모드 판정 */
@@ -1561,6 +1627,26 @@
     var vr = $('view-room');
     if (vr) { if (compact) vr.setAttribute('data-compact', '1'); else vr.removeAttribute('data-compact'); }
     if (compact !== lastCompact) { lastCompact = compact; if (!compact) setTimeout(scrollChatBottom, 0); renderChatPeek(false); }
+    fitDrawerCanvas();
+  }
+
+  /**
+   * 출제자(모바일): 툴바를 화면 하단에 두고 캔버스는 그 위 남는 높이에 4:3 최대 크기로 맞춘다.
+   * 가운데 패널 높이 - 툴바 높이 - 간격 = 캔버스 최대 높이 → 너비 = min(패널 너비, 높이 × 4/3). 결과를 --dw 로 넘긴다.
+   */
+  function fitDrawerCanvas() {
+    var vr = $('view-room'), cp = document.querySelector('.center-panel'), cw = $('canvas-wrap'), tb = $('toolbar');
+    if (!vr || !cp || !cw) return;
+    var on = mobileMq.matches && state.phase !== 'lobby' && isDrawer();
+    if (!on) { cw.style.removeProperty('--dw'); return; }
+    var cs = getComputedStyle(cp);
+    var padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    var gap = parseFloat(cs.rowGap || cs.gap) || 8;
+    var innerW = cp.clientWidth - padX;
+    var availH = cp.clientHeight - padY - (tb && !tb.hidden ? tb.offsetHeight + gap : 0);
+    if (innerW <= 0 || availH <= 0) return;
+    var w = Math.max(120, Math.min(innerW, Math.floor(availH * 4 / 3)));
+    cw.style.setProperty('--dw', w + 'px');
   }
 
   /** 채팅 요약: 접힌 채팅 바(마지막 메시지) · 출제자 티커(최신 1개) · 컴팩트 말풍선(최근 3개). fresh=true 면 티커를 4초간 진하게 */
@@ -1602,6 +1688,7 @@
     var tk = $('chat-ticker'); if (tk) tk.addEventListener('click', function () { openSheet('sheet-chat'); });
     var ce = $('btn-chat-expand'); if (ce) ce.addEventListener('click', function () { openSheet('sheet-chat'); });
     document.querySelectorAll('.sheet [data-sheet-close]').forEach(function (n) { n.addEventListener('click', function () { closeSheet(false); }); });
+    document.querySelectorAll('.sheet .sheet-panel').forEach(bindSheetDrag);
     // 메뉴 시트에서 나가기/초대 복사를 누르면 시트를 닫는다
     var bl = $('btn-leave'); if (bl) bl.addEventListener('click', function () { closeSheet(true); });
     var bc = $('btn-copy'); if (bc) bc.addEventListener('click', function () { if (openSheetId === 'sheet-menu') closeSheet(false); });
@@ -1612,6 +1699,7 @@
       window.visualViewport.addEventListener('scroll', updateViewportVars);
     }
     window.addEventListener('resize', updateViewportVars);
+    if (window.ResizeObserver) { var cpEl = document.querySelector('.center-panel'); if (cpEl) new ResizeObserver(function () { fitDrawerCanvas(); }).observe(cpEl); }
     window.addEventListener('orientationchange', function () { setTimeout(updateViewportVars, 60); });
     updateViewportVars();
     placeMobileChrome();

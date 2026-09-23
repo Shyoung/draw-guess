@@ -53,7 +53,16 @@ async function openSheet(page, btnSel, sheetId) {
 async function closeSheet(page, sheetId, how) {
   if (how === 'button') await page.click(`#${sheetId} .sheet-close`);
   else if (how === 'backdrop') await page.locator(`#${sheetId} .sheet-backdrop`).click({ position: { x: 10, y: 10 } });
-  else await page.keyboard.press('Escape');
+  else if (how === 'drag') {
+    // 손잡이를 아래로 200px 끌어 닫기
+    const h = await page.locator(`#${sheetId} .sheet-handle`).boundingBox();
+    const x = h.x + h.width / 2, y = h.y + h.height / 2;
+    await page.mouse.move(x, y); await page.mouse.down();
+    for (let i = 1; i <= 8; i++) await page.mouse.move(x, y + i * 25, { steps: 2 });
+    await page.mouse.up();
+  } else if (how === 'back') {
+    await page.goBack(); // 기기 뒤로가기 = history.back()
+  } else await page.keyboard.press('Escape');
   await page.waitForSelector(`#${sheetId}`, { state: 'hidden', timeout: 3000 });
   await sleep(100);
 }
@@ -107,6 +116,21 @@ async function mainRun() {
       const lastMsg = await box(m, '#sheet-chat #chat-list > *:last-child');
       check(inside(lastMsg), '로비: 채팅 시트에 마지막 메시지 보임', fmt(lastMsg));
       await closeSheet(m, 'sheet-chat', 'backdrop');
+      // 드래그로 닫기
+      await openSheet(m, '#btn-chat-expand', 'sheet-chat');
+      await closeSheet(m, 'sheet-chat', 'drag');
+      check(await m.locator('#sheet-chat').isHidden(), '로비: 시트를 아래로 끌어 닫힘');
+      // 기기 뒤로가기로 닫기 (방은 유지되어야 함)
+      const urlBefore = m.url();
+      await openSheet(m, '#btn-chat-expand', 'sheet-chat');
+      await closeSheet(m, 'sheet-chat', 'back');
+      check(await m.locator('#sheet-chat').isHidden(), '로비: 뒤로가기로 시트 닫힘');
+      check(await m.locator('#view-room').isVisible() && m.url() === urlBefore, '로비: 뒤로가기 후에도 방 화면 유지', m.url());
+      // 시트를 ✕로 닫은 뒤 뒤로가기를 눌러도 방을 떠나지 않아야 함 (우리가 넣은 history 항목이 정리됐는지)
+      await openSheet(m, '#btn-chat-expand', 'sheet-chat');
+      await closeSheet(m, 'sheet-chat', 'button');
+      const histLen = await m.evaluate(() => history.state && history.state.sheet ? 'sheet-state-left' : 'clean');
+      check(histLen === 'clean', '로비: ✕로 닫으면 시트용 history 항목이 정리됨', histLen);
       check((await m.locator('#chat-panel #chat-input').count()) === 1, '로비: 시트 닫으면 #chat-input 이 채팅 패널로 복귀');
     }
     if (stage === 'choosing-drawer') {
@@ -129,7 +153,10 @@ async function mainRun() {
       check(c && Math.abs(c.width / c.height - 4 / 3) < 0.02, 'drawing(출제자): 캔버스 4:3', c && (c.width / c.height).toFixed(3));
       check(inside(t), 'drawing(출제자): #toolbar 뷰포트 안', fmt(t));
       check(t && t.height <= 100, 'drawing(출제자): 툴바 높이 ≤ 100px', t && Math.round(t.height));
-      check(c && t && c.y + c.height <= t.y + 0.5, 'drawing(출제자): 툴바가 캔버스 바로 아래(겹침 없음)', `${fmt(c)} / ${fmt(t)}`);
+      check(c && t && c.y + c.height <= t.y + 0.5, 'drawing(출제자): 툴바가 캔버스 위에 겹치지 않음', `${fmt(c)} / ${fmt(t)}`);
+      check(t && t.y + t.height >= VH - 40, 'drawing(출제자): 툴바(팔레트)가 화면 하단에 고정', t && Math.round(t.y + t.height));
+      const cw = await box(m, '#canvas-wrap');
+      check(c && cw && Math.abs((c.y - cw.y) - ((cw.y + cw.height) - (c.y + c.height))) <= 4, 'drawing(출제자): 캔버스가 남는 영역 세로 중앙', `${fmt(c)} in ${fmt(cw)}`);
       const pal = await m.locator('#palette').evaluate((e) => [Math.round(e.getBoundingClientRect().height), e.scrollWidth > e.clientWidth]);
       check(pal[0] <= 40 && pal[1], 'drawing(출제자): 팔레트 한 줄 + 가로 스크롤', pal.join(' '));
       check((await m.locator('#custom-color-input').count()) === 1, 'drawing(출제자): 커스텀 색상 피커 존재');
