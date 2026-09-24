@@ -43,7 +43,7 @@ function startServer(label) {
   return new Promise((resolve, reject) => {
     const proc = spawn(process.execPath, ['server/index.js'], {
       cwd: ROOT,
-      env: { ...process.env, PORT: String(PORT), STORE_URL: 'file:' + STATE_FILE, RECONNECT_GRACE_MS: '60000' },
+      env: { ...process.env, PORT: String(PORT), STORE_URL: 'file:' + STATE_FILE, RECONNECT_GRACE_MS: '60000', HOST_RETURN_MS: '1500' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     proc.logs = '';
@@ -190,6 +190,47 @@ const lastEv = (c, ev) => { const e = c.log.filter((x) => x.ev === ev).pop(); re
   await sleep(600);
   const finalStore = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
   check('room removed from store when everyone leaves', !finalStore[code], Object.keys(finalStore));
+
+  // ── 재시작 복원 뒤 방장이 돌아오지 않으면: 잠시 기다렸다 접속 중인 사람에게 방장을 넘긴다 ──
+  const h1 = await connect('H1'), h2 = await connect('H2');
+  const hc = await emitAck(h1, 'room:create', { name: '방장', avatar: {}, token: 'tok-host-return-0001' });
+  const hj = await emitAck(h2, 'room:join', { roomCode: hc.roomCode, name: '손님', avatar: {}, token: 'tok-host-return-0002' });
+  const HOST = hc.playerId, GUEST = hj.playerId;
+  await sleep(500);
+  await stopServer(serverProc);
+  serverProc = await startServer('C');
+  const hr2 = await connect('R2');
+  const firstStP = waitNext(hr2, 'room:state', undefined, 3000, 'first state');
+  const movedP = waitNext(hr2, 'room:state', (st) => st.hostId === GUEST, 6000, 'host handover');
+  const sysP = waitNext(hr2, 'chat:message', (m) => m.kind === 'system' && /방장이 돌아오지 않아/.test(m.text), 6000, 'handover message');
+  const t0 = Date.now();
+  const hrj2 = await emitAck(hr2, 'room:rejoin', { roomCode: hc.roomCode, token: 'tok-host-return-0002' });
+  const firstSt = await firstStP;
+  check('restore without host: guest rejoins, host still the (offline) original at first', hrj2.ok && firstSt.hostId === HOST && byId(firstSt.players, HOST).connected === false, firstSt);
+  const moved = await movedP.catch(() => null);
+  check('host did not come back → host handed to the connected guest after ~1.5s', !!moved && Date.now() - t0 >= 1200 && byId(moved.players, HOST) && byId(moved.players, HOST).connected === false, moved && { host: moved.hostId, ms: Date.now() - t0 });
+  check('handover system message', !!(await sysP.catch(() => null)));
+  const hr1 = await connect('R1');
+  const backP = waitNext(hr1, 'room:state', (st) => byId(st.players, HOST) && byId(st.players, HOST).connected, 3000, 'host back');
+  const hrj1 = await emitAck(hr1, 'room:rejoin', { roomCode: hc.roomCode, token: 'tok-host-return-0001' });
+  const back = await backP.catch(() => null);
+  check('original host rejoins later: same seat, host stays with the guest', hrj1.ok && hrj1.playerId === HOST && !!back && back.hostId === GUEST, back && back.hostId);
+  // 방장이 제때 돌아오면 그대로 (저장 스로틀 300ms 가 끝난 뒤 종료 — Windows 에서는 SIGTERM 처리 없이 바로 끝난다)
+  await sleep(800);
+  await stopServer(serverProc);
+  serverProc = await startServer('D');
+  const q2 = await connect('Q2'), q1 = await connect('Q1');
+  await emitAck(q2, 'room:rejoin', { roomCode: hc.roomCode, token: 'tok-host-return-0002' });
+  await sleep(300);
+  await emitAck(q1, 'room:rejoin', { roomCode: hc.roomCode, token: 'tok-host-return-0001' });
+  const stayP = waitNext(q1, 'room:state', undefined, 3000, 'state after host back');
+  q1.emit('chat:message', { text: 'ping' });
+  const stay0 = await stayP.catch(() => null);
+  await sleep(2000);
+  const lastSt = [...q2.log].reverse().find((e) => e.ev === 'room:state');
+  check('host (now guest-seat owner) returning within the window keeps host', !!stay0 && lastSt && lastSt.payload.hostId === GUEST && !q2.log.some((e) => e.ev === 'chat:message' && /방장이 돌아오지 않아/.test(e.payload.text)), { last: lastSt && lastSt.payload.hostId, GUEST, HOST, stay0: !!stay0, msgs: q2.log.filter((e) => e.ev === 'chat:message').map((e) => e.payload.text) });
+  for (const c of [q1, q2]) c.emit('room:leave');
+  await sleep(400);
 
   cleanup(failures ? 1 : 0);
 })().catch((err) => {

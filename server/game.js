@@ -17,6 +17,12 @@ const CHOOSING_TIME = 15; // 초
 const TURN_END_TIME = 5; // 초
 const GAME_OVER_TIME = 10; // 초
 // 연결이 끊긴 플레이어를 방에 남겨두는 시간(ms). 이 안에 room:rejoin 하면 점수·자리를 그대로 이어간다. 0이면 즉시 퇴장.
+/**
+ * 방장이 오프라인인데 접속자가 있을 때, 방장이 돌아오길 기다리는 시간(ms).
+ * 방장이 "접속 중인 상태에서" 끊기면 바로 넘기지만(markDisconnected), 서버 재시작 복원처럼 방장이 처음부터
+ * 오프라인이면 넘길 계기가 없어 퇴장 유예(60초)가 끝날 때까지 방장 없는 방이 된다 → 이 시간 뒤에 넘긴다.
+ */
+const HOST_RETURN_MS = process.env.HOST_RETURN_MS != null ? Math.max(0, Number(process.env.HOST_RETURN_MS) || 0) : 10000;
 const RECONNECT_GRACE_MS = process.env.RECONNECT_GRACE_MS != null
   ? Math.max(0, Number(process.env.RECONNECT_GRACE_MS) || 0)
   : 60000;
@@ -450,6 +456,7 @@ class Room {
   /** 방 삭제 시 호출. 이후 모든 콜백/전송은 no-op */
   destroy() {
     this.clearTimers();
+    this.clearHostTimer();
     for (const p of this.players) this.clearGrace(p);
     if (this._persistTimer) { clearTimeout(this._persistTimer); this._persistTimer = null; }
     this.destroyed = true;
@@ -514,7 +521,35 @@ class Room {
     };
   }
 
+  /**
+   * 방장 확인: 방장 id 가 목록에 없으면 즉시 바로잡고, 방장이 오프라인인데 접속자가 있으면 HOST_RETURN_MS 뒤에 넘긴다.
+   * (그 사이 방장이 돌아오면 그대로)
+   */
+  checkHost() {
+    if (!this.players.length) { this.clearHostTimer(); return; }
+    if (!this.getPlayer(this.hostId)) {
+      const next = this.connectedPlayers()[0] || this.players[0];
+      this.hostId = next.id;
+    }
+    const host = this.getPlayer(this.hostId);
+    const next = this.connectedPlayers()[0];
+    if (host.connected || !next) { this.clearHostTimer(); return; }
+    if (this._hostTimer) return;
+    this._hostTimer = setTimeout(() => {
+      this._hostTimer = null;
+      if (this.destroyed) return;
+      const h = this.getPlayer(this.hostId);
+      const n = this.connectedPlayers()[0];
+      if ((h && h.connected) || !n) return;
+      this.hostId = n.id;
+      this.systemMessage(`방장이 돌아오지 않아 ${n.name}님이 방장이 됐어요.`);
+      this.broadcastState();
+    }, HOST_RETURN_MS);
+  }
+  clearHostTimer() { if (this._hostTimer) { clearTimeout(this._hostTimer); this._hostTimer = null; } }
+
   broadcastState() {
+    this.checkHost();
     this.emitAll('room:state', this.toState());
     this.persist();
   }
@@ -1328,6 +1363,7 @@ module.exports = {
   DEFAULT_SETTINGS,
   CHOOSING_TIME,
   TURN_END_TIME,
+  HOST_RETURN_MS,
   GAME_OVER_TIME,
   RECONNECT_GRACE_MS,
   MIN_PLAYERS,

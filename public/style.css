@@ -403,7 +403,12 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 .settings-details[open] { padding-bottom: 14px; }
 .details-note { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--secondary-dark); }
 .setting-help { font-size: 11px; font-weight: 500; color: var(--muted); line-height: 1.35; }
-.settings-summary { display: flex; flex-wrap: wrap; gap: 6px; }
+.settings-summary { display: flex; flex-direction: column; gap: 10px; }
+.sum-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sum-words { background: #f8f6fc; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.sum-words-title { font-size: 13px; font-weight: 800; }
+.sum-words-list { display: flex; flex-wrap: wrap; gap: 6px; max-height: 160px; overflow-y: auto; }
+.sum-word { font-size: 13px; font-weight: 600; background: #fff; border-radius: 999px; padding: 3px 10px; box-shadow: inset 0 0 0 1px var(--line); }
 .settings-summary .sum-chip { font-size: 13px; font-weight: 700; background: #f8f6fc; border-radius: 999px; padding: 6px 12px; color: var(--text); }
 .settings-summary .sum-chip.sum-main { background: var(--secondary-soft); color: var(--secondary-dark); }
 /* 방 설정 창(효과음 · 프로필) */
@@ -506,8 +511,9 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 }
 .msg { font-size: 14px; padding: 6px 10px; border-radius: 12px; background: #f8f6fc; display: flex; align-items: flex-start; gap: 8px; overflow-wrap: anywhere; }
 .msg .avatar { width: 24px; height: 24px; font-size: 14px; flex: 0 0 auto; margin-top: 1px; }
-.msg-name { font-weight: 800; flex: 0 0 auto; }
-.msg-text { flex: 1; }
+.msg-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.msg-name { font-weight: 800; font-size: 12px; line-height: 1.3; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-text { line-height: 1.4; }
 .msg-mine { background: var(--blue-soft); }
 .msg-system { background: transparent; color: var(--muted); font-style: italic; font-size: 13px; justify-content: center; text-align: center; padding: 2px 6px; }
 .msg-correct { background: var(--green-soft); color: #167a4c; font-weight: 800; }
@@ -938,7 +944,9 @@ body.sheet-open { overflow: hidden; }
     font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); animation: bubble-in .2s ease-out;
   }
-  .chat-bubble .bb-name { font-weight: 800; opacity: .85; margin-right: 4px; }
+  /* 말풍선: 닉네임 한 줄(작게) · 내용 한 줄 — 긴 닉네임이 내용을 밀어내지 않게 */
+  .chat-bubble .bb-name, .chat-bubble .bb-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-bubble .bb-name { font-size: 10px; font-weight: 800; opacity: .8; line-height: 1.25; }
   .chat-bubble.kind-correct { background: rgba(30, 154, 98, 0.88); }
   .chat-bubble.kind-close { background: rgba(214, 140, 0, 0.88); }
   .chat-bubble.kind-system { background: rgba(108, 111, 133, 0.62); font-style: italic; font-weight: 500; }

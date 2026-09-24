@@ -1406,11 +1406,21 @@
         var cw = parseWords(s.customWords || '').words.length;
         var chips = [[preset ? PRESET_NAMES[preset] : '직접 설정', 'sum-main'], [fixed ? s.rounds + '문제' : s.rounds + '라운드'], ['한 턴 ' + s.drawTime + '초'],
           [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']];
-        if (cw) chips.push([(s.customWordsOnly ? '우리 단어만 ' : '우리 단어 ') + cw + '개']);
-        var skey = JSON.stringify(chips);
+        var cwList = cw ? parseWords(s.customWords || '').words : [];
+        var skey = JSON.stringify([chips, cwList, !!s.customWordsOnly]);
         if (sum.getAttribute('data-key') !== skey) {
           sum.setAttribute('data-key', skey); sum.innerHTML = '';
-          chips.forEach(function (c0) { sum.appendChild(el('span', 'sum-chip' + (c0[1] ? ' ' + c0[1] : ''), c0[0])); });
+          var chipRow = el('div', 'sum-chips');
+          chips.forEach(function (c0) { chipRow.appendChild(el('span', 'sum-chip' + (c0[1] ? ' ' + c0[1] : ''), c0[0])); });
+          sum.appendChild(chipRow);
+          if (cwList.length) {
+            var box = el('div', 'sum-words');
+            box.appendChild(el('div', 'sum-words-title', '우리만의 단어 ' + cwList.length + '개' + (s.customWordsOnly ? ' · 이 단어로만 출제' : ' · 기본 단어와 섞어서 출제')));
+            var wl = el('div', 'sum-words-list');
+            cwList.forEach(function (w) { wl.appendChild(el('span', 'sum-word', w)); });
+            box.appendChild(wl);
+            sum.appendChild(box);
+          }
         }
       }
     }
@@ -1567,6 +1577,13 @@
   // ------------------------------------------------------------------
   // Chat
   // ------------------------------------------------------------------
+  /** 채팅 한 줄: 닉네임(위) · 내용(아래). 닉네임이 길어도 내용 폭이 줄지 않는다 */
+  function msgBody(name, text) {
+    var b = el('div', 'msg-body');
+    if (name) b.appendChild(el('span', 'msg-name', String(name)));
+    b.appendChild(el('span', 'msg-text', text));
+    return b;
+  }
   function appendChat(m) {
     var list = $('chat-list'); if (!list) return;
     var kind = typeof m.kind === 'string' ? m.kind : 'chat';
@@ -1586,13 +1603,11 @@
     }
     else if (kind === 'guessed-chat') {
       node = el('div', 'msg msg-guessed'); node.appendChild(el('span', 'msg-icon', '🔒'));
-      if (m.name) node.appendChild(el('span', 'msg-name', String(m.name)));
-      node.appendChild(el('span', 'msg-text', text));
+      node.appendChild(msgBody(m.name, text));
     } else {
       node = el('div', 'msg msg-chat' + (m.id && m.id === myId ? ' msg-mine' : ''));
       node.appendChild(avatarNode(m.avatar));
-      if (m.name) node.appendChild(el('span', 'msg-name', String(m.name)));
-      node.appendChild(el('span', 'msg-text', text));
+      node.appendChild(msgBody(m.name, text));
     }
     list.appendChild(node);
     while (list.children.length > 300) list.removeChild(list.firstChild);
@@ -2662,7 +2677,7 @@
         recent.forEach(function (m) {
           var b = el('div', 'chat-bubble ' + kindClass(m.kind) + (m.mine ? ' mine' : ''));
           if ((m.kind === 'chat' || m.kind === 'guessed-chat') && m.name) b.appendChild(el('span', 'bb-name', m.name));
-          b.appendChild(document.createTextNode(m.text));
+          b.appendChild(el('span', 'bb-text', m.text));
           dc.appendChild(b);
         });
       }
@@ -2673,7 +2688,7 @@
       if (mobileMq.matches) recent.forEach(function (m) {
         var b = el('div', 'chat-bubble ' + kindClass(m.kind) + (m.mine ? ' mine' : ''));
         if ((m.kind === 'chat' || m.kind === 'guessed-chat') && m.name) b.appendChild(el('span', 'bb-name', m.name));
-        b.appendChild(document.createTextNode(m.text));
+        b.appendChild(el('span', 'bb-text', m.text));
         bb.appendChild(b);
       });
     }

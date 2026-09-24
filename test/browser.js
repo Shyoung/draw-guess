@@ -148,6 +148,14 @@ async function say(page, text) {
     await sleep(500);
     check((await p2.inputValue('#set-rounds')) === '1', '설정 변경 동기화(rounds=1)', await p2.inputValue('#set-rounds'));
     check((await p2.inputValue('#set-drawTime')) === '30', '설정 변경 동기화(drawTime=30)', await p2.inputValue('#set-drawTime'));
+    await p2.waitForFunction(() => document.querySelectorAll('#settings-summary .sum-word').length === 12, null, { timeout: 3000 }).catch(() => {});
+    check((await p2.locator('#settings-summary .sum-word').count()) === 12 && (await p2.textContent('#settings-summary .sum-words-title')).includes('이 단어로만'), '방장이 아닌 사람: 우리만의 단어 목록 12개 · "이 단어로만 출제"', await p2.locator('#settings-summary .sum-word').count());
+    // 채팅: 닉네임 위 · 내용 아래
+    await p2.fill('#chat-input', '긴 닉네임이어도 내용 폭이 줄지 않아요');
+    await p2.press('#chat-input', 'Enter');
+    await host.waitForSelector('#chat-list .msg-chat .msg-body .msg-text', { timeout: 3000 });
+    const msgLay = await host.evaluate(() => { const m = [...document.querySelectorAll('#chat-list .msg-chat')].pop(); const n = m.querySelector('.msg-name').getBoundingClientRect(), t = m.querySelector('.msg-text').getBoundingClientRect(); return { below: t.top >= n.bottom - 1, sameLeft: Math.abs(t.left - n.left) < 2 }; });
+    check(msgLay.below && msgLay.sameLeft, '채팅: 닉네임 아래에 내용', msgLay);
     await host.screenshot({ path: path.join(SHOTS, 'e2e-lobby.png') });
 
     // 로비 채팅
