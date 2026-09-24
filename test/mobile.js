@@ -87,8 +87,25 @@ async function mainRun() {
     const m = ctx.mobile;
     if (stage === 'landing') {
       const mm = await metrics(m);
-      check(mm.sw <= VW, '랜딩: 가로 스크롤 없음', mm.sw);
+      check(mm.sw <= VW, '랜딩(1단계): 가로 스크롤 없음', mm.sw);
       check(parseFloat(await m.locator('#nick').evaluate((e) => getComputedStyle(e).fontSize)) >= 16, '랜딩: 닉네임 입력 font-size ≥ 16px');
+      check(await m.locator('#landing-step-profile').isVisible() && await m.locator('#landing-step-room').isHidden(), '랜딩: 첫 방문은 1단계(프로필)');
+      const card = await box(m, '.landing-card');
+      check(card && card.x <= 16.5 && card.x + card.width >= VW - 16.5, '랜딩: 카드가 거의 전체 폭(좌우 여백 ≤ 16px)', fmt(card));
+      const cb = await box(m, '#color-row .color-btn'), eb = await box(m, '#emoji-strip .emoji-btn'), nb = await box(m, '#btn-profile-next');
+      check(cb && cb.width >= 32 && cb.height >= 32, '랜딩: 색상 버튼 탭 영역 ≥ 32px', fmt(cb));
+      check(eb && eb.height >= 36, '랜딩: 얼굴 버튼 높이 ≥ 36px', fmt(eb));
+      check(nb && nb.height >= 44, '랜딩: "다음" 버튼 높이 ≥ 44px', fmt(nb));
+    }
+    if (stage === 'landing-room') {
+      const mm = await metrics(m);
+      check(mm.sw <= VW, '랜딩(2단계): 가로 스크롤 없음', mm.sw);
+      check((await m.locator('#me-name').textContent()).trim() === '모바일' && (await m.locator('#me-status').textContent()).trim() === '게스트', '랜딩(2단계): 프로필 요약(닉네임·게스트)');
+      for (const sel of ['#btn-create', '#btn-join', '#room-code-input', '#btn-profile-edit']) {
+        const b = await box(m, sel);
+        check(inside(b) && b.height >= 38, `랜딩(2단계): ${sel} 화면 안 · 높이 ≥ 38px`, fmt(b));
+      }
+      check(parseFloat(await m.locator('#room-code-input').evaluate((e) => getComputedStyle(e).fontSize)) >= 16, '랜딩(2단계): 방 코드 입력 font-size ≥ 16px');
     }
     if (stage === 'lobby-mode') {
       const mm = await metrics(m);

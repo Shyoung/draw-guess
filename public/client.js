@@ -891,7 +891,6 @@
       name.appendChild(document.createTextNode(p.name));
       if (isMe) { name.appendChild(document.createTextNode(' ')); name.appendChild(el('span', 'me-tag', '(나)')); }
       if (p.id === state.hostId) { name.appendChild(document.createTextNode(' ')); var crown = el('span', 'host-tag', '👑'); crown.title = '호스트'; name.appendChild(crown); }
-      if (p.loggedIn) { name.appendChild(document.createTextNode(' ')); var lb = el('span', 'login-badge', '✔'); lb.title = '로그인 사용자'; lb.setAttribute('aria-label', '로그인 사용자'); name.appendChild(lb); }
       if (isNext) { name.appendChild(document.createTextNode(' ')); var nt = el('span', 'next-tag', '다음 차례'); nt.title = '다음 턴에 그릴 차례예요'; name.appendChild(nt); }
       if (p.connected === false) { name.appendChild(document.createTextNode(' ')); var ot = el('span', 'offline-tag', '연결 끊김'); ot.title = '잠시 후 돌아올 수 있어요'; name.appendChild(ot); }
       info.appendChild(name);
@@ -1209,6 +1208,125 @@
     var row = $('color-row');
     if (row) row.querySelectorAll('.color-btn').forEach(function (b) { b.setAttribute('aria-checked', b.getAttribute('data-color') === profile.color ? 'true' : 'false'); });
   }
+  // ------------------------------------------------------------------
+  // 랜딩 2단계: 1) 프로필(로그인 또는 게스트 닉네임·아바타) → 2) 방(만들기 / 코드로 참가 / 초대받은 방)
+  //   첫 화면: 저장된 닉네임이 있으면 2단계, 없으면 1단계. 로그인(세션 복원·OAuth 복귀 포함)되어 프로필이 오면 2단계로.
+  //   history: 2단계로 갈 때 { landing:'room' } 항목을 하나 넣는다(바로 아래 항목은 { landing:'profile' }).
+  //   기기 뒤로가기로 그 항목에서 내려오면 1단계. "프로필 수정"·로그아웃은 우리가 넣은 항목을 history.back() 으로 걷어낸다.
+  // ------------------------------------------------------------------
+  var landing = { step: 'profile', invite: null, autoAdvance: false };
+  function cleanCode(v) { return String(v || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); }
+  function nickValue() { var n = $('nick'); return (n ? n.value : profile.name).trim().slice(0, 12); }
+  function updateNextBtn() { var b = $('btn-profile-next'); if (b) b.disabled = !nickValue(); }
+  function focusNode(n) { if (n) { try { n.focus({ preventScroll: true }); } catch (e) { /* ignore */ } } }
+  /** parent 의 자식 순서를 nodes 순서로 맞춘다(이미 그 자리면 건드리지 않아 포커스 유지) */
+  function orderChildren(parent, nodes) {
+    if (!parent) return;
+    nodes = nodes.filter(Boolean);
+    for (var i = 0; i < nodes.length; i++) {
+      var ref = parent.children[i] || null;
+      if (ref !== nodes[i]) parent.insertBefore(nodes[i], ref);
+    }
+  }
+  function renderLanding() {
+    if (inRoom) return;
+    var sp = $('landing-step-profile'), sr = $('landing-step-room');
+    if (sp) sp.hidden = landing.step !== 'profile';
+    if (sr) sr.hidden = landing.step !== 'room';
+    updateNextBtn();
+    var logged = acctLoggedIn();
+    var av = $('me-avatar'); if (av) { av.textContent = profile.emoji; av.style.setProperty('--av', profile.color); }
+    var nm = $('me-name'); if (nm) nm.textContent = nickValue() || '플레이어';
+    var stt = $('me-status'); if (stt) stt.textContent = logged ? providerLabel(acct.user && acct.user.provider) + ' 계정' : '게스트';
+    var ml = $('btn-me-login'); if (ml) ml.hidden = !(acct.on && !logged);
+    var ma = $('me-account'); if (ma) ma.hidden = !logged;
+    // 초대받은 방: 코드 카드 안에 #btn-join(주 버튼)을 두고, "새 방 만들기"는 보조로 아래에
+    var inv = landing.invite;
+    var card = $('invite-card'), bc = $('btn-create'), bj = $('btn-join'), dv = $('join-divider'), jr = $('join-row'), dm = $('btn-invite-dismiss');
+    var meCard = sr ? sr.querySelector('.me-card') : null, head = card ? card.querySelector('.invite-head') : null;
+    if (inv) { orderChildren(card, [head, jr]); orderChildren(sr, [meCard, card, dv, bc, dm]); }
+    else { orderChildren(sr, [meCard, card, bc, dv, jr, dm]); }
+    if (card) card.hidden = !inv;
+    var ic = $('invite-code'); if (ic) ic.textContent = inv || '';
+    if (sr) sr.classList.toggle('is-invite', !!inv);
+    if (bj) { bj.textContent = inv ? '이 방에 참가하기' : '참가하기'; bj.className = 'btn btn-lg ' + (inv ? 'btn-primary btn-block' : 'btn-secondary'); }
+    if (bc) { bc.textContent = inv ? '새 방 만들기' : '방 만들기'; bc.className = 'btn btn-lg btn-block ' + (inv ? 'btn-outline' : 'btn-primary'); }
+    var dt = $('join-divider-text'); if (dt) dt.textContent = inv ? '또는' : '또는 방 코드로 참가';
+    if (dm) dm.hidden = !inv;
+  }
+  function showLandingStep(step, animate) {
+    var prev = landing.step; landing.step = step;
+    renderLanding();
+    var node = $(step === 'room' ? 'landing-step-room' : 'landing-step-profile');
+    if (animate && prev !== step && node) {
+      node.classList.remove('step-fwd', 'step-back'); void node.offsetWidth;
+      node.classList.add(step === 'room' ? 'step-fwd' : 'step-back');
+    }
+  }
+  /** 2단계로. history 에 { landing:'room' } 을 하나 넣는다(이미 그 항목이면 그대로) */
+  function goRoomStep(animate, focus) {
+    if (inRoom) return;
+    showLandingStep('room', animate);
+    afterHistory(function () {
+      if (inRoom || landing.step !== 'room') return;
+      try {
+        var st = history.state;
+        if (st && (st.landing === 'room' || st.sheet)) return;
+        if (!(st && st.landing === 'profile')) history.replaceState({ landing: 'profile' }, '');
+        history.pushState({ landing: 'room' }, '');
+      } catch (e) { /* file:// 등 */ }
+    });
+    if (focus) focusNode(landing.invite ? $('btn-join') : $('btn-create')); // 사용자가 "다음"을 눌렀을 때만(키보드면 Enter 한 번 더로 진행)
+  }
+  /** 1단계로. 우리가 넣은 { landing:'room' } 항목 위에 있으면 걷어낸다 */
+  function goProfileStep(animate) {
+    if (inRoom) return;
+    landing.autoAdvance = false;
+    showLandingStep('profile', animate);
+    afterHistory(function () {
+      if (inRoom || landing.step !== 'profile') return;
+      try { if (history.state && history.state.landing === 'room') histBack(); } catch (e) { /* ignore */ }
+    });
+    if (animate && !mobileMq.matches) focusNode($('nick'));
+  }
+  /** 기기 뒤로가기/앞으로가기(시트와 무관한 popstate) */
+  function onLandingPopstate() {
+    if (inRoom) {
+      // 방 안에서 랜딩 항목으로 내려와도 방은 그대로 두고 주소창의 ?room= 만 되살린다
+      try {
+        var qs = new URLSearchParams(location.search);
+        if (state.roomCode && qs.get('room') !== state.roomCode) { qs.set('room', state.roomCode); history.replaceState(history.state, '', location.pathname + '?' + qs.toString()); }
+      } catch (e) { /* ignore */ }
+      return;
+    }
+    var st = history.state && history.state.landing;
+    if (st === 'room') {
+      if (landing.step !== 'room') {
+        if (nickValue()) showLandingStep('room', true);
+        else { try { history.replaceState({ landing: 'profile' }, ''); } catch (e) { /* ignore */ } }
+      }
+    } else if (landing.step === 'room') showLandingStep('profile', true);
+  }
+  /** 1단계 "다음": 닉네임 확정·저장(로그인 상태면 프로필에도) → 2단계 */
+  function submitProfile() {
+    var name = nickValue();
+    if (!name) { toast('닉네임을 입력해주세요', 'error'); focusNode($('nick')); return; }
+    var n = $('nick'); if (n) n.value = name;
+    profile.name = name; saveProfile();
+    syncProfileOnEnter(currentProfile());
+    landing.autoAdvance = false;
+    goRoomStep(true, true);
+  }
+  function dismissInvite() {
+    landing.invite = null;
+    try {
+      var qs = new URLSearchParams(location.search);
+      if (qs.has('room')) { qs.delete('room'); var q = qs.toString(); history.replaceState(history.state, '', location.pathname + (q ? '?' + q : '')); }
+    } catch (e) { /* ignore */ }
+    renderLanding();
+    var c = $('room-code-input'); if (c) { focusNode(c); try { c.select(); } catch (e) { /* ignore */ } }
+  }
+
   function buildLanding() {
     var strip = $('emoji-strip');
     if (strip) EMOJIS.forEach(function (em) {
@@ -1225,9 +1343,16 @@
     var nick = $('nick');
     if (nick) {
       nick.value = profile.name;
-      nick.addEventListener('input', function () { profile.name = nick.value.slice(0, 12); saveProfile(); });
-      nick.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var code = codeInput(); if (code.length === 4) joinRoom(); else createRoom(); } });
+      // 닉네임은 "다음"(또는 방 만들기/참가) 때 확정·저장한다 → 저장된 닉네임 유무로 첫 화면을 고른다
+      nick.addEventListener('input', updateNextBtn);
+      nick.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submitProfile(); } });
     }
+    var bn = $('btn-profile-next'); if (bn) bn.addEventListener('click', submitProfile);
+    ['btn-profile-edit', 'btn-me-login'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', function () { goProfileStep(true); }); });
+    var bd = $('btn-invite-dismiss'); if (bd) bd.addEventListener('click', dismissInvite);
+    ['landing-step-profile', 'landing-step-room'].forEach(function (id) {
+      var s = $(id); if (s) s.addEventListener('animationend', function () { s.classList.remove('step-fwd', 'step-back'); });
+    });
     var codeIn = $('room-code-input');
     if (codeIn) {
       codeIn.addEventListener('input', function () {
@@ -1239,17 +1364,25 @@
     var bc = $('btn-create'); if (bc) bc.addEventListener('click', createRoom);
     var bj = $('btn-join'); if (bj) bj.addEventListener('click', joinRoom);
 
-    // ?room=CODE 프리필
-    try {
-      var qs = new URLSearchParams(location.search);
-      var rc = (qs.get('room') || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
-      if (rc && codeIn) { codeIn.value = rc; if (nick) nick.focus(); }
-    } catch (e) { /* ignore */ }
+    // ?room=CODE → 초대받은 방. 없으면 OAuth 리다이렉트 전에 임시 저장해 둔 코드(redirectTo 에는 쿼리가 없다)
+    var rc = '';
+    try { rc = cleanCode(new URLSearchParams(location.search).get('room')); } catch (e) { /* ignore */ }
     try {
       var pendingRoom = sessionStorage.getItem(PENDING_ROOM_KEY);
-      if (pendingRoom) { sessionStorage.removeItem(PENDING_ROOM_KEY); if (codeIn && !codeIn.value) codeIn.value = pendingRoom.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); }
+      if (pendingRoom) { sessionStorage.removeItem(PENDING_ROOM_KEY); if (!rc) rc = cleanCode(pendingRoom); }
     } catch (e) { /* ignore */ }
+    if (rc && codeIn) codeIn.value = rc;
+    landing.invite = rc.length === 4 ? rc : null;
     renderProfile();
+
+    // 첫 화면. 새로고침 전 남은 history.state(랜딩/시트)는 지금 문서의 항목이 아니므로 비운다
+    try { if (history.state && (history.state.landing || history.state.sheet)) history.replaceState(null, ''); } catch (e) { /* ignore */ }
+    if (nickValue()) goRoomStep(false);
+    else {
+      showLandingStep('profile', false);
+      try { history.replaceState({ landing: 'profile' }, ''); } catch (e) { /* ignore */ }
+      if (!mobileMq.matches) focusNode(nick);
+    }
   }
   function codeInput() { var n = $('room-code-input'); return n ? n.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4) : ''; }
   function currentProfile() {
@@ -1259,7 +1392,7 @@
   }
   function validName() {
     var p = currentProfile();
-    if (!p.name) { toast('닉네임을 입력해주세요', 'error'); var n = $('nick'); if (n) n.focus(); return null; }
+    if (!p.name) { toast('닉네임을 입력해주세요', 'error'); goProfileStep(true); focusNode($('nick')); return null; }
     return p;
   }
   var busy = false;
@@ -1344,10 +1477,15 @@
     ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null; ui.timeLeft = null;
     var vl = $('view-landing'), vr = $('view-room');
     if (vl) vl.hidden = true; if (vr) vr.hidden = false;
-    try {
-      var qs = new URLSearchParams(location.search); qs.set('room', state.roomCode);
-      history.replaceState(null, '', location.pathname + '?' + qs.toString());
-    } catch (e) { /* file:// 등 */ }
+    // 지금 항목의 주소를 ?room=CODE 로(랜딩 표시는 유지 → 나갈 때 뒤로가기 구조를 이어 쓴다). 걷어내는 중인 항목이 있으면 그 뒤에
+    afterHistory(function () {
+      if (!inRoom || !state.roomCode) return;
+      try {
+        var qs = new URLSearchParams(location.search); qs.set('room', state.roomCode);
+        var st = history.state && history.state.landing ? { landing: history.state.landing } : null;
+        history.replaceState(st, '', location.pathname + '?' + qs.toString());
+      } catch (e) { /* file:// 등 */ }
+    });
     renderAll();
     var ci = $('chat-input'); if (ci && window.innerWidth >= 1100) ci.focus();
   }
@@ -1368,11 +1506,21 @@
     resetCanvasState(); clearChat();
     var vl = $('view-landing'), vr = $('view-room');
     if (vr) vr.hidden = true; if (vl) vl.hidden = false;
-    try {
-      var qs = new URLSearchParams(location.search); qs.delete('room');
-      var q = qs.toString();
-      history.replaceState(null, '', location.pathname + (q ? '?' + q : ''));
-    } catch (e) { /* ignore */ }
+    // 방에서 나오면 2단계(방 선택). 뒤로가기 → 1단계가 되도록 { landing:'room' } 항목 위에 선다
+    landing.invite = null; landing.autoAdvance = false;
+    var toRoomStep = !!nickValue();
+    showLandingStep(toRoomStep ? 'room' : 'profile', false);
+    afterHistory(function () {
+      if (inRoom) return;
+      try {
+        var qs = new URLSearchParams(location.search); qs.delete('room');
+        var q = qs.toString(), url = location.pathname + (q ? '?' + q : '');
+        var st = history.state;
+        if (!toRoomStep) history.replaceState({ landing: 'profile' }, '', url);
+        else if (st && st.landing === 'room') history.replaceState({ landing: 'room' }, '', url);
+        else { history.replaceState({ landing: 'profile' }, '', url); history.pushState({ landing: 'room' }, ''); }
+      } catch (e) { /* ignore */ }
+    });
     renderAll();
   }
 
@@ -1542,7 +1690,22 @@
 
   // 기기 뒤로가기로 시트 닫기: 열 때 history 항목을 하나 넣고, popstate 가 오면 닫는다.
   // UI(✕·배경·드래그·ESC)로 닫을 때는 우리가 넣은 항목을 history.back() 으로 걷어내며, 그때 오는 popstate 는 무시한다.
-  var sheetPopGuard = false;
+  // 랜딩 단계 항목도 같은 방식(histBack). history.back() 은 비동기라, 그 사이의 replaceState/pushState 는 afterHistory 로 미룬다.
+  var histGuard = 0, histQueue = [], histTimer = null;
+  function flushHistQueue() {
+    clearTimeout(histTimer); histTimer = null;
+    var q = histQueue; histQueue = [];
+    q.forEach(function (fn) { try { fn(); } catch (e) { console.error('[history]', e); } });
+  }
+  /** 우리가 넣은 항목을 걷어낸다. 그 결과로 오는 popstate 는 무시한다 */
+  function histBack() {
+    histGuard++;
+    clearTimeout(histTimer);
+    histTimer = setTimeout(function () { if (histGuard) { histGuard = 0; flushHistQueue(); } }, 800); // popstate 가 오지 않는 경우 대비
+    try { history.back(); } catch (e) { histGuard = Math.max(0, histGuard - 1); if (!histGuard) flushHistQueue(); }
+  }
+  /** 걷어내는 중인 항목이 있으면 그 popstate 뒤에, 없으면 바로 fn 을 실행한다 */
+  function afterHistory(fn) { if (histGuard) histQueue.push(fn); else fn(); }
   function sheetHistoryPush(id) {
     try {
       if (history.state && history.state.sheet) history.replaceState({ sheet: id }, '');
@@ -1551,12 +1714,13 @@
   }
   function sheetHistoryPop() {
     try {
-      if (history.state && history.state.sheet) { sheetPopGuard = true; history.back(); }
-    } catch (e) { sheetPopGuard = false; }
+      if (history.state && history.state.sheet) histBack();
+    } catch (e) { /* ignore */ }
   }
   window.addEventListener('popstate', function () {
-    if (sheetPopGuard) { sheetPopGuard = false; return; }
-    if (openSheetId) closeSheet(false, true);
+    if (histGuard) { histGuard--; if (!histGuard) flushHistQueue(); return; }
+    if (openSheetId) { closeSheet(false, true); return; }
+    onLandingPopstate();
   });
 
   function openSheet(id) {
@@ -1822,9 +1986,11 @@
     var uid = acct.user ? acct.user.id : null;
     var token = snap && snap.token ? snap.token : null;
     if (uid !== acct.lastUid) {
+      var hadUser = !!acct.lastUid;
       acct.lastUid = uid; acct.sets = []; acct.setsLoaded = false; acct.formOpen = false; acct.editing = null; acct.appliedKey = '';
       if (!uid && acct.open) closeAccount();
-      if (uid) refreshWordSets();
+      if (uid) { refreshWordSets(); landing.autoAdvance = true; } // 로그인(세션 복원·OAuth 복귀 포함) → 프로필이 오면 2단계로
+      else { landing.autoAdvance = false; if (hadUser && !inRoom) goProfileStep(true); } // 로그아웃 → 1단계
     }
     if (token !== acct.lastToken) {
       acct.lastToken = token;
@@ -1834,6 +2000,10 @@
       }
     }
     if (acct.profile) applyProfileToLanding();
+    if (landing.autoAdvance && acct.profile && acct.profile.nickname) {
+      landing.autoAdvance = false;
+      if (!inRoom && landing.step === 'profile' && nickValue()) goRoomStep(true);
+    }
     renderAccount();
   }
   /** 로그인 프로필(닉네임·아바타)을 랜딩 입력에 채운다. 사용자가 닉네임을 입력 중이면 그 값은 건드리지 않는다 */
@@ -1845,7 +2015,7 @@
     var nick = $('nick');
     if (pr.nickname) {
       profile.name = String(pr.nickname).slice(0, 12);
-      if (nick && document.activeElement !== nick) nick.value = profile.name;
+      if (nick && (document.activeElement !== nick || !nick.value.trim())) nick.value = profile.name;
     }
     if (EMOJIS.indexOf(pr.avatar_emoji) !== -1) profile.emoji = pr.avatar_emoji;
     if (AV_COLORS.indexOf(pr.avatar_color) !== -1) profile.color = pr.avatar_color;
@@ -1881,7 +2051,12 @@
     var area = $('auth-area'); if (area) area.hidden = !on;
     var out = $('auth-logged-out'); if (out) out.hidden = !on || logged;
     var chip = $('account-chip'); if (chip) chip.hidden = !logged;
-    if (logged) { renderAcctAvatar($('chip-avatar')); var nm = $('chip-name'); if (nm) nm.textContent = acctName(); }
+    if (logged) {
+      renderAcctAvatar($('chip-avatar'));
+      var nm = $('chip-name'); if (nm) nm.textContent = acctName();
+      var cp = $('chip-provider'); if (cp) cp.textContent = providerLabel(acct.user && acct.user.provider) + ' 계정으로 로그인됨';
+    }
+    renderLanding();
     var top = $('btn-account-top'); if (top) top.hidden = !logged;
     var slot = $('menu-slot-account'); if (slot) slot.hidden = !logged;
     // 대기실 설정: 내 세트 불러오기 / 현재 단어를 세트로 저장
@@ -2017,7 +2192,7 @@
   }
   function startSignIn(provider) {
     if (!Account) return;
-    try { var code = codeInput(); if (code) sessionStorage.setItem(PENDING_ROOM_KEY, code); } catch (e) { /* ignore */ }
+    try { var code = landing.invite || codeInput(); if (code) sessionStorage.setItem(PENDING_ROOM_KEY, code); } catch (e) { /* ignore */ }
     var btns = [$('btn-login-google'), $('btn-login-kakao')];
     btns.forEach(function (b) { if (b) b.disabled = true; });
     Account.signIn(provider)

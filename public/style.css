@@ -73,6 +73,14 @@ ul, ol { padding: 0; list-style: none; }
 .btn-secondary:hover:not(:disabled) { background: var(--secondary-dark); }
 .btn-ghost { background: rgba(43, 45, 66, 0.06); color: var(--text); }
 .btn-ghost:hover:not(:disabled) { background: rgba(43, 45, 66, 0.12); }
+.btn-outline { background: #fff; color: var(--text); box-shadow: inset 0 0 0 2px var(--line); }
+.btn-outline:hover:not(:disabled) { background: #faf8ff; box-shadow: inset 0 0 0 2px #dcd5ea; }
+.link-btn {
+  border: 0; background: none; padding: 4px 2px; border-radius: 6px;
+  font-size: 13px; font-weight: 700; color: var(--secondary-dark); line-height: 1.3;
+}
+.link-btn:hover { text-decoration: underline; text-underline-offset: 2px; }
+.link-muted { color: var(--muted); font-weight: 600; }
 .btn-sm { padding: 7px 12px; font-size: 13px; }
 .btn-icon { padding: 7px 10px; font-size: 16px; line-height: 1; }
 .btn-lg { padding: 13px 22px; font-size: 16px; }
@@ -145,7 +153,7 @@ textarea { resize: vertical; min-height: 64px; }
   display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px;
 }
 .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.join-row { display: flex; gap: 10px; }
+.join-row { display: flex; gap: 10px; min-width: 0; }
 .join-row input {
   flex: 1; min-width: 0; text-transform: uppercase; font-family: var(--mono); font-size: 22px; letter-spacing: .35em;
   text-align: center; padding: 10px 0 10px .35em;
@@ -891,7 +899,7 @@ body.sheet-open { overflow: hidden; }
 }
 
 /* =====================================================================
-   계정 — 로그인(랜딩) · 계정 칩 · 내 정보(모달/시트) · 단어 세트 · 로그인 배지
+   계정 — 로그인(랜딩) · 계정 칩 · 내 정보(모달/시트) · 단어 세트
    로그인 기능이 꺼져 있으면 관련 노드는 모두 hidden 이라 아무것도 그려지지 않는다.
    ===================================================================== */
 .auth-area { display: flex; flex-direction: column; gap: 10px; }
@@ -909,19 +917,19 @@ body.sheet-open { overflow: hidden; }
 .k-glyph { font-size: 16px; line-height: 1; }
 .auth-note { text-align: center; font-size: 12px; color: var(--muted); }
 .auth-note a { color: var(--secondary-dark); font-weight: 700; }
-.account-chip { display: flex; align-items: center; gap: 8px; background: #f8f6fc; border-radius: 999px; padding: 6px 8px 6px 6px; }
+.auth-logged-out { display: flex; flex-direction: column; gap: 12px; }
+.auth-title { font-size: 15px; font-weight: 800; text-align: center; letter-spacing: -0.01em; }
+.auth-logged-out .divider { margin-top: 6px; }
+/* 1단계(로그인 상태): 계정 칩 — 아바타 · 닉네임 · 제공자 */
+.account-chip { display: flex; align-items: center; gap: 12px; background: #f8f6fc; border-radius: 18px; padding: 10px 14px 10px 10px; }
 .chip-avatar {
-  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 19px;
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 22px;
   background: var(--av, #d6d6d6); overflow: hidden; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.08);
 }
 .chip-avatar img, .acct-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.chip-name { flex: 1 1 auto; min-width: 0; font-weight: 800; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.account-chip .btn { flex: 0 0 auto; }
-/* 플레이어 목록: 로그인 사용자 ✔ (은은하게) */
-.login-badge {
-  display: inline-grid; place-items: center; width: 13px; height: 13px; border-radius: 50%; margin-left: 1px;
-  background: var(--green); color: #fff; font-size: 8px; font-weight: 900; line-height: 1; vertical-align: 1px; opacity: .85;
-}
+.chip-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.chip-name { min-width: 0; font-weight: 800; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip-provider { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 대기실 설정: 내 세트 도구 */
 .wordset-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: -4px; }
 .wordset-tools select { width: auto; flex: 1 1 200px; min-width: 0; padding: 8px 10px; font-size: 13px; font-weight: 600; }
@@ -964,7 +972,52 @@ body.sheet-open { overflow: hidden; }
 @media (max-width: 767px) {
   .sheet-panel-account { max-height: 92%; }
   .sheet-panel-account .account-body { padding: 2px 0 8px; gap: 16px; }
-  .account-chip { padding: 5px 6px 5px 5px; gap: 6px; }
-  .account-chip .btn-sm { padding: 6px 9px; font-size: 12px; }
   .wordset-tools select { flex-basis: 100%; }
+}
+
+/* =====================================================================
+   랜딩 2단계 — 1) 프로필(#landing-step-profile) → 2) 방(#landing-step-room)
+   ===================================================================== */
+.landing-step { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.landing-step.step-fwd { animation: step-in-fwd .24s cubic-bezier(.2, .8, .3, 1); }
+.landing-step.step-back { animation: step-in-back .24s cubic-bezier(.2, .8, .3, 1); }
+@keyframes step-in-fwd { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+@keyframes step-in-back { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
+
+/* 2단계: 내 프로필 요약 카드 */
+.me-card { display: flex; flex-direction: column; gap: 10px; background: #f8f6fc; border-radius: 20px; padding: 14px; }
+.me-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.me-avatar {
+  flex: 0 0 auto; width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font-size: 28px;
+  background: var(--av, #bae1ff); box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.08), var(--shadow-sm);
+}
+.me-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.me-name { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.me-status { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+.me-status .link-btn { padding: 2px; }
+.me-main .btn, .me-account .btn { flex: 0 0 auto; background: #fff; box-shadow: inset 0 0 0 1px var(--line); }
+.me-main .btn:hover:not(:disabled), .me-account .btn:hover:not(:disabled) { background: #fbfaff; box-shadow: inset 0 0 0 1px #dcd5ea; }
+.me-account { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+
+/* 2단계: 초대받은 방 — 코드 카드 안에 "이 방에 참가하기"(#btn-join) */
+.invite-card {
+  display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: 20px;
+  background: linear-gradient(160deg, #fff5f0 0%, var(--primary-soft) 100%); box-shadow: inset 0 0 0 2px rgba(255, 122, 89, 0.16);
+}
+.invite-head { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.invite-label { font-size: 13px; font-weight: 800; color: var(--primary-dark); }
+.invite-code { font-family: var(--mono); font-size: 34px; font-weight: 800; letter-spacing: .3em; padding-left: .3em; line-height: 1.2; color: var(--text); }
+.invite-card .join-row input { display: none; }
+.invite-dismiss { align-self: center; margin-top: -8px; }
+
+@media (max-width: 767px) {
+  .landing { padding: 16px 12px; }
+  .landing-card { max-width: none; padding: 24px 18px 20px; border-radius: 24px; gap: 16px; }
+  .landing-step { gap: 16px; }
+  .emoji-btn { padding: 9px 0; }
+  .color-row { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+  .color-btn { width: 100%; max-width: 40px; height: auto; aspect-ratio: 1 / 1; justify-self: center; }
+  .me-main .btn-sm, .me-account .btn-sm { min-height: 38px; padding: 8px 12px; }
+  .me-account .link-btn, .invite-dismiss { min-height: 38px; padding: 8px 6px; }
+  .invite-code { font-size: 30px; }
 }

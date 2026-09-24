@@ -23,51 +23,85 @@
       </h1>
       <p class="tagline">친구들과 함께 그리고, 맞히고, 웃어요!</p>
 
-      <div class="profile">
-        <div id="avatar-preview" class="avatar-preview" style="--av:#bae1ff">
-          <span id="avatar-preview-emoji">😀</span>
-        </div>
-        <label class="field">
-          <span class="field-label">닉네임</span>
-          <input id="nick" type="text" maxlength="12" placeholder="최대 12자" autocomplete="off" spellcheck="false">
-        </label>
-      </div>
-
-      <div class="picker">
-        <div class="picker-label">얼굴</div>
-        <div id="emoji-strip" class="emoji-strip" role="radiogroup" aria-label="아바타 얼굴"></div>
-      </div>
-      <div class="picker">
-        <div class="picker-label">색상</div>
-        <div id="color-row" class="color-row" role="radiogroup" aria-label="아바타 색상"></div>
-      </div>
-
-      <button id="btn-create" class="btn btn-primary btn-lg btn-block" type="button">방 만들기</button>
-
-      <div class="divider"><span>또는 방 코드로 참가</span></div>
-
-      <div class="join-row">
-        <input id="room-code-input" type="text" maxlength="4" placeholder="ABCD" inputmode="latin"
-               autocapitalize="characters" autocomplete="off" spellcheck="false" aria-label="방 코드 4글자">
-        <button id="btn-join" class="btn btn-secondary btn-lg" type="button">참가하기</button>
-      </div>
-
-      <!-- 로그인(선택, Supabase). /config.js 에 설정이 없으면 client.js 가 전부 hidden 으로 둔다(게스트 전용) -->
-      <div id="auth-area" class="auth-area" hidden>
-        <div id="auth-logged-out" hidden>
-          <div class="divider"><span>로그인하고 단어 세트 저장</span></div>
-          <div class="auth-buttons">
-            <button id="btn-login-google" class="btn btn-lg btn-block btn-google" type="button"><span class="g-glyph" aria-hidden="true">G</span> Google로 계속하기</button>
-            <button id="btn-login-kakao" class="btn btn-lg btn-block btn-kakao" type="button"><span class="k-glyph" aria-hidden="true">💬</span> 카카오로 계속하기</button>
+      <!-- ===== 1단계: 프로필 (로그인 또는 게스트 닉네임·아바타) ===== -->
+      <div id="landing-step-profile" class="landing-step" aria-label="프로필 설정">
+        <!-- 로그인(선택, Supabase). /config.js 에 설정이 없으면 client.js 가 전부 hidden 으로 둔다(게스트 전용) -->
+        <div id="auth-area" class="auth-area" hidden>
+          <div id="auth-logged-out" class="auth-logged-out" hidden>
+            <h2 class="auth-title">로그인하고 시작</h2>
+            <div class="auth-buttons">
+              <button id="btn-login-google" class="btn btn-lg btn-block btn-google" type="button"><span class="g-glyph" aria-hidden="true">G</span> Google로 계속하기</button>
+              <button id="btn-login-kakao" class="btn btn-lg btn-block btn-kakao" type="button"><span class="k-glyph" aria-hidden="true">💬</span> 카카오로 계속하기</button>
+            </div>
+            <p class="auth-note">로그인하면 내 단어 세트를 저장하고 어디서든 불러올 수 있어요 · <a href="/privacy" target="_blank" rel="noopener">개인정보 처리방침</a></p>
+            <div class="divider"><span>또는 게스트로 시작</span></div>
           </div>
-          <p class="auth-note">로그인하면 단어 세트가 계정에 저장돼요 · <a href="/privacy" target="_blank" rel="noopener">개인정보 처리방침</a></p>
+          <div id="account-chip" class="account-chip" hidden>
+            <span id="chip-avatar" class="chip-avatar" aria-hidden="true"></span>
+            <span class="chip-text">
+              <span id="chip-name" class="chip-name"></span>
+              <span id="chip-provider" class="chip-provider"></span>
+            </span>
+          </div>
         </div>
-        <div id="account-chip" class="account-chip" hidden>
-          <span id="chip-avatar" class="chip-avatar" aria-hidden="true"></span>
-          <span id="chip-name" class="chip-name"></span>
-          <button id="btn-account-open" class="btn btn-ghost btn-sm" type="button">내 정보</button>
-          <button id="btn-logout" class="btn btn-ghost btn-sm" type="button">로그아웃</button>
+
+        <div class="profile">
+          <div id="avatar-preview" class="avatar-preview" style="--av:#bae1ff">
+            <span id="avatar-preview-emoji">😀</span>
+          </div>
+          <label class="field">
+            <span class="field-label">닉네임</span>
+            <input id="nick" type="text" maxlength="12" placeholder="최대 12자" autocomplete="off" spellcheck="false">
+          </label>
         </div>
+
+        <div class="picker">
+          <div class="picker-label">얼굴</div>
+          <div id="emoji-strip" class="emoji-strip" role="radiogroup" aria-label="아바타 얼굴"></div>
+        </div>
+        <div class="picker">
+          <div class="picker-label">색상</div>
+          <div id="color-row" class="color-row" role="radiogroup" aria-label="아바타 색상"></div>
+        </div>
+
+        <button id="btn-profile-next" class="btn btn-primary btn-lg btn-block" type="button" disabled>다음</button>
+      </div>
+
+      <!-- ===== 2단계: 방 (만들기 / 코드로 참가 / 초대받은 방) ===== -->
+      <div id="landing-step-room" class="landing-step" aria-label="방 선택" hidden>
+        <div class="me-card">
+          <div class="me-main">
+            <span id="me-avatar" class="me-avatar" aria-hidden="true"></span>
+            <div class="me-info">
+              <strong id="me-name" class="me-name"></strong>
+              <span class="me-status"><span id="me-status">게스트</span><button id="btn-me-login" class="link-btn" type="button" hidden>로그인</button></span>
+            </div>
+            <button id="btn-profile-edit" class="btn btn-ghost btn-sm" type="button">프로필 수정</button>
+          </div>
+          <div id="me-account" class="me-account" hidden>
+            <button id="btn-account-open" class="btn btn-ghost btn-sm" type="button">내 정보</button>
+            <button id="btn-logout" class="link-btn link-muted" type="button">로그아웃</button>
+          </div>
+        </div>
+
+        <div id="invite-card" class="invite-card" hidden>
+          <div class="invite-head">
+            <span class="invite-label">초대받은 방</span>
+            <strong id="invite-code" class="invite-code">----</strong>
+          </div>
+        </div>
+
+        <button id="btn-create" class="btn btn-primary btn-lg btn-block" type="button">방 만들기</button>
+
+        <div id="join-divider" class="divider"><span id="join-divider-text">또는 방 코드로 참가</span></div>
+
+        <div id="join-row" class="join-row">
+          <input id="room-code-input" type="text" maxlength="4" placeholder="ABCD" inputmode="latin"
+                 autocapitalize="characters" autocomplete="off" spellcheck="false" aria-label="방 코드 4글자">
+          <button id="btn-join" class="btn btn-secondary btn-lg" type="button">참가하기</button>
+        </div>
+
+        <button id="btn-invite-dismiss" class="link-btn link-muted invite-dismiss" type="button" hidden>다른 방 코드 입력하기</button>
       </div>
     </section>
   </main>

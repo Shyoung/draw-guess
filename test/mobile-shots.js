@@ -3,7 +3,7 @@
  * fullPage 가 아니라 "사용자가 실제로 보는 화면"(뷰포트)만 찍는다.
  *   node test/mobile-shots.js
  *
- * 1회차(기본 단어): 01~10 기본 단계 + 11 메뉴 시트 · 12 플레이어 시트 · 13 채팅 시트(출제자) · 14 키보드 컴팩트(390x360)
+ * 1회차(기본 단계): 01 랜딩 1단계(프로필) · 01b 랜딩 2단계(방) · 02~10 기본 단계 + 11 메뉴 시트 · 12 플레이어 시트 · 13 채팅 시트(출제자) · 14 키보드 컴팩트(390x360)
  * 2회차(긴 사용자 단어): 15 관전자 마스크 · 16 출제자 단어
  */
 const path = require('path');
@@ -15,6 +15,7 @@ fs.mkdirSync(SHOTS, { recursive: true });
 
 const FILES = {
   'landing': '01-landing.png',
+  'landing-room': '01b-landing-room.png',
   'lobby-mode': '02-lobby-mode.png',
   'lobby-settings': '03-lobby-settings.png',
   'choosing-drawer': '04-choosing-drawer.png',

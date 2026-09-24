@@ -3,7 +3,7 @@
  *   - 서버(server/index.js) 를 3988 포트로 띄우고
  *   - iPhone 13 에뮬레이션(모바일, 호스트) + 데스크톱 1280x860 두 브라우저 컨텍스트로 1라운드 게임을 끝까지 돌린다.
  *   - 각 단계마다 hook(stage, ctx) 를 호출한다. stage:
- *       landing, lobby-mode, lobby-settings, choosing-drawer, drawing-drawer, turnend,
+ *       landing(1단계 프로필), landing-room(2단계 방), lobby-mode, lobby-settings, choosing-drawer, drawing-drawer, turnend,
  *       drawing-guesser, drawing-guesser-chat, gameover, gallery
  */
 const { spawn } = require('child_process');
@@ -67,18 +67,26 @@ async function runMobileFlow(hook, opts) {
     }
     const ctx = { mobile, desktop, browser, word: null };
 
-    // 1. 랜딩
+    // 1. 랜딩 1단계(프로필) → "다음" → 2단계(방)
     await mobile.goto(URL + '/');
-    await mobile.waitForSelector('#btn-create');
+    await mobile.waitForSelector('#landing-step-profile:not([hidden])');
+    await sleep(200);
     await hook('landing', ctx);
+    await mobile.fill('#nick', '모바일');
+    await mobile.click('#btn-profile-next');
+    await mobile.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    await sleep(350);
+    await hook('landing-room', ctx);
 
     // 2. 모바일이 방을 만들고(호스트) 데스크톱이 참가 → 모드 선택 화면
-    await mobile.fill('#nick', '모바일');
     await mobile.click('#btn-create');
     await mobile.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     const code = (await mobile.textContent('#room-code')).trim().replace(/[^A-Z]/g, '');
     await desktop.goto(`${URL}/?room=${code}`);
+    await desktop.waitForSelector('#landing-step-profile:not([hidden])');
     await desktop.fill('#nick', '데스크톱');
+    await desktop.click('#btn-profile-next');
+    await desktop.waitForSelector('#invite-card:not([hidden])', { timeout: 3000 });
     await desktop.click('#btn-join');
     await desktop.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     await mobile.waitForFunction(() => document.querySelectorAll('#player-list li').length >= 2, null, { timeout: 5000 });

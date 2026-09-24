@@ -5,9 +5,12 @@
  * 1) 서버를 SUPABASE_* 환경 변수 없이 3130 포트로 띄운다 → /config.js 는 {} → 로그인 UI 가 전혀 보이지 않고 게임은 그대로 동작해야 한다.
  * 2) ?mock=1&auth=1&stay=1 : dev-mock.js 가 가짜 window.supabase + APP_CONFIG 를 설치한다(메모리 DB, 로그인된 상태로 시작).
  *    - 계정 칩 · 내 정보(프로필/닉네임 저장) · 단어 세트 생성(3단어)/목록/"이 세트로 방 설정"/수정/삭제 · 20개 제한 메시지 노출
- *    - 대기실 설정의 "내 세트 불러오기" 셀렉트 · "현재 단어를 세트로 저장" · 플레이어 목록 ✔ 배지
+ *    - 대기실 설정의 "내 세트 불러오기" 셀렉트 · "현재 단어를 세트로 저장" · 플레이어 목록에 ✔ 배지 없음(데이터 loggedIn 은 유지)
  *    - 로그아웃 → 칩 사라지고 로그인 버튼 표시 → 다시 로그인
  * 3) 모바일(iPhone 13): 내 정보가 바텀 시트(#sheet-account)로 열리고, 방 메뉴 시트에 "내 정보" 행이 있다.
+ * 랜딩 2단계(1: #landing-step-profile 프로필/로그인 → 2: #landing-step-room 방 만들기/참가)
+ *    - 첫 방문 1단계 · "다음"은 닉네임 1~12자일 때만 · 2단계 요약 카드 · 프로필 수정 → 1단계(값 유지) · 기기 뒤로가기 → 1단계
+ *    - 저장된 프로필이면 새로고침 시 2단계 · ?room= 초대 카드 · 로그인(모크) 상태는 2단계 + 제공자 라벨 · 로그아웃 → 1단계
  */
 const { spawn } = require('child_process');
 const path = require('path');
@@ -58,40 +61,120 @@ const txt = async (page, sel) => (await page.locator(sel).first().textContent().
     const health = await (await fetch(URL + '/healthz')).json();
     check(health.auth === false, 'Supabase 미설정: /healthz auth=false', JSON.stringify(health.auth));
 
-    // ---------- 1. 게스트(로그인 꺼짐) ----------
-    console.log('\n== 게스트(로그인 꺼짐) ==');
+    // ---------- 1. 게스트(로그인 꺼짐) + 랜딩 2단계 ----------
+    console.log('\n== 게스트(로그인 꺼짐) · 랜딩 2단계 ==');
     const g = await newPage(browser, '게스트');
     await g.goto(URL + '/');
-    await g.waitForSelector('#btn-create');
+    await g.waitForSelector('#landing-step-profile:not([hidden])');
     await sleep(400);
+    check(await g.locator('#landing-step-room').isHidden(), '첫 방문: 1단계(프로필)부터 시작');
+    check(await g.locator('#nick').isVisible() && await g.locator('#emoji-strip .emoji-btn').first().isVisible() && await g.locator('#color-row .color-btn').first().isVisible(), '1단계: 게스트 폼(닉네임·얼굴·색상)');
     check(await g.locator('#auth-area').isHidden(), '게스트: 로그인 영역 숨김');
     check(await g.locator('#btn-login-google').isHidden() && await g.locator('#btn-login-kakao').isHidden(), '게스트: Google/카카오 버튼 없음');
+    check(await g.locator('#auth-logged-out .divider').isHidden(), '로그인 꺼짐: "또는 게스트로 시작" 구분선 없음');
     check(await g.locator('#account-chip').isHidden(), '게스트: 계정 칩 없음');
     check(await g.locator('#btn-account-top').isHidden(), '게스트: 상단 "내 정보" 버튼 없음');
     check(await g.evaluate(() => !document.querySelector('script[src*="supabase"]')), '게스트: supabase 라이브러리를 로드하지 않음');
     check(await g.evaluate(() => window.Account && window.Account.isEnabled() === false), '게스트: Account.isEnabled() === false');
+    check(await g.locator('#btn-profile-next').isDisabled(), '1단계: 닉네임이 비어 있으면 "다음" 비활성');
+    await g.fill('#nick', '   ');
+    check(await g.locator('#btn-profile-next').isDisabled(), '1단계: 공백만 입력해도 "다음" 비활성');
     await g.fill('#nick', '게스트');
+    check(!(await g.locator('#btn-profile-next').isDisabled()), '1단계: 닉네임 입력 → "다음" 활성');
+    check((await g.getAttribute('#nick', 'maxlength')) === '12', '1단계: 닉네임 최대 12자');
+    await g.locator('#emoji-strip .emoji-btn').nth(5).click();
+    const pickedEmoji = (await g.locator('#emoji-strip .emoji-btn').nth(5).textContent()).trim();
+    await g.click('#btn-profile-next');
+    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    check(await g.locator('#landing-step-profile').isHidden(), '다음 → 2단계(방)');
+    check((await txt(g, '#me-name')) === '게스트' && (await txt(g, '#me-status')) === '게스트', '2단계: 요약 카드(닉네임 · "게스트")', `${await txt(g, '#me-name')} / ${await txt(g, '#me-status')}`);
+    check((await txt(g, '#me-avatar')) === pickedEmoji, '2단계: 요약 카드 아바타 = 고른 얼굴', await txt(g, '#me-avatar'));
+    check(await g.locator('#btn-profile-edit').isVisible(), '2단계: "프로필 수정" 버튼');
+    check(await g.locator('#btn-me-login').isHidden() && await g.locator('#me-account').isHidden(), '2단계(로그인 꺼짐): 로그인 링크 · 내 정보 · 로그아웃 없음');
+    check(await g.locator('#btn-create').isVisible() && await g.locator('#room-code-input').isVisible() && await g.locator('#btn-join').isVisible(), '2단계: 방 만들기 + 방 코드 참가');
+    check(await g.locator('#invite-card').isHidden(), '2단계: 초대 링크가 아니면 초대 카드 없음');
+    // 프로필 수정 → 1단계(값 유지)
+    await g.click('#btn-profile-edit');
+    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
+    check(await g.locator('#landing-step-room').isHidden(), '프로필 수정 → 1단계');
+    check((await val(g, '#nick')) === '게스트' && (await g.locator('#emoji-strip .emoji-btn').nth(5).getAttribute('aria-checked')) === 'true', '프로필 수정: 닉네임 · 얼굴 값 유지');
+    // Enter = 다음
+    await g.press('#nick', 'Enter');
+    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    check(await g.locator('#landing-step-room').isVisible(), '1단계: 닉네임에서 Enter = 다음');
+    // 기기 뒤로가기(2단계 → 1단계, 페이지는 그대로)
+    await g.evaluate(() => { window.__samePage = 1; });
+    await g.goBack();
+    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check(await g.locator('#landing-step-profile').isVisible() && await g.evaluate(() => window.__samePage === 1) && g.url().startsWith(URL), '뒤로가기: 2단계 → 1단계(페이지를 떠나지 않음)', g.url());
+    await g.click('#btn-profile-next');
+    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    // 저장된 프로필 → 새로고침하면 2단계부터
+    await g.reload();
+    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 }).catch(() => {});
+    check(await g.locator('#landing-step-room').isVisible() && await g.locator('#landing-step-profile').isHidden(), '새로고침(저장된 프로필): 2단계부터', await g.locator('#landing-step-room').isVisible());
+    check((await txt(g, '#me-name')) === '게스트', '새로고침: 요약 카드에 저장된 닉네임');
+    await g.evaluate(() => { window.__samePage = 2; });
+    await g.goBack();
+    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check(await g.locator('#landing-step-profile').isVisible() && await g.evaluate(() => window.__samePage === 2), '새로고침 후에도 뒤로가기: 2단계 → 1단계');
+    // 초대 링크(?room=ABCD, 저장된 프로필) → 2단계 초대 카드
+    await g.goto(URL + '/?room=ABCD');
+    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
+    check(await g.locator('#invite-card').isVisible() && (await txt(g, '#invite-code')) === 'ABCD', '초대 링크: "초대받은 방 ABCD" 카드', await txt(g, '#invite-code'));
+    check((await txt(g, '#btn-join')) === '이 방에 참가하기' && (await g.getAttribute('#btn-join', 'class')).includes('btn-primary'), '초대 카드: 주 버튼 "이 방에 참가하기"');
+    check((await val(g, '#room-code-input')) === 'ABCD' && await g.locator('#room-code-input').isHidden(), '초대 카드: 코드 프리필(입력칸은 숨김)');
+    check((await txt(g, '#btn-create')) === '새 방 만들기' && !(await g.getAttribute('#btn-create', 'class')).includes('btn-primary'), '초대 카드: "새 방 만들기"는 보조 버튼');
+    await g.click('#btn-invite-dismiss');
+    check(await g.locator('#invite-card').isHidden() && await g.locator('#room-code-input').isVisible() && (await val(g, '#room-code-input')) === 'ABCD', '다른 방 코드 입력: 일반 화면(코드 유지)');
+    check((await txt(g, '#btn-create')) === '방 만들기' && !g.url().includes('room='), '다른 방 코드 입력: 방 만들기 주 버튼 · 주소에서 ?room= 제거', g.url());
+    // 처음 온 사람 + 초대 링크 → 1단계 → 다음 → 초대 카드
+    const g2 = await newPage(browser, '게스트2');
+    await g2.goto(URL + '/?room=WXYZ');
+    await g2.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 });
+    check(await g2.locator('#landing-step-room').isHidden(), '초대 링크(새 방문자): 1단계부터');
+    await g2.fill('#nick', '초대손님');
+    await g2.click('#btn-profile-next');
+    await g2.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    check(await g2.locator('#invite-card').isVisible() && (await txt(g2, '#invite-code')) === 'WXYZ', '초대 링크(새 방문자): 다음 → 초대 카드(코드 유지)');
+    await g2.context().close();
     await g.click('#btn-create');
     await g.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     await g.click('#mode-panel .mode-card[data-mode="classic"]');
     await g.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
     check(await g.locator('#settings-panel').isVisible(), '게스트: 방 만들기 → 설정 패널 표시');
     check(await g.locator('#wordset-tools').isHidden(), '게스트: 설정의 내 세트 도구 숨김');
-    check((await g.locator('#player-list .login-badge').count()) === 0, '게스트: 플레이어 목록에 ✔ 배지 없음');
+    check((await g.locator('.login-badge').count()) === 0, '게스트: 플레이어 목록에 ✔ 배지 없음');
     check(await g.locator('#overlay-account').isHidden() && await g.locator('#sheet-account').isHidden(), '게스트: 내 정보 모달/시트 숨김');
     await g.click('#btn-leave');
     await g.waitForSelector('#view-landing:not([hidden])', { timeout: 3000 });
+    await sleep(200);
+    check(await g.locator('#landing-step-room').isVisible() && !g.url().includes('room='), '방 나가기 → 2단계(방 선택), 주소에 ?room= 없음', g.url());
+    await g.evaluate(() => { window.__samePage = 3; });
+    await g.goBack();
+    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check(await g.locator('#landing-step-profile').isVisible() && await g.evaluate(() => window.__samePage === 3), '방 나간 뒤 뒤로가기: 1단계(페이지 유지)');
 
     // ---------- 2. 가짜 Supabase (데스크톱) ----------
     console.log('\n== 로그인 UI (가짜 Supabase, 데스크톱) ==');
     const p = await newPage(browser, '로그인');
     await p.goto(`${URL}/?mock=1&auth=1&stay=1`);
-    await p.waitForSelector('#account-chip:not([hidden])', { timeout: 5000 });
-    await p.waitForFunction(() => (document.getElementById('chip-name').textContent || '').trim() === '모크유저', null, { timeout: 3000 }).catch(() => {});
-    check(await p.locator('#account-chip').isVisible(), '로그인: 계정 칩 표시');
-    check((await txt(p, '#chip-name')) === '모크유저', '로그인: 칩에 닉네임', await txt(p, '#chip-name'));
-    check(await p.locator('#auth-logged-out').isHidden(), '로그인: Google/카카오 버튼 숨김');
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
+    await p.waitForFunction(() => (document.getElementById('me-status').textContent || '').trim() === 'Google 계정', null, { timeout: 3000 }).catch(() => {});
+    check(await p.locator('#landing-step-profile').isHidden(), '로그인(모크, 새 방문자): 프로필이 오면 2단계로');
+    check((await txt(p, '#me-status')) === 'Google 계정', '2단계(로그인): 제공자 라벨 "Google 계정"', await txt(p, '#me-status'));
+    check((await txt(p, '#me-name')) === '모크유저', '2단계(로그인): 요약 카드에 프로필 닉네임', await txt(p, '#me-name'));
+    check(await p.locator('#btn-account-open').isVisible() && await p.locator('#btn-logout').isVisible() && await p.locator('#btn-me-login').isHidden(), '2단계(로그인): 내 정보 · 로그아웃 표시, 로그인 링크 없음');
     check((await val(p, '#nick')) === '모크유저', '로그인: 닉네임 입력이 프로필로 프리필', await val(p, '#nick'));
+    // 프로필 수정 → 1단계: 로그인 버튼 대신 계정 칩 + 폼
+    await p.click('#btn-profile-edit');
+    await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
+    check(await p.locator('#account-chip').isVisible(), '1단계(로그인): 계정 칩 표시');
+    check((await txt(p, '#chip-name')) === '모크유저' && (await txt(p, '#chip-provider')).includes('Google'), '1단계(로그인): 칩에 닉네임 · 제공자', `${await txt(p, '#chip-name')} / ${await txt(p, '#chip-provider')}`);
+    check(await p.locator('#auth-logged-out').isHidden(), '1단계(로그인): Google/카카오 버튼 숨김');
+    check(await p.locator('#nick').isVisible() && (await val(p, '#nick')) === '모크유저', '1단계(로그인): 닉네임 폼 프리필(수정 가능)');
+    await p.click('#btn-profile-next');
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
 
     // 내 정보 열기(칩)
     await p.click('#btn-account-open');
@@ -137,22 +220,29 @@ const txt = async (page, sel) => (await page.locator(sel).first().textContent().
     await p.waitForFunction(() => (document.getElementById('chip-name').textContent || '').trim() === '모크짱', null, { timeout: 3000 }).catch(() => {});
     check((await txt(p, '#chip-name')) === '모크짱', '닉네임 저장: 칩 갱신', await txt(p, '#chip-name'));
     check((await val(p, '#nick')) === '모크짱', '닉네임 저장: 랜딩 닉네임 입력 갱신', await val(p, '#nick'));
+    check((await txt(p, '#me-name')) === '모크짱', '닉네임 저장: 2단계 요약 카드 갱신', await txt(p, '#me-name'));
     check(await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname === '모크짱'), '닉네임 저장: DB 반영');
     await p.click('#btn-account-close');
     check(await p.locator('#overlay-account').isHidden(), '내 정보: 닫기');
 
-    // 방 만들기(모크 대기실, 호스트) — 닉네임을 바꿔서 들어가면 프로필에 저장돼야 한다
+    // 1단계에서 닉네임을 바꾸고 "다음" → 프로필에 저장, 그 뒤 방 만들기(모크 대기실, 호스트)
+    await p.click('#btn-profile-edit');
+    await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
     await p.fill('#nick', '방장모크');
+    await p.click('#btn-profile-next');
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    await p.waitForFunction(() => window.__mockAuth.tables.profiles[0].nickname === '방장모크', null, { timeout: 3000 }).catch(() => {});
+    check(await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname === '방장모크'), '다음: 바꾼 닉네임이 프로필에 저장', await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname));
+    check((await txt(p, '#me-name')) === '방장모크', '다음: 요약 카드에 바꾼 닉네임');
     await p.click('#btn-create');
     await p.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     await p.waitForSelector('#settings-panel:not([hidden])', { timeout: 5000 });
-    await p.waitForFunction(() => window.__mockAuth.tables.profiles[0].nickname === '방장모크', null, { timeout: 3000 }).catch(() => {});
-    check(await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname === '방장모크'), '방 만들기: 바꾼 닉네임이 프로필에 저장', await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname));
     check(await p.locator('.topbar #btn-account-top').isVisible(), '방 안(데스크톱): 상단바 "내 정보" 버튼');
     check(await p.locator('#wordset-tools').isVisible() && await p.locator('#btn-wordset-save').isVisible(), '설정: "현재 단어를 세트로 저장" 표시');
     check(await p.locator('#wordset-load').isVisible() && (await p.locator('#wordset-load option').count()) === 2, '설정: "내 세트 불러오기" 셀렉트(세트 1개)', await p.locator('#wordset-load option').count());
-    check((await p.locator('#player-list li.me .login-badge').count()) === 1, '플레이어 목록: 내 이름 옆 ✔ 배지');
-    check((await p.locator('#player-list li.me .login-badge').getAttribute('title')) === '로그인 사용자', '✔ 배지 title');
+    await p.waitForFunction(() => window.__dg.state.players.some((pl) => pl.loggedIn), null, { timeout: 3000 }).catch(() => {});
+    check(await p.evaluate(() => window.__dg.state.players.some((pl) => pl.id === window.__dg.myId() && pl.loggedIn)), '데이터: players[].loggedIn 은 그대로 받음');
+    check((await p.locator('.login-badge').count()) === 0, '플레이어 목록: 로그인해도 ✔ 배지를 그리지 않음');
 
     // "이 세트로 방 설정"
     await p.click('#btn-account-top');
@@ -236,41 +326,65 @@ const txt = async (page, sel) => (await page.locator(sel).first().textContent().
     check(await p.locator('#overlay-account').isHidden(), '로그아웃: 내 정보 닫힘');
     check(await p.locator('#btn-account-top').isHidden() && await p.locator('#wordset-tools').isHidden(), '로그아웃: 방 안 계정 UI 숨김');
     check(await p.locator('#view-room').isVisible(), '로그아웃: 방은 그대로(새로고침 없음)');
-    await p.waitForFunction(() => document.querySelectorAll('#player-list li.me .login-badge').length === 0, null, { timeout: 3000 }).catch(() => {});
-    check((await p.locator('#player-list li.me .login-badge').count()) === 0, '로그아웃: auth:token null → ✔ 배지 제거');
+    await p.waitForFunction(() => !window.__dg.state.players.some((pl) => pl.loggedIn), null, { timeout: 3000 }).catch(() => {});
+    check(await p.evaluate(() => !window.__dg.state.players.some((pl) => pl.loggedIn)), '로그아웃: auth:token null → loggedIn 해제');
     await p.click('#btn-leave');
     await p.waitForSelector('#view-landing:not([hidden])', { timeout: 3000 });
+    check(await p.locator('#landing-step-room').isVisible() && (await txt(p, '#me-status')) === '게스트', '로그아웃 후 방 나가기: 2단계(게스트)', await txt(p, '#me-status'));
+    check(await p.locator('#btn-me-login').isVisible() && await p.locator('#me-account').isHidden(), '2단계(게스트, 로그인 가능): "로그인" 링크 · 내 정보 없음');
+    await p.click('#btn-me-login');
+    await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
     check(await p.locator('#account-chip').isHidden(), '로그아웃: 랜딩 칩 없음');
+    check((await txt(p, '.auth-title')) === '로그인하고 시작', '1단계(로그아웃): "로그인하고 시작" 블록');
     check(await p.locator('#btn-login-google').isVisible() && await p.locator('#btn-login-kakao').isVisible(), '로그아웃: Google/카카오 버튼 표시');
+    check(await p.locator('#auth-logged-out .divider').isVisible() && (await txt(p, '#auth-logged-out .divider')) === '또는 게스트로 시작', '1단계(로그아웃): "또는 게스트로 시작" 구분선 아래 게스트 폼');
+    const order = await p.evaluate(() => { const a = document.getElementById('btn-login-google').getBoundingClientRect().top, n = document.getElementById('nick').getBoundingClientRect().top; return a < n; });
+    check(order, '1단계(로그아웃): 로그인 버튼이 게스트 폼보다 위');
     check((await txt(p, '.auth-note')).includes('단어 세트') && (await p.locator('.auth-note a[href="/privacy"]').count()) === 1, '로그아웃: 안내 문구 + 개인정보 처리방침 링크');
     const kakaoBg = await p.locator('#btn-login-kakao').evaluate((e) => getComputedStyle(e).backgroundColor);
     const kakaoFg = await p.locator('#btn-login-kakao').evaluate((e) => getComputedStyle(e).color);
     check(kakaoBg === 'rgb(254, 229, 0)' && kakaoFg === 'rgb(0, 0, 0)', '카카오 버튼: #FEE500 배경 + 검정 글자', `${kakaoBg} / ${kakaoFg}`);
     check((await p.locator('#btn-login-google').evaluate((e) => getComputedStyle(e).backgroundColor)) === 'rgb(255, 255, 255)', 'Google 버튼: 흰 배경');
 
-    // 다시 로그인(모크는 즉시) → 칩
-    await p.fill('#room-code-input', 'ABCD');
+    // 초대 링크로 와서(로그아웃 상태) 1단계에서 로그인(모크는 즉시) → 2단계 + 초대 카드 유지
+    await p.goto(`${URL}/?mock=1&auth=1&stay=1&auth_state=out&room=ABCD`);
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
+    check(await p.locator('#invite-card').isVisible() && (await txt(p, '#invite-code')) === 'ABCD', '초대 링크(저장된 프로필, 로그아웃): 2단계 초대 카드');
+    await p.click('#btn-profile-edit');
+    await p.waitForSelector('#btn-login-kakao:visible', { timeout: 5000 });
     await p.click('#btn-login-kakao');
-    await p.waitForSelector('#account-chip:not([hidden])', { timeout: 3000 });
-    check(await p.locator('#account-chip').isVisible() && await p.locator('#auth-logged-out').isHidden(), '재로그인: 칩 표시 · 버튼 숨김');
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
+    await p.waitForFunction(() => (document.getElementById('me-status').textContent || '').trim() === '카카오 계정', null, { timeout: 3000 }).catch(() => {});
+    check((await txt(p, '#me-status')) === '카카오 계정' && await p.locator('#me-account').isVisible(), '재로그인(카카오): 2단계로 · "카카오 계정"', await txt(p, '#me-status'));
+    check(await p.locator('#invite-card').isVisible() && (await txt(p, '#invite-code')) === 'ABCD', '재로그인: 초대 카드 유지');
     await p.click('#btn-account-open');
     await p.waitForSelector('#overlay-account:not([hidden])', { timeout: 3000 });
     check((await txt(p, '#acct-provider')).includes('카카오'), '재로그인: 제공자 라벨(카카오)', await txt(p, '#acct-provider'));
     await p.click('#btn-account-close');
-    // 로그인 버튼을 누르기 전 입력한 방 코드는 OAuth 리다이렉트 뒤 복원하도록 임시 저장된다(모크는 실제로 이동하지 않으므로 남아 있음) → 다시 열면 채워지고 소비된다
+    // 로그인 버튼을 누르기 전의 초대 코드는 OAuth 리다이렉트 뒤 복원하도록 임시 저장된다(모크는 실제로 이동하지 않으므로 남아 있음) → 다시 열면 초대 카드로 복원되고 소비된다
     check(await p.evaluate(() => sessionStorage.getItem('drawguess.pendingRoom') === 'ABCD'), '로그인 시도 전 방 코드 임시 저장(리다이렉트 복원용)');
     await p.goto(`${URL}/?mock=1&auth=1&stay=1`);
-    await p.waitForSelector('#account-chip:not([hidden])', { timeout: 5000 });
-    check((await val(p, '#room-code-input')) === 'ABCD', '리다이렉트 복귀: 방 코드 입력 복원', await val(p, '#room-code-input'));
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
+    await p.waitForSelector('#me-account:not([hidden])', { timeout: 5000 });
+    check(await p.locator('#invite-card').isVisible() && (await txt(p, '#invite-code')) === 'ABCD' && (await val(p, '#room-code-input')) === 'ABCD', '리다이렉트 복귀(로그인): 2단계 초대 카드로 방 코드 복원', await val(p, '#room-code-input'));
     check(await p.evaluate(() => sessionStorage.getItem('drawguess.pendingRoom') === null), '리다이렉트 복귀: 임시 저장 소비됨');
+    // 2단계에서 로그아웃 → 1단계
+    await p.evaluate(() => { window.__samePage = 9; });
+    await p.click('#btn-logout');
+    await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 }).catch(() => {});
+    await sleep(300);
+    check(await p.locator('#landing-step-profile').isVisible() && await p.locator('#btn-login-google').isVisible() && await p.evaluate(() => window.__samePage === 9), '로그아웃(2단계) → 1단계(로그인 버튼), 페이지 유지');
+    check(await p.evaluate(() => !(history.state && history.state.landing === 'room')), '로그아웃: 2단계 history 항목 정리');
 
     // ---------- 3. 모바일 ----------
     console.log('\n== 로그인 UI (가짜 Supabase, 모바일) ==');
     const m = await newPage(browser, '모바일', { ...devices['iPhone 13'] });
     await m.goto(`${URL}/?mock=1&auth=1&stay=1`);
-    await m.waitForSelector('#account-chip:not([hidden])', { timeout: 5000 });
+    await m.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
+    await m.waitForSelector('#me-account:not([hidden])', { timeout: 5000 });
     let sw = await m.evaluate(() => document.documentElement.scrollWidth);
-    check(sw <= 390, '모바일 랜딩(로그인): 가로 스크롤 없음', sw);
+    check(sw <= 390, '모바일 랜딩(로그인, 2단계): 가로 스크롤 없음', sw);
+    check((await txt(m, '#me-status')) === 'Google 계정', '모바일: 로그인 상태는 2단계 + 제공자 라벨');
     await m.click('#btn-account-open');
     await m.waitForSelector('#sheet-account.open', { timeout: 3000 });
     check((await m.locator('#sheet-account-body #account-body').count()) === 1, '모바일: 내 정보가 바텀 시트에 렌더링');
@@ -280,7 +394,7 @@ const txt = async (page, sel) => (await page.locator(sel).first().textContent().
     await m.click('#sheet-account .sheet-close');
     await m.waitForSelector('#sheet-account', { state: 'hidden', timeout: 3000 });
     check(await m.evaluate(() => window.__dg.acct.open === false), '모바일: ✕로 닫으면 열림 상태 해제');
-    await m.fill('#nick', '모바일모크');
+    check(await m.locator('#landing-step-room').isVisible(), '모바일: 시트를 닫아도 2단계 유지');
     await m.click('#btn-create');
     await m.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     await m.waitForSelector('#settings-panel:not([hidden])', { timeout: 5000 });
@@ -298,6 +412,7 @@ const txt = async (page, sel) => (await page.locator(sel).first().textContent().
     await m.keyboard.press('Escape');
     await m.waitForSelector('#sheet-account', { state: 'hidden', timeout: 3000 });
     check(await m.locator('#wordset-tools').isVisible(), '모바일 설정: 세트 도구 표시');
+    check((await m.locator('.login-badge').count()) === 0, '모바일: ✔ 로그인 배지 없음');
   } catch (e) {
     console.log('FAIL  예외:', e.stack || e.message);
     failures++;

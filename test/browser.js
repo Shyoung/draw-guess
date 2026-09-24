@@ -50,9 +50,14 @@ async function joinAs(context, nick, code) {
   page.on('pageerror', (e) => { console.log(`[${nick}] pageerror: ${e.message}`); failures++; });
   page.on('console', (m) => { if (m.type() === 'error') console.log(`[${nick}] console.error: ${m.text()}`); });
   await page.goto(code ? `${URL}/?room=${code}` : URL + '/');
+  // 랜딩 1단계(프로필) → "다음" → 2단계(방)
+  await page.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 });
   await page.fill('#nick', nick);
+  await page.click('#btn-profile-next');
+  await page.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
   if (code) {
     check((await page.inputValue('#room-code-input')).toUpperCase() === code, `${nick}: ?room= 코드 자동 입력`);
+    check(await page.locator('#invite-card').isVisible() && (await page.textContent('#invite-code')).trim() === code, `${nick}: 초대받은 방 카드 표시`);
     await page.click('#btn-join');
   } else {
     await page.click('#btn-create');
