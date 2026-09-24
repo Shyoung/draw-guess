@@ -45,12 +45,14 @@
     var t = null;
     return function () { var a = arguments; clearTimeout(t); t = setTimeout(function () { fn.apply(null, a); }, ms); };
   }
-  // 프로필 사진(avatar.img): https(카카오 http 는 https 로) · 개발 모크용 data:image/ · blob: 만. 한 번 로드에 실패한 주소는 다시 시도하지 않는다
-  var badImgs = {};
+  // 프로필 사진(avatar.img): https(카카오 http 는 https 로) · 개발 모크용 data:image/ · blob: 만.
+  // 로드에 실패한 주소는 BAD_IMG_RETRY_MS 동안 이모지로 보여 주고, 그 뒤 다시 그릴 때 한 번 더 시도한다(일시적 네트워크 오류 대비)
+  var badImgs = {}, BAD_IMG_RETRY_MS = 60 * 1000;
+  function isBadImg(u) { var t = badImgs[u]; if (!t) return false; if (Date.now() - t < BAD_IMG_RETRY_MS) return true; delete badImgs[u]; return false; }
   function avatarImgUrl(u) {
     if (typeof u !== 'string' || !u || u.length > 2048) return null;
     if (/^http:\/\//i.test(u)) u = 'https://' + u.slice(7);
-    if (!/^(https:\/\/|data:image\/|blob:)/i.test(u) || badImgs[u]) return null;
+    if (!/^(https:\/\/|data:image\/|blob:)/i.test(u) || isBadImg(u)) return null;
     return u;
   }
   function safeAvatar(a) {
@@ -76,7 +78,7 @@
     img.className = 'avatar-img'; img.alt = ''; img.decoding = 'async'; img.loading = 'lazy';
     img.referrerPolicy = 'no-referrer'; img.setAttribute('referrerpolicy', 'no-referrer'); // Google 프로필 사진은 referrer 가 있으면 403
     img.onerror = function () {
-      badImgs[av.img] = 1;
+      badImgs[av.img] = Date.now();
       if (img.parentNode !== node) return;
       node.removeChild(img); node.classList.remove('has-img');
       node.insertBefore(document.createTextNode(av.emoji), node.firstChild);
@@ -727,6 +729,12 @@
     }
     return ui.galleryThumbs[i];
   }
+  /** 갤러리·턴 띠용: 그 사람의 아바타(방에 없으면 게임 결과 순위에서, 그것도 없으면 기본) */
+  function avatarOf(id) {
+    var p = findPlayer(id); if (p && p.avatar) return p.avatar;
+    var r = (ui.ranking || []).filter(function (x) { return x.id === id; })[0]; if (r && r.avatar) return r.avatar;
+    return null;
+  }
   function galleryCaption(g) {
     return (g.round ? g.round + '라운드 · ' : '') + '정답 ' + g.word + ' · ✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘';
   }
@@ -854,7 +862,12 @@
       if (g.category) wd.appendChild(el('span', 'gallery-cat', g.category));
       meta.appendChild(wd);
       var sub = el('div', 'gallery-sub');
-      sub.appendChild(el('span', 'gallery-by', (g.round ? g.round + 'R · ' : '') + '✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘'));
+      var by = el('span', 'gallery-by');
+      if (g.round) by.appendChild(document.createTextNode(g.round + 'R · '));
+      by.appendChild(avatarNode(avatarOf(g.drawerId) || { emoji: '✏️', color: '#f3ecff' }, 'gallery-av'));
+      by.appendChild(el('span', 'gallery-drawer', g.drawerName));
+      by.appendChild(document.createTextNode(' · ' + g.guessed + '명 맞힘'));
+      sub.appendChild(by);
       var dl = el('button', 'btn btn-secondary btn-sm', 'PNG 저장'); dl.type = 'button';
       dl.addEventListener('click', function () {
         try { downloadDataUrl(galleryItemPng(i), galleryFileName(i)); }
@@ -1307,9 +1320,11 @@
     function sep() { t.appendChild(el('span', 'ts-sep', '·')); }
     var dn = playerName(state.drawerId, ui.drawerName || '출제자');
     if (state.phase === 'gameOver') { t.appendChild(document.createTextNode('🏁 게임 종료')); return; }
+    var dav = avatarOf(state.drawerId);
     if (state.phase === 'turnEnd') { t.appendChild(document.createTextNode('⏳ ')); t.appendChild(el('b', null, dn)); t.appendChild(document.createTextNode(' 턴 종료')); }
     else {
-      t.appendChild(document.createTextNode('✏️ ')); t.appendChild(el('b', null, dn + (state.drawerId === myId ? '(나)' : '')));
+      if (dav) t.appendChild(avatarNode(dav, 'ts-av')); else t.appendChild(document.createTextNode('✏️ '));
+      t.appendChild(el('b', null, dn + (state.drawerId === myId ? '(나)' : '')));
       t.appendChild(document.createTextNode(state.phase === 'choosing' ? ' 단어 고르는 중' : ' 그리는 중'));
     }
     if (state.settings.mode !== 'fixed' && state.nextDrawerId && state.nextDrawerId !== state.drawerId) {
@@ -3210,5 +3225,5 @@
   else boot();
 
   // 디버깅용 (콘솔에서 상태 확인)
-  window.__dg = { state: state, ui: ui, acct: acct, photo: photo, landing: landing, ops: function () { return ops; }, redrawAll: redrawAll, myId: function () { return myId; } };
+  window.__dg = { state: state, ui: ui, acct: acct, photo: photo, landing: landing, badImgs: badImgs, renderPlayers: function () { renderPlayers(); }, ops: function () { return ops; }, redrawAll: redrawAll, myId: function () { return myId; } };
 })();

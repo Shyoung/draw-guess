@@ -426,6 +426,7 @@ async function say(page, text) {
     // 카드마다 저장 버튼이 카드 안에 온전히 보인다(행이 줄어 잘리지 않음)
     const cardFit = await host.$$eval('#gallery-grid .gallery-item', (cards) => cards.every((c) => { const r = c.getBoundingClientRect(), b = c.querySelector('.btn').getBoundingClientRect(); return b.top >= r.top && b.bottom <= r.bottom + 0.5 && b.height > 20; }));
     check(cardFit, '갤러리: 저장 버튼이 카드 안에 온전히');
+    check((await host.locator('#gallery-grid .gallery-by .gallery-av').count()) === 3, '갤러리: 카드마다 그린 사람 아바타');
     check((await host.textContent('#btn-gallery-all')).includes('3장'), '"모두 저장 (3장)" 표시', await host.textContent('#btn-gallery-all'));
     // 다운로드가 실제로 일어나는지 (Playwright download 이벤트)
     const dlPromise = host.waitForEvent('download', { timeout: 5000 }).catch(() => null);

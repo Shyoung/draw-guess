@@ -246,6 +246,7 @@ async function mainRun() {
     if (stage === 'drawing-guesser') {
       const mm = await noPageScroll(m, 'drawing(관전자)');
       check(mm.phase === 'drawing' && mm.role === 'guesser', 'drawing(관전자): data-phase/role', `${mm.phase}/${mm.role}`);
+      check((await m.locator('#turn-strip .ts-av').count()) === 1, 'drawing(관전자): 턴 띠에 그리는 사람 아바타');
       check(!mm.compact, 'drawing(관전자): 664px 에서는 컴팩트 아님', mm.compact);
       await headerChecks(m, 'drawing(관전자)');
       // 게임 중 기기 뒤로가기 → "방을 나갈까요?"(게임 문구) → 계속 있기

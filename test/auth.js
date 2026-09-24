@@ -1043,6 +1043,9 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     // 사진이 깨지면 이모지로 (한 번 실패한 주소는 이 페이지에서 다시 쓰지 않으므로 맨 마지막에)
     await m.evaluate(() => { const i = document.querySelector('#player-list li.me .avatar img'); i.dispatchEvent(new Event('error')); });
     check((await m.locator('#player-list li.me .avatar img').count()) === 0 && ((await txt(m, '#player-list li.me .avatar')) || '').length > 0, '사진 로드 실패: 이모지로 대체', await txt(m, '#player-list li.me .avatar'));
+    // 1분이 지나면 다시 그릴 때 한 번 더 시도
+    await m.evaluate(() => { const d = window.__dg.badImgs; Object.keys(d).forEach((k) => { d[k] = Date.now() - 61000; }); window.__dg.renderPlayers(); });
+    check((await m.locator('#player-list li.me .avatar img').count()) === 1, '사진 로드 실패 1분 뒤: 다시 시도(사진 다시 표시)');
   } catch (e) {
     console.log('FAIL  예외:', e.stack || e.message);
     failures++;
