@@ -215,6 +215,50 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check((await g.locator('.login-badge').count()) === 0, '게스트: 플레이어 목록에 ✔ 배지 없음');
     check((await g.locator('#player-list .avatar img').count()) === 0, '게스트(실서버): 플레이어 목록 아바타는 이모지');
     check(await g.locator('#overlay-account').isHidden() && await g.locator('#sheet-account').isHidden(), '게스트: 내 정보 모달/시트 숨김');
+    // 방 안 뒤로가기 → "방을 나갈까요?" (방은 그대로)
+    await sleep(200);
+    check(pathOf(g) === '/' && g.url().includes('room=') && await g.evaluate(() => !!(history.state && history.state.inRoom)), '방: 메인 위에 방 항목(/?room=)', g.url());
+    await g.evaluate(() => { window.__samePage = 'room'; });
+    await g.goBack();
+    await g.waitForSelector('#overlay-leave:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check(await g.locator('#overlay-leave').isVisible() && await g.locator('#view-room').isVisible(), '방 안 뒤로가기: 나가기 확인 대화상자 · 방 유지');
+    check((await txt(g, '#leave-title')) === '방을 나갈까요?' && (await txt(g, '#leave-desc')).includes('메인 화면'), '나가기 확인: 문구(대기실)', await txt(g, '#leave-desc'));
+    check(g.url().includes('room=') && await g.evaluate(() => !!(history.state && history.state.inRoom) && window.__samePage === 'room'), '나가기 확인: 방 항목을 다시 쌓음(페이지 유지)', g.url());
+    await g.click('#btn-leave-cancel');
+    check(await g.locator('#overlay-leave').isHidden() && await g.locator('#view-room').isVisible(), '계속 있기: 대화상자 닫힘 · 방 유지');
+    // 대화상자가 떠 있을 때 뒤로가기 = 취소
+    await g.goBack();
+    await g.waitForSelector('#overlay-leave:not([hidden])', { timeout: 3000 }).catch(() => {});
+    await g.goBack();
+    await sleep(300);
+    check(await g.locator('#overlay-leave').isHidden() && await g.locator('#view-room').isVisible() && await g.evaluate(() => window.__samePage === 'room'), '대화상자 위 뒤로가기 = 취소(방 유지)');
+    // ESC = 취소
+    await g.goBack();
+    await g.waitForSelector('#overlay-leave:not([hidden])', { timeout: 3000 }).catch(() => {});
+    await g.keyboard.press('Escape');
+    check(await g.locator('#overlay-leave').isHidden() && await g.locator('#view-room').isVisible(), 'ESC = 취소');
+    // 나가기 → 메인
+    await g.goBack();
+    await g.waitForSelector('#overlay-leave:not([hidden])', { timeout: 3000 }).catch(() => {});
+    await g.click('#btn-leave-confirm');
+    await g.waitForSelector('#view-landing:not([hidden])', { timeout: 3000 });
+    await sleep(400);
+    check(await g.locator('#landing-step-room').isVisible() && pathOf(g) === '/' && !g.url().includes('room=') && await g.evaluate(() => !!(history.state && history.state.landing === 'room')), '나가기 확인 → 메인(/, ?room= 없음)', `${g.url()} ${await g.evaluate(() => JSON.stringify(history.state))}`);
+    const leftCode = await g.evaluate(() => window.__dg && window.__dg.state ? window.__dg.state.roomCode : null);
+    check(!leftCode, '나가기 확인: 방 상태 비움', String(leftCode));
+    // 다시 방 만들기 → 나가기 버튼(확인 없이) → 메인, 앞으로가기로 방에 되돌아가지 않음
+    await g.click('#btn-create');
+    await g.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
+    await sleep(200);
+    await g.click('#btn-leave');
+    await g.waitForSelector('#view-landing:not([hidden])', { timeout: 3000 });
+    await sleep(400);
+    check(pathOf(g) === '/' && !g.url().includes('room=') && await g.locator('#overlay-leave').isHidden(), '나가기 버튼 → 메인(확인 없음)', g.url());
+    await g.goForward();
+    await sleep(400);
+    check(await g.locator('#landing-step-room').isVisible() && !g.url().includes('room=') && await g.locator('#view-room').isHidden(), '나간 뒤 앞으로가기: 메인 그대로(방 주소 정리)', g.url());
+    await g.click('#btn-create');
+    await g.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     await g.click('#btn-leave');
     await g.waitForSelector('#view-landing:not([hidden])', { timeout: 3000 });
     await sleep(200);
@@ -650,6 +694,26 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await sleep(400);
     check((await visibleStep(p)) === 'start' && await p.locator('#btn-login-google').isVisible() && await p.evaluate(() => window.__samePage === 9), '로그아웃(방 단계) → 시작 단계, 페이지 유지', await visibleStep(p));
     check(pathOf(p) === '/login' && await p.evaluate(() => !!(history.state && history.state.landing === 'start')), '로그아웃: 지금 항목을 시작(/login)으로', `${p.url()} ${await p.evaluate(() => JSON.stringify(history.state))}`);
+
+    // ---------- 2-c. OAuth 복귀 뒤 뒤로가기 ----------
+    console.log('\n== OAuth 복귀 뒤 뒤로가기 (가짜 Supabase) ==');
+    const o = await newPage(browser, 'OAuth복귀');
+    await o.goto(`${URL}/privacy?before=1`);                                       // 로그인 화면으로 오기 전 페이지
+    await o.goto(`${URL}/login?mock=1&auth=1&stay=1&auth_state=out`);            // 시작 화면
+    await o.waitForSelector('#landing-step-start:not([hidden])', { timeout: 5000 });
+    // 로그인 버튼이 적는 기록을 그대로 흉내(모크 로그인은 리다이렉트하지 않으므로)
+    await o.evaluate(() => sessionStorage.setItem('drawguess.oauthHist', JSON.stringify({ len: history.length, fwd: 0, ts: Date.now() })));
+    await o.goto(`${URL}/privacy?kakao=login`);                                    // 카카오 로그인 화면 대용
+    await o.goto(`${URL}/privacy?kakao=consent`);                                  // 카카오 동의 화면 대용
+    await o.goto(`${URL}/login?mock=1&auth=1&stay=1&code=mock-code`);             // 복귀(?code=)
+    await o.waitForSelector('#landing-step-profile:not([hidden]), #landing-step-room:not([hidden])', { timeout: 5000 });
+    await sleep(300);
+    check(await o.evaluate(() => sessionStorage.getItem('drawguess.oauthHist') === null), 'OAuth 복귀: 기록 소비');
+    await o.mouse.click(5, 5);
+    await o.goBack();
+    await o.waitForURL(/before=1/, { timeout: 5000 }).catch(() => {});
+    check(o.url().includes('/privacy?before=1'), 'OAuth 복귀 뒤 뒤로가기: 카카오 화면을 건너뛰고 로그인 전 페이지로', o.url());
+    await o.context().close();
 
     // ---------- 3. 모바일 ----------
     console.log('\n== 로그인 UI (가짜 Supabase, 모바일) ==');

@@ -524,6 +524,12 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 
 /* ---------- 게임 종료 결과 모달 ---------- */
 .modal-results { z-index: 45; }
+/* 나갈까요? 확인 — 시트·결과·내 정보 위 */
+.modal-confirm { z-index: 80; }
+.modal.modal-confirm { align-items: center; } /* 모바일에서도 가운데(다른 모달은 위쪽 정렬) */
+.card-confirm { width: min(360px, 100%); gap: 8px; text-align: center; padding: 22px 20px 18px; }
+.confirm-desc { font-size: 14px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; }
+.confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .card-results { width: min(96%, 560px); align-items: center; text-align: center; gap: 10px; }
 .card-results .ranking-list { max-height: 30vh; }
 .results-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }

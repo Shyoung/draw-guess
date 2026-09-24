@@ -328,6 +328,18 @@
     </div>
   </main>
 
+  <!-- 대기실·게임 중 기기 뒤로가기: 방을 나갈지 묻는다 -->
+  <div id="overlay-leave" class="modal modal-confirm" hidden>
+    <div class="modal-card card-confirm" role="alertdialog" aria-modal="true" aria-labelledby="leave-title" aria-describedby="leave-desc">
+      <h3 id="leave-title" class="card-title">방을 나갈까요?</h3>
+      <p id="leave-desc" class="confirm-desc">대기실에서 나가 메인 화면으로 돌아가요.</p>
+      <div class="confirm-actions">
+        <button id="btn-leave-cancel" class="btn btn-outline btn-lg" type="button">계속 있기</button>
+        <button id="btn-leave-confirm" class="btn btn-primary btn-lg" type="button">나가기</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 게임 종료 결과 (전체화면 모달). 각자 "대기실로 돌아가기"를 눌러야 닫힌다 -->
   <div id="overlay-gameover" class="modal modal-results" hidden>
     <div class="modal-card card-results">

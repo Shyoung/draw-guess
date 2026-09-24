@@ -1426,15 +1426,17 @@
   /** 기기 뒤로가기/앞으로가기(시트와 무관한 popstate): 주소가 가리키는 화면으로(들어갈 수 없으면 대신 갈 화면으로 주소도 고친다) */
   function onLandingPopstate() {
     if (inRoom) {
-      // 방 안에서 이전 항목으로 내려와도 방은 그대로 두고 주소를 /?room= 으로 되살린다
-      try {
-        var qs = new URLSearchParams(location.search);
-        if (state.roomCode) { qs.set('room', state.roomCode); history.replaceState({ landing: 'room' }, '', '/?' + qs.toString()); }
-      } catch (e) { /* ignore */ }
+      // 대기실·게임 중 뒤로가기: 방 항목을 다시 쌓고(방은 그대로) 나갈지 묻는다. 대화상자가 떠 있으면 뒤로가기 = 취소
+      pushRoomEntry();
+      if (leaveDialogOpen()) closeLeaveDialog(); else openLeaveDialog();
       return;
     }
     if (!landing.ready) return;
     var st = history.state;
+    if (st && st.inRoom) { // 나간 방의 항목(앞으로가기 등): 방 주소를 지우고 메인으로 본다
+      try { var rq = new URLSearchParams(location.search); rq.delete('room'); var rqs = rq.toString(); history.replaceState(null, '', location.pathname + (rqs ? '?' + rqs : '')); } catch (e) { /* ignore */ }
+      st = null;
+    }
     var want = st && st.landing ? st.landing : stepFromPath(location.pathname);
     var step = resolveStep(want);
     if (step !== want || stepFromPath(location.pathname) !== step || !(st && st.landing)) {
@@ -1554,6 +1556,7 @@
 
     // 첫 화면. 새로고침 전 남은 시트 항목(history.state.sheet)은 비운다(시트는 닫힌 채로 시작). 랜딩 항목의 from 은 이어 쓴다
     try { if (history.state && history.state.sheet) history.replaceState(null, ''); } catch (e) { /* ignore */ }
+    installOAuthBackSkip();
     if (maybeRestoringSession()) {
       // 로그인 세션 복원 결과(initAccount)를 기다린다. 라이브러리 로드가 멈춰도 4초 뒤에는 게스트 기준으로 보여 준다
       renderLanding();
@@ -1654,14 +1657,8 @@
     var vl = $('view-landing'), vr = $('view-room');
     if (vl) vl.hidden = true; if (vr) vr.hidden = false;
     if (!acctLoggedIn()) setGuestStarted(true); // 방에 들어간 게스트는 이 탭에서 시작을 지난 것으로 본다
-    // 지금 항목(메인)의 주소를 /?room=CODE 로. 걷어내는 중인 항목이 있으면 그 뒤에
-    afterHistory(function () {
-      if (!inRoom || !state.roomCode) return;
-      try {
-        var qs = new URLSearchParams(location.search); qs.set('room', state.roomCode);
-        history.replaceState({ landing: 'room' }, '', '/?' + qs.toString());
-      } catch (e) { /* file:// 등 */ }
-    });
+    // 메인 위에 방 항목(/?room=CODE)을 쌓는다 → 뒤로가기는 방 항목을 벗어나며 "나갈까요?"를 띄운다. 걷어내는 중인 항목이 있으면 그 뒤에
+    afterHistory(pushRoomEntry);
     renderAll();
     var ci = $('chat-input'); if (ci && window.innerWidth >= 1100) ci.focus();
   }
@@ -1682,8 +1679,10 @@
     resetCanvasState(); clearChat();
     var vl = $('view-landing'), vr = $('view-room');
     if (vr) vr.hidden = true; if (vl) vl.hidden = false;
-    // 방에서 나오면 메인. 주소에서 ?room= 을 뺀다(지금 항목을 바꾼다)
+    closeLeaveDialog();
+    // 방에서 나오면 메인. 방 항목을 걷어내고(→ 메인 항목), 주소에서 ?room= 을 뺀다
     landing.invite = null; landing.ready = true;
+    afterHistory(function () { try { if (history.state && history.state.inRoom) histBack(); } catch (e) { /* ignore */ } });
     afterHistory(function () {
       if (inRoom) return;
       try {
@@ -1694,6 +1693,59 @@
     });
     goStep('room', false, { mode: 'replace' });
     renderAll();
+  }
+
+  /** 방 항목: 지금 항목이 방 항목이면 주소만 맞추고, 아니면 위에 쌓는다 */
+  function pushRoomEntry() {
+    if (!inRoom || !state.roomCode) return;
+    try {
+      var qs = new URLSearchParams(location.search); qs.set('room', state.roomCode);
+      var url = '/?' + qs.toString(), st = { inRoom: state.roomCode }, hs = history.state;
+      if (hs && hs.inRoom) history.replaceState(st, '', url); else history.pushState(st, '', url);
+    } catch (e) { /* file:// 등 */ }
+  }
+  // 뒤로가기로 방을 나가려 할 때 묻는 대화상자
+  function leaveDialogOpen() { var d = $('overlay-leave'); return !!(d && !d.hidden); }
+  function openLeaveDialog() {
+    var d = $('overlay-leave'); if (!d || !inRoom) return;
+    var desc = $('leave-desc');
+    if (desc) desc.textContent = state.phase === 'lobby' ? '대기실에서 나가 메인 화면으로 돌아가요.' : '진행 중인 게임에서 빠지고 메인 화면으로 돌아가요. 점수는 사라져요.';
+    d.hidden = false;
+    var ok = $('btn-leave-confirm'); if (ok) { try { ok.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+  }
+  function closeLeaveDialog() { var d = $('overlay-leave'); if (d) d.hidden = true; }
+
+  // OAuth(카카오/Google) 복귀 뒤 뒤로가기가 카카오 로그인·동의 화면으로 가지 않게:
+  //   로그인 버튼을 누를 때 history 길이(와 앞으로 항목 수)를 적어 두고, 돌아오면 지금 항목을 "바닥"으로 바꾸고 그 위에 같은 화면을 쌓는다.
+  //   바닥으로 내려오면(popstate) 로그인 화면으로 오기 전 항목으로 한 번에 건너뛴다.
+  var OAUTH_HIST_KEY = 'drawguess.oauthHist';
+  function rememberHistoryForOAuth() {
+    try {
+      var fwd = 0, nav = window.navigation;
+      if (nav && nav.currentEntry && typeof nav.entries === 'function') fwd = Math.max(0, nav.entries().length - 1 - nav.currentEntry.index);
+      sessionStorage.setItem(OAUTH_HIST_KEY, JSON.stringify({ len: history.length, fwd: fwd, ts: Date.now() }));
+    } catch (e) { /* ignore */ }
+  }
+  function forgetHistoryForOAuth() { try { sessionStorage.removeItem(OAUTH_HIST_KEY); } catch (e) { /* ignore */ } }
+  function installOAuthBackSkip() {
+    var raw = null;
+    try { raw = sessionStorage.getItem(OAUTH_HIST_KEY); } catch (e) { return; }
+    if (!raw) return;
+    forgetHistoryForOAuth();
+    var returned = false;
+    try { returned = /(^#|&)(access_token|error)=/.test(location.hash || '') || /[?&](code|error)=/.test(location.search || ''); } catch (e) { /* ignore */ }
+    if (!returned) return;
+    try {
+      var m = JSON.parse(raw);
+      if (!m || typeof m.len !== 'number' || Date.now() - (m.ts || 0) > 30 * 60 * 1000) return;
+      var at = m.len - 1 - (m.fwd || 0);           // 로그인 버튼을 누른 항목(/login)
+      var target = Math.max(0, at - 1);            // 그 앞 = 로그인 화면으로 오기 전
+      var d = target - (history.length - 1);       // 지금(복귀) 항목에서의 거리
+      if (d >= 0) return;
+      var url = location.pathname + location.search + location.hash;
+      history.replaceState({ oauthBase: d }, '', url);
+      history.pushState(null, '', url);
+    } catch (e) { /* ignore */ }
   }
 
   function copyInvite() {
@@ -1791,8 +1843,12 @@
       catch (e) { toast('이미지를 만들지 못했어요', 'error'); }
     });
     var gm = $('overlay-gallery'); if (gm) gm.addEventListener('click', function (e) { if (e.target === gm) closeGallery(); });
+    var lc = $('btn-leave-cancel'); if (lc) lc.addEventListener('click', closeLeaveDialog);
+    var lo = $('btn-leave-confirm'); if (lo) lo.addEventListener('click', function () { closeLeaveDialog(); if (inRoom) resetToLanding(true); });
+    var ld = $('overlay-leave'); if (ld) ld.addEventListener('click', function (e) { if (e.target === ld) closeLeaveDialog(); });
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
+      if (leaveDialogOpen()) { closeLeaveDialog(); return; }
       if (openSheetId) { closeSheet(false); return; }
       if (acct.open) { closeAccount(); return; }
       if (ui.galleryOpen) closeGallery();
@@ -1866,8 +1922,11 @@
   var histGuard = 0, histQueue = [], histTimer = null;
   function flushHistQueue() {
     clearTimeout(histTimer); histTimer = null;
-    var q = histQueue; histQueue = [];
-    q.forEach(function (fn) { try { fn(); } catch (e) { console.error('[history]', e); } });
+    // 실행한 fn 이 다시 histBack 을 부르면(histGuard > 0) 나머지는 그 popstate 뒤에 이어서 실행한다
+    while (histQueue.length && !histGuard) {
+      var fn = histQueue.shift();
+      try { fn(); } catch (e) { console.error('[history]', e); }
+    }
   }
   /** 우리가 넣은 항목 n개(기본 1)를 걷어낸다. 그 결과로 오는 popstate(한 번)는 무시한다 */
   function histBack(n) {
@@ -1892,6 +1951,8 @@
   }
   window.addEventListener('popstate', function () {
     if (histGuard) { histGuard--; if (!histGuard) flushHistQueue(); return; }
+    var hs = history.state;
+    if (hs && typeof hs.oauthBase === 'number') { try { history.go(hs.oauthBase); } catch (e) { /* ignore */ } return; } // 카카오/Google 화면을 건너뛴다
     if (openSheetId) { closeSheet(false, true); return; }
     onLandingPopstate();
   });
@@ -2179,6 +2240,7 @@
     applyProfileToLanding();
     // 로그인/로그아웃(첫 화면을 정한 뒤, 방 밖): 로그인 → 이 브라우저에서 확정한 적 있으면 메인(메인에서 왔으면 뒤로), 처음이면 프로필 설정
     //   (/login 항목을 바꾼다. 메인에서 왔으면 저장 뒤 메인으로 돌아가게 from 을 넘긴다) / 로그아웃 → 시작(지금 항목을 바꾼다)
+    if (uid && loginChanged) forgetHistoryForOAuth(); // 이 문서 안에서 로그인됨(리다이렉트 없음) → 적어 둔 길이는 쓰지 않는다
     if (loginChanged && landing.ready && !inRoom) {
       if (uid) {
         if (isConfirmed(uid) && nickValue()) returnTo('room', true);
@@ -2397,6 +2459,7 @@
   }
   function startSignIn(provider) {
     if (!Account) return;
+    rememberHistoryForOAuth();
     try { var code = landing.invite || codeInput(); if (code) sessionStorage.setItem(PENDING_ROOM_KEY, code); } catch (e) { /* ignore */ }
     var btns = [$('btn-login-google'), $('btn-login-kakao')];
     btns.forEach(function (b) { if (b) b.disabled = true; });

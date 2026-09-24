@@ -248,6 +248,15 @@ async function mainRun() {
       check(mm.phase === 'drawing' && mm.role === 'guesser', 'drawing(관전자): data-phase/role', `${mm.phase}/${mm.role}`);
       check(!mm.compact, 'drawing(관전자): 664px 에서는 컴팩트 아님', mm.compact);
       await headerChecks(m, 'drawing(관전자)');
+      // 게임 중 기기 뒤로가기 → "방을 나갈까요?"(게임 문구) → 계속 있기
+      await m.goBack();
+      await m.waitForSelector('#overlay-leave:not([hidden])', { timeout: 3000 }).catch(() => {});
+      check(await m.locator('#overlay-leave').isVisible() && await m.locator('#view-room').isVisible(), 'drawing: 뒤로가기 → 나가기 확인(방 유지)');
+      check((await m.locator('#leave-desc').textContent()).includes('게임'), 'drawing: 확인 문구에 게임에서 빠진다는 안내', await m.locator('#leave-desc').textContent());
+      const lb = await box(m, '#overlay-leave .card-confirm');
+      check(inside(lb), 'drawing: 확인 대화상자가 화면 안', fmt(lb));
+      await m.click('#btn-leave-cancel');
+      check(await m.locator('#overlay-leave').isHidden() && await m.locator('#view-room').isVisible(), 'drawing: 계속 있기 → 게임 유지');
       const c = await box(m, '#canvas'), ci = await box(m, '#chat-input'), ds = await box(m, '#draw-status'), strip = await box(m, '#turn-strip');
       check(inside(c), 'drawing(관전자): #canvas 뷰포트 안', fmt(c));
       check(inside(ci), 'drawing(관전자): #chat-input 뷰포트 안', fmt(ci));
