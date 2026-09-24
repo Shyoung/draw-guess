@@ -41,8 +41,11 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values ('avatars', 'avatars', true, 1048576, array['image/jpeg', 'image/png', 'image/webp'])
 on conflict (id) do update set public = excluded.public, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 
+-- 읽기: 공개 버킷이라 공개 URL 은 정책 없이 열린다. SELECT 는 upsert·삭제에 필요한 "본인 폴더만" 허용(전체 목록 노출 방지)
 drop policy if exists "avatars: public read" on storage.objects;
-create policy "avatars: public read" on storage.objects for select using (bucket_id = 'avatars');
+drop policy if exists "avatars: read own" on storage.objects;
+create policy "avatars: read own" on storage.objects for select to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = auth.uid()::text);
 
 drop policy if exists "avatars: upload own" on storage.objects;
 create policy "avatars: upload own" on storage.objects for insert to authenticated
