@@ -25,7 +25,13 @@
      deleteWordSet(id): Promise<true>
      parseWords(text): { words: string[], invalid: string[] }         게임 서버와 같은 규칙(쉼표 구분·1~20자·중복 제거)
      onChange(cb): unsubscribe           cb({ enabled, session, user, profile, token }) — 로그인/로그아웃/토큰 갱신/프로필 변경 시
-     MAX_SETS: 20, MAX_WORDS: 500
+     그림 보관(0004_drawings.sql — 아직 실행 전이면 err.code === 'NO_TABLE'):
+     listDrawingRows(): Promise<[{ id, path, word, category, round, guessed, created_at }]>   최신순
+     listDrawings(): Promise<[… + url]>  비공개 버킷이라 1시간짜리 서명 URL 을 붙인다
+     saveDrawing({ blob, word, category?, round?, guessed? }): Promise<row>   <uid>/<시각>-<난수>.webp|png 업로드 후 행 추가(실패하면 파일 정리)
+     deleteDrawings([{ id, path }]): Promise<true>   행 삭제 후 파일 삭제
+     downloadDrawing({ path }): Promise<Blob>
+     MAX_SETS: 20, MAX_WORDS: 500, MAX_DRAWINGS: 100
    }
    ===================================================================== */
 (function () {
@@ -33,6 +39,7 @@
 
   var LIB_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
   var MAX_SETS = 20, MAX_WORDS = 500, MAX_NAME = 30, MAX_NICK = 12;
+  var DRAWING_BUCKET = 'drawings', MAX_DRAWINGS = 100, DRAWING_MAX_BYTES = 512 * 1024;
   var AVATAR_BUCKET = 'avatars', AVATAR_SIZE = 256, AVATAR_MAX_BYTES = 1024 * 1024, AVATAR_MAX_INPUT = 25 * 1024 * 1024;
   var uploaded = {};        // 이 세션에서 올린 사진 공개 URL → 저장소 경로
   var pendingUpload = null; // 올렸지만 아직 프로필에 저장하지 않은 사진 URL
@@ -398,6 +405,98 @@
     return client.from('word_sets').delete().eq('id', id).eq('owner_id', user.id).then(unwrap).then(function () { return true; });
   }
 
+  // ---------- 그림 보관 ----------
+  /** 0004 를 아직 실행하지 않았다(테이블/버킷 없음) */
+  function isNoDrawingTable(e) {
+    if (!e) return false;
+    if (e.code === 'PGRST205' || e.code === '42P01') return true;
+    var m = errMsg(e, '');
+    return /drawings/.test(m) && /(schema cache|does not exist|Could not find|relation)/i.test(m);
+  }
+  function drawingsRes(res) {
+    if (res && res.error && isNoDrawingTable(res.error)) { var er = new Error('그림 보관 기능을 준비 중이에요'); er.code = 'NO_TABLE'; throw er; }
+    return unwrap(res);
+  }
+  function normDrawing(r) {
+    if (!r || typeof r !== 'object' || !r.id || !r.path) return null;
+    return { id: r.id, path: String(r.path), word: String(r.word || ''), category: r.category ? String(r.category) : '',
+      round: typeof r.round === 'number' ? r.round : null, guessed: typeof r.guessed === 'number' ? r.guessed : null, created_at: r.created_at || null };
+  }
+  function drawingBucket() {
+    if (!client.storage || typeof client.storage.from !== 'function') throw new Error('그림 저장소를 쓸 수 없어요');
+    return client.storage.from(DRAWING_BUCKET);
+  }
+  function listDrawingRows() {
+    var err = requireLogin(); if (err) return err;
+    return client.from('drawings').select('id,path,word,category,round,guessed,created_at')
+      .eq('owner_id', user.id).order('created_at', { ascending: false })
+      .then(drawingsRes).then(function (rows) { return (Array.isArray(rows) ? rows : []).map(normDrawing).filter(Boolean); });
+  }
+  function listDrawings() {
+    return listDrawingRows().then(function (rows) {
+      if (!rows.length) return rows;
+      return Promise.resolve(drawingBucket().createSignedUrls(rows.map(function (r) { return r.path; }), 3600))
+        .then(unwrap)
+        .then(function (list) {
+          var byPath = {};
+          (Array.isArray(list) ? list : []).forEach(function (x) { if (x && x.path && x.signedUrl && !x.error) byPath[x.path] = x.signedUrl; });
+          rows.forEach(function (r) { r.url = byPath[r.path] || null; });
+          return rows;
+        });
+    });
+  }
+  function saveDrawing(d) {
+    var err = requireLogin(); if (err) return err;
+    d = d || {};
+    var blob = d.blob;
+    if (!blob || typeof blob.size !== 'number' || !blob.size) return fail('저장할 그림이 없어요');
+    if (blob.type !== 'image/webp' && blob.type !== 'image/png') return fail('그림 형식이 올바르지 않아요');
+    if (blob.size > DRAWING_MAX_BYTES) return fail('그림 파일이 너무 커요');
+    var word = String(d.word || '').trim().slice(0, 40);
+    if (!word) return fail('제시어가 없어요');
+    var uid = user.id;
+    var path = uid + '/' + Date.now() + '-' + Math.random().toString(36).slice(2, 8) + (blob.type === 'image/webp' ? '.webp' : '.png');
+    var bucket;
+    try { bucket = drawingBucket(); } catch (e) { return Promise.reject(e); }
+    var row = { owner_id: uid, path: path, word: word,
+      category: d.category ? String(d.category).slice(0, 40) : null,
+      round: typeof d.round === 'number' && isFinite(d.round) ? Math.max(0, Math.min(100, Math.round(d.round))) : null,
+      guessed: typeof d.guessed === 'number' && isFinite(d.guessed) ? Math.max(0, Math.min(100, Math.round(d.guessed))) : null };
+    return Promise.resolve(bucket.upload(path, blob, { upsert: false, contentType: blob.type, cacheControl: '31536000' }))
+      .then(function (res) {
+        if (res && res.error && /bucket not found/i.test(errMsg(res.error, ''))) { var er = new Error('그림 보관 기능을 준비 중이에요'); er.code = 'NO_TABLE'; throw er; }
+        return unwrap(res);
+      })
+      .then(function () { return client.from('drawings').insert(row).select().single(); })
+      .then(function (res) {
+        if (res && res.error) { Promise.resolve(bucket.remove([path])).catch(function () { /* ignore */ }); } // 행을 못 만들면 올린 파일도 지운다
+        return drawingsRes(res);
+      })
+      .then(normDrawing);
+  }
+  function deleteDrawings(list) {
+    var err = requireLogin(); if (err) return err;
+    list = (Array.isArray(list) ? list : [list]).filter(function (x) { return x && x.id; });
+    if (!list.length) return Promise.resolve(true);
+    var ids = list.map(function (x) { return x.id; }), paths = list.map(function (x) { return x.path; }).filter(Boolean);
+    return client.from('drawings').delete().in('id', ids).eq('owner_id', user.id).then(drawingsRes)
+      .then(function () {
+        if (!paths.length) return true;
+        return Promise.resolve(drawingBucket().remove(paths)).then(function (res) {
+          if (res && res.error) console.warn('[account] drawing file remove:', errMsg(res.error, '')); // 행은 이미 지웠다 — 파일은 best-effort
+          return true;
+        });
+      });
+  }
+  function downloadDrawing(r) {
+    var err = requireLogin(); if (err) return err;
+    if (!r || !r.path) return fail('그림을 찾을 수 없어요');
+    return Promise.resolve(drawingBucket().download(r.path)).then(unwrap).then(function (b) {
+      if (!b || typeof b.size !== 'number') throw new Error('그림을 받지 못했어요');
+      return b;
+    });
+  }
+
   function onChange(cb) {
     if (typeof cb !== 'function') return function () {};
     listeners.push(cb);
@@ -419,6 +518,12 @@
     listWordSets: listWordSets,
     saveWordSet: saveWordSet,
     deleteWordSet: deleteWordSet,
+    listDrawingRows: listDrawingRows,
+    listDrawings: listDrawings,
+    saveDrawing: saveDrawing,
+    deleteDrawings: deleteDrawings,
+    downloadDrawing: downloadDrawing,
+    MAX_DRAWINGS: MAX_DRAWINGS,
     parseWords: parseWords,
     onChange: onChange,
     MAX_SETS: MAX_SETS,

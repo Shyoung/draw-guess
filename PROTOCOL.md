@@ -16,7 +16,8 @@
 ## 로그인 (선택, Supabase)
 - 서버는 `/config.js` 로 `window.APP_CONFIG = { supabaseUrl, supabaseAnonKey }` 를 내려준다(로그인이 꺼져 있으면 `{}`). 클라이언트는 supabase-js 로 Google/Kakao OAuth 를 직접 수행하고, 소켓 연결 시 `io({ auth: { token: <access_token> } })` 로 토큰을 보낸다.
 - 서버는 토큰을 검증해 플레이어에 `userId` 를 붙인다. `room:state.players[].loggedIn` 으로 노출(id 자체는 노출하지 않음). 접속 중 로그인/로그아웃은 `auth:token { token|null }`.
-- 프로필·단어 세트는 클라이언트가 supabase-js 로 직접 읽고 쓴다(RLS 로 본인 것만). 게임 서버는 관여하지 않는다.
+- 프로필·단어 세트·보관한 그림(drawings, 비공개 Storage 버킷)은 클라이언트가 supabase-js 로 직접 읽고 쓴다(RLS 로 본인 것만). 게임 서버는 관여하지 않는다.
+  그림 보관: `game:over.gallery` 중 `drawerId === 내 id` 이고 ops 가 있는 턴을 클라이언트가 800×600 webp 로 그려 저장한다(사용자당 100장).
 
 ### HTTP (로그인 켜짐일 때만)
 - `POST /api/account/delete` — 헤더 `Authorization: Bearer <Supabase access token>`. 업로드한 프로필 사진(`avatars/<uid>/*`)을 지우고 Auth 사용자를 삭제(profiles·word_sets 는 cascade). 응답 `{ ok:true }` · 401 토큰 무효 · 500 실패. 방 안에 있던 그 계정 플레이어는 `loggedIn:false` 로.

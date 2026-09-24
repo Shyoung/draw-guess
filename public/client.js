@@ -661,7 +661,9 @@
     ui.resultsPending = true; // room:state 의 atResults 가 도착하기 전까지는 결과 화면 유지
     setTimeout(function () { ui.resultsPending = false; }, 1500);
     setTimeLeft(null);
+    ui.saveStatus = null; ui.saveJob = null;
     renderAll();
+    saveMyDrawings();
   }
 
   // ------------------------------------------------------------------
@@ -775,6 +777,230 @@
     });
   }
 
+  // ------------------------------------------------------------------
+  // 그림 보관함(로그인 사용자): 게임이 끝나면 내가 그린 그림을 이미지로 저장(최대 100장). 가득 차면 오래된 그림을 ZIP 으로 받고 바꾼다.
+  //   저장한 게임은 이 탭에서 표시해 두어(sessionStorage) 재접속으로 game:over 를 다시 받아도 두 번 저장하지 않는다.
+  // ------------------------------------------------------------------
+  var MAX_DRAWINGS = 100, SAVED_GAMES_KEY = 'drawguess.savedGames';
+  var vault = { rows: null, loading: false, unavailable: false, error: '', loadedAt: 0, viewing: null, busy: false };
+  function myGalleryItems() {
+    return (ui.gallery || []).filter(function (g) { return g.drawerId === myId && g.ops && g.ops.length; });
+  }
+  function gallerySig(items) {
+    return (state.roomCode || '') + ':' + items.map(function (g) { return g.round + '/' + g.word + '/' + g.ops.length; }).join('|');
+  }
+  function savedSigs() { try { var a = JSON.parse(sessionStorage.getItem(SAVED_GAMES_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+  function markSaved(sig) {
+    var a = savedSigs().filter(function (x) { return x !== sig; }); a.push(sig);
+    try { sessionStorage.setItem(SAVED_GAMES_KEY, JSON.stringify(a.slice(-20))); } catch (e) { /* ignore */ }
+  }
+  /** ops → 800×600 webp(안 되면 png), 512KB 이하 */
+  function drawingBlob(g) {
+    var cv = renderOpsToCanvas(g.ops);
+    var tries = [['image/webp', 0.9], ['image/webp', 0.75], ['image/webp', 0.6], ['image/png']], i = 0;
+    function next() {
+      if (i >= tries.length) return Promise.reject(new Error('그림 이미지를 만들지 못했어요'));
+      var t = tries[i++];
+      return new Promise(function (resolve) { try { cv.toBlob(function (b) { resolve(b); }, t[0], t[1]); } catch (e) { resolve(null); } })
+        .then(function (b) { return b && b.type === t[0] && b.size <= 512 * 1024 ? b : next(); });
+    }
+    return next();
+  }
+  function saveItems(items) {
+    var n = 0;
+    return items.reduce(function (p, g) {
+      return p.then(function () { return drawingBlob(g); })
+        .then(function (blob) { return Account.saveDrawing({ blob: blob, word: g.word, category: g.category || null, round: g.round, guessed: g.guessed }); })
+        .then(function () { n++; });
+    }, Promise.resolve()).then(function () { vault.rows = null; return n; });
+  }
+  function saveMyDrawings() {
+    if (!acctLoggedIn() || !Account || !Account.saveDrawing || vault.unavailable) return;
+    var items = myGalleryItems();
+    if (!items.length) return;
+    var sig = gallerySig(items);
+    if (savedSigs().indexOf(sig) !== -1 || (ui.saveJob && ui.saveJob.sig === sig)) return;
+    ui.saveJob = { sig: sig, items: items };
+    ui.saveStatus = { kind: 'saving', n: items.length };
+    renderResultsSave();
+    Account.listDrawingRows()
+      .then(function (rows) {
+        var free = MAX_DRAWINGS - rows.length;
+        if (items.length > free) { ui.saveStatus = { kind: 'full', n: items.length, need: items.length - Math.max(0, free), count: rows.length }; return; }
+        return saveItems(items).then(function (n) { markSaved(sig); ui.saveStatus = { kind: 'saved', n: n }; });
+      })
+      .catch(function (e) { onSaveError(e); })
+      .then(renderResultsSave);
+  }
+  function onSaveError(e) {
+    if (e && e.code === 'NO_TABLE') { vault.unavailable = true; ui.saveStatus = null; ui.saveJob = null; return; }
+    ui.saveStatus = { kind: 'error', msg: e && e.message ? e.message : '그림을 저장하지 못했어요' };
+  }
+  function drawingFileName(r, type) {
+    var d = r.created_at ? new Date(r.created_at) : new Date(), p2 = function (x) { return (x < 10 ? '0' : '') + x; };
+    var stamp = isNaN(d.getTime()) ? '' : d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' + p2(d.getHours()) + p2(d.getMinutes());
+    return safeFile('그림맞추기_' + (r.word || '그림') + '_' + stamp) + (type === 'image/png' ? '.png' : '.webp');
+  }
+  function downloadBlob(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    downloadDataUrl(url, filename);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+  }
+  /** 행들을 받아 ZIP 한 파일로 저장. 파일이 이미 없는 행은 건너뛴다. 하나도 못 받으면(없는 파일 제외) 실패 */
+  function zipDrawings(rows, zipName) {
+    if (!window.MiniZip) return Promise.reject(new Error('ZIP 을 만들 수 없어요'));
+    var failed = 0;
+    return Promise.all(rows.map(function (r) {
+      return Account.downloadDrawing(r)
+        .then(function (b) { return { name: drawingFileName(r, b.type), data: b, date: r.created_at ? new Date(r.created_at) : new Date() }; })
+        .catch(function (e) { if (!/not found/i.test(e && e.message || '')) failed++; return null; });
+    })).then(function (files) {
+      files = files.filter(Boolean);
+      if (failed) throw new Error('그림을 받지 못했어요. 잠시 후 다시 시도해주세요');
+      if (!files.length) return 0;
+      return window.MiniZip.make(files).then(function (blob) { downloadBlob(blob, zipName); return files.length; });
+    });
+  }
+  function stampNow() { var d = new Date(), p2 = function (x) { return (x < 10 ? '0' : '') + x; }; return d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()); }
+  /** 가득 참: 오래된 그림 need 장을 ZIP 으로 받고 지운 뒤 이번 그림 저장 */
+  function replaceOldestAndSave() {
+    var job = ui.saveJob; if (!job || vault.busy) return;
+    vault.busy = true;
+    ui.saveStatus = { kind: 'saving', n: job.items.length, note: '오래된 그림을 받는 중…' };
+    renderResultsSave();
+    var replaced = 0;
+    Account.listDrawingRows()
+      .then(function (rows) {
+        var need = job.items.length - (MAX_DRAWINGS - rows.length);
+        var oldest = need > 0 ? rows.slice().sort(function (a, b) { return String(a.created_at).localeCompare(String(b.created_at)); }).slice(0, need) : [];
+        replaced = oldest.length;
+        if (!oldest.length) return null;
+        return zipDrawings(oldest, '그림맞추기_보관함_정리_' + stampNow() + '.zip').then(function () { return Account.deleteDrawings(oldest); });
+      })
+      .then(function () { ui.saveStatus = { kind: 'saving', n: job.items.length }; renderResultsSave(); return saveItems(job.items); })
+      .then(function (n) { markSaved(job.sig); ui.saveStatus = { kind: 'saved', n: n, replaced: replaced }; })
+      .catch(function (e) { onSaveError(e); })
+      .then(function () { vault.busy = false; renderResultsSave(); });
+  }
+  function skipSave() {
+    if (ui.saveJob) markSaved(ui.saveJob.sig);
+    ui.saveStatus = { kind: 'skipped' };
+    renderResultsSave();
+  }
+  function renderResultsSave() {
+    var box = $('results-save'); if (!box) return;
+    var s = inRoom ? ui.saveStatus : null;
+    box.hidden = !s;
+    if (!s) { box.innerHTML = ''; box.removeAttribute('data-key'); return; }
+    var key = JSON.stringify(s);
+    if (box.getAttribute('data-key') === key) return;
+    box.setAttribute('data-key', key);
+    box.className = 'results-save rs-' + s.kind;
+    box.innerHTML = '';
+    var btn = function (label, cls, fn) { var b = el('button', 'btn btn-sm ' + cls, label); b.type = 'button'; b.addEventListener('click', fn); return b; };
+    if (s.kind === 'saving') box.appendChild(el('span', 'rs-text', s.note || ('내 그림 ' + s.n + '장을 보관함에 저장하는 중…')));
+    else if (s.kind === 'saved') box.appendChild(el('span', 'rs-text', '✅ 내 그림 ' + s.n + '장을 보관함에 저장했어요' + (s.replaced ? ' (오래된 ' + s.replaced + '장은 받아 두고 정리했어요)' : '') + '. 내 정보 › 그림에서 볼 수 있어요'));
+    else if (s.kind === 'skipped') box.appendChild(el('span', 'rs-text', '이번 그림은 보관함에 저장하지 않았어요'));
+    else if (s.kind === 'error') {
+      box.appendChild(el('span', 'rs-text', '그림을 저장하지 못했어요: ' + s.msg));
+      var acts0 = el('div', 'rs-actions');
+      acts0.appendChild(btn('다시 시도', 'btn-outline', function () { if (ui.saveJob) { var sig = ui.saveJob.sig; ui.saveJob = null; if (savedSigs().indexOf(sig) === -1) saveMyDrawings(); } }));
+      box.appendChild(acts0);
+    } else if (s.kind === 'full') {
+      box.appendChild(el('span', 'rs-text', '보관함이 가득 찼어요 (' + s.count + '/' + MAX_DRAWINGS + '장). 이번 그림 ' + s.n + '장을 저장하려면 오래된 그림 ' + s.need + '장을 정리해야 해요.'));
+      var acts = el('div', 'rs-actions');
+      acts.appendChild(btn('오래된 ' + s.need + '장 받고 바꾸기', 'btn-primary', replaceOldestAndSave));
+      acts.appendChild(btn('저장 안 함', 'btn-ghost', skipSave));
+      box.appendChild(acts);
+    }
+  }
+
+  // 내 정보 › 그림 탭
+  function loadDrawings(force) {
+    if (!acctLoggedIn() || !Account || !Account.listDrawings || vault.loading) return;
+    if (!force && vault.rows && Date.now() - vault.loadedAt < 45 * 60 * 1000) return; // 서명 URL 은 1시간
+    vault.loading = true; vault.error = '';
+    renderMeGallery();
+    Account.listDrawings()
+      .then(function (rows) { vault.rows = rows; vault.loadedAt = Date.now(); vault.unavailable = false; })
+      .catch(function (e) { if (e && e.code === 'NO_TABLE') vault.unavailable = true; else vault.error = e && e.message ? e.message : '그림을 불러오지 못했어요'; })
+      .then(function () { vault.loading = false; renderMeGallery(); });
+  }
+  function drawingSub(r) {
+    return [fmtDate(r.created_at), r.category, typeof r.guessed === 'number' ? r.guessed + '명 맞힘' : ''].filter(Boolean).join(' · ');
+  }
+  function renderMeGallery() {
+    if (landing.step !== 'me' || meTab() !== 'gallery' || inRoom) return;
+    if (!vault.rows && !vault.loading && !vault.unavailable && !vault.error) { loadDrawings(); return; }
+    var rows = vault.rows || [], n = rows.length;
+    var show = function (id, on) { var e = $(id); if (e) e.hidden = !on; };
+    show('drawings-loading', vault.loading && !vault.rows);
+    show('drawings-unavailable', vault.unavailable);
+    show('drawings-error', !!vault.error);
+    var er = $('drawings-error'); if (er) er.textContent = vault.error || '';
+    show('drawings-empty', !!vault.rows && !n && !vault.unavailable);
+    show('drawings-full', n >= MAX_DRAWINGS);
+    var cnt = $('drawings-count'); if (cnt) cnt.textContent = vault.rows && !vault.unavailable ? n + ' / ' + MAX_DRAWINGS : '';
+    var zb = $('btn-drawings-zip'); if (zb) { zb.hidden = !n || vault.unavailable; zb.disabled = vault.busy; }
+    var grid = $('drawings-grid'); if (!grid) return;
+    var key = vault.unavailable ? '' : rows.map(function (r) { return r.id + ':' + (r.url ? 1 : 0); }).join('|');
+    if (grid.getAttribute('data-key') === key) return;
+    grid.setAttribute('data-key', key);
+    grid.innerHTML = '';
+    if (vault.unavailable) return;
+    rows.forEach(function (r) {
+      var li = el('li', 'drawing-item'); li.setAttribute('data-id', String(r.id));
+      var th = el('button', 'drawing-thumb'); th.type = 'button'; th.setAttribute('aria-label', r.word + ' 그림 크게 보기');
+      if (r.url) { var img = document.createElement('img'); img.src = r.url; img.alt = r.word + ' 그림'; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer'; th.appendChild(img); }
+      else th.appendChild(el('span', 'dt-missing', '이미지를 불러오지 못했어요'));
+      th.addEventListener('click', function () { openDrawing(r); });
+      li.appendChild(th);
+      var meta = el('div', 'drawing-meta');
+      meta.appendChild(el('strong', 'drawing-word', r.word));
+      meta.appendChild(el('span', 'drawing-sub', drawingSub(r)));
+      li.appendChild(meta);
+      var acts = el('div', 'drawing-actions');
+      var dl = el('button', 'btn btn-ghost btn-sm dr-download', '받기'); dl.type = 'button'; dl.addEventListener('click', function () { downloadDrawingRow(r); });
+      var rm = el('button', 'btn btn-ghost btn-sm dr-delete', '삭제'); rm.type = 'button'; rm.addEventListener('click', function () { deleteDrawingRow(r); });
+      acts.appendChild(dl); acts.appendChild(rm);
+      li.appendChild(acts);
+      grid.appendChild(li);
+    });
+  }
+  function downloadDrawingRow(r) {
+    Account.downloadDrawing(r).then(function (b) { downloadBlob(b, drawingFileName(r, b.type)); })
+      .catch(function (e) { acctErr(e, '그림을 받지 못했어요'); });
+  }
+  function deleteDrawingRow(r) {
+    if (!window.confirm('"' + r.word + '" 그림을 지울까요? 되돌릴 수 없어요.')) return;
+    Account.deleteDrawings([r])
+      .then(function () {
+        toast('그림을 지웠어요', 'ok');
+        if (vault.rows) vault.rows = vault.rows.filter(function (x) { return x.id !== r.id; });
+        if (vault.viewing && vault.viewing.id === r.id) closeDrawing();
+        renderMeGallery();
+      })
+      .catch(function (e) { acctErr(e, '그림을 지우지 못했어요'); });
+  }
+  function downloadAllDrawings() {
+    var rows = vault.rows || []; if (!rows.length || vault.busy) return;
+    vault.busy = true; renderMeGallery();
+    toast('그림 ' + rows.length + '장을 모으는 중…');
+    zipDrawings(rows, '그림맞추기_보관함_' + stampNow() + '.zip')
+      .then(function (n) { if (n) toast('그림 ' + n + '장을 ZIP 으로 받았어요', 'ok'); })
+      .catch(function (e) { acctErr(e, 'ZIP 을 만들지 못했어요'); })
+      .then(function () { vault.busy = false; renderMeGallery(); });
+  }
+  function openDrawing(r) {
+    var m = $('overlay-drawing'); if (!m) return;
+    vault.viewing = r;
+    var img = $('dv-img'); if (img) { img.src = r.url || ''; img.alt = r.word + ' 그림'; }
+    var w = $('dv-word'); if (w) w.textContent = r.word;
+    var meta = $('dv-meta'); if (meta) meta.textContent = drawingSub(r);
+    m.hidden = false;
+  }
+  function closeDrawing() { vault.viewing = null; var m = $('overlay-drawing'); if (m) m.hidden = true; }
+
   function onChatMessage(m) {
     if (!m || typeof m !== 'object') return;
     appendChat(m);
@@ -831,7 +1057,7 @@
     if (roomProfile.open && (!inRoom || state.phase !== 'lobby')) { closeRoomProfile(); if (inRoom) toast('게임이 시작돼 프로필 수정을 닫았어요'); }
     var rpb = $('btn-room-profile');
     if (rpb) { rpb.disabled = inRoom && state.phase !== 'lobby'; rpb.title = rpb.disabled ? '대기실에서 바꿀 수 있어요' : '닉네임·아바타 바꾸기'; }
-    renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderChatPeek(); renderAccount();
+    renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderResultsSave(); renderChatPeek(); renderAccount();
   }
 
   function renderTopbar() {
@@ -1711,7 +1937,7 @@
     state.roomCode = null; state.hostId = null; state.phase = 'lobby'; state.round = 0; state.totalRounds = 0;
     state.drawerId = null; state.players = []; state.settings = Object.assign({}, DEFAULT_SETTINGS);
     ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null; ui.optionsKey = '';
-    ui.gallery = null; ui.galleryThumbs = []; ui.galleryOpen = false;
+    ui.gallery = null; ui.galleryThumbs = []; ui.galleryOpen = false; ui.saveStatus = null; ui.saveJob = null;
     state.lobbyStep = 'mode'; state.fixedDrawerId = null;
     setTimeLeft(null);
     resetCanvasState(); clearChat();
@@ -1909,6 +2135,7 @@
       if (e.key !== 'Escape') return;
       if (leaveDialogOpen()) { closeLeaveDialog(); return; }
       var dd = $('overlay-delete'); if (dd && !dd.hidden) { closeDeleteDialog(); return; }
+      if (vault.viewing) { closeDrawing(); return; }
       if (openSheetId) { closeSheet(false); return; }
       if (roomProfile.open) { closeRoomProfile(); return; }
       if (ui.galleryOpen) closeGallery();
@@ -2295,6 +2522,8 @@
     var loginChanged = false;
     if (uid !== acct.lastUid) {
       acct.lastUid = uid; acct.sets = []; acct.setsLoaded = false; acct.formOpen = false; acct.editing = null; acct.appliedKey = '';
+      vault.rows = null; vault.error = ''; vault.unavailable = false; vault.loadedAt = 0; closeDrawing();
+      if (uid && inRoom && ui.gallery && ui.gallery.length) setTimeout(saveMyDrawings, 0); // 결과 화면에서 로그인 복원이 늦게 끝난 경우
       photo.mode = 'emoji'; photo.url = null; photo.social = null; photo.uploading = false; landing.nickEdited = false;
       if (!uid && acct.open) closeAccount();
       if (uid) refreshWordSets();
@@ -2441,6 +2670,7 @@
       var b = $('tab-' + t); if (b) { b.setAttribute('aria-selected', t === tab ? 'true' : 'false'); b.tabIndex = t === tab ? 0 : -1; }
       var p = $('me-panel-' + t); if (p) p.hidden = t !== tab;
     });
+    if (tab === 'gallery') renderMeGallery();
   }
   // 회원 탈퇴
   function openDeleteDialog() {
@@ -2656,6 +2886,11 @@
     var k = $('btn-login-kakao'); if (k) k.addEventListener('click', function () { startSignIn('kakao'); });
     ['btn-account-open', 'btn-account-top'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', openAccount); });
     ['btn-logout', 'btn-mp-logout'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', doSignOut); });
+    var dz = $('btn-drawings-zip'); if (dz) dz.addEventListener('click', downloadAllDrawings);
+    var dvc = $('btn-dv-close'); if (dvc) dvc.addEventListener('click', closeDrawing);
+    var dvd = $('btn-dv-download'); if (dvd) dvd.addEventListener('click', function () { if (vault.viewing) downloadDrawingRow(vault.viewing); });
+    var dvx = $('btn-dv-delete'); if (dvx) dvx.addEventListener('click', function () { if (vault.viewing) deleteDrawingRow(vault.viewing); });
+    var dvo = $('overlay-drawing'); if (dvo) dvo.addEventListener('click', function (e) { if (e.target === dvo) closeDrawing(); });
     var nb = $('btn-wordset-new'); if (nb) nb.addEventListener('click', function () { openWordSetForm(null); });
     var wc = $('btn-ws-cancel'); if (wc) wc.addEventListener('click', function () { acct.formOpen = false; acct.editing = null; renderAccountPanel(); });
     var wf = $('wordset-form'); if (wf) wf.addEventListener('submit', function (e) { e.preventDefault(); submitWordSet(); });

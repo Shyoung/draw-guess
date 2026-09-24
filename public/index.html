@@ -158,10 +158,22 @@
         </section>
         </div>
         <div id="me-panel-gallery" class="me-panel" role="tabpanel" aria-labelledby="tab-gallery" hidden>
-          <div class="me-empty">
-            <span class="me-empty-icon" aria-hidden="true">🖼️</span>
-            <p>게임에서 그린 그림이 여기에 모여요.<br>곧 열릴 예정이에요!</p>
+          <div class="drawings-head">
+            <p class="me-panel-note">게임이 끝나면 내가 그린 그림이 저장돼요 <span id="drawings-count" class="panel-sub"></span></p>
+            <button id="btn-drawings-zip" class="btn btn-ghost btn-sm" type="button" hidden>전체 받기 (ZIP)</button>
           </div>
+          <p id="drawings-full" class="drawings-full" hidden>보관함이 가득 찼어요. 다음 게임이 끝나면 오래된 그림을 받아 두고 정리할 수 있어요.</p>
+          <p id="drawings-loading" class="card-note">불러오는 중…</p>
+          <p id="drawings-error" class="card-note drawings-error" hidden></p>
+          <div id="drawings-empty" class="me-empty" hidden>
+            <span class="me-empty-icon" aria-hidden="true">🖼️</span>
+            <p>아직 저장한 그림이 없어요.<br>로그인한 채로 게임을 하면 내가 그린 그림이 여기에 모여요.</p>
+          </div>
+          <div id="drawings-unavailable" class="me-empty" hidden>
+            <span class="me-empty-icon" aria-hidden="true">🛠️</span>
+            <p>그림 보관 기능을 준비 중이에요.</p>
+          </div>
+          <ul id="drawings-grid" class="drawings-grid"></ul>
         </div>
         <div class="me-foot">
           <button id="btn-mp-logout" class="link-btn link-muted" type="button">로그아웃</button>
@@ -407,6 +419,8 @@
       <div id="podium" class="podium"></div>
       <ol id="ranking-list" class="ranking-list"></ol>
       <p id="gameover-drawer" class="card-note" hidden></p>
+      <!-- 로그인 사용자: 내가 그린 그림을 보관함에 저장한 결과 / 가득 찼을 때 정리 안내 -->
+      <div id="results-save" class="results-save" role="status" hidden></div>
       <div class="results-actions">
         <button id="btn-gallery-open" class="btn btn-secondary" type="button" hidden>🖼 그림 갤러리 보기</button>
         <button id="btn-results-done" class="btn btn-primary" type="button">대기실로 돌아가기</button>
@@ -499,6 +513,22 @@
     </div>
   </div>
 
+  <!-- 보관한 그림 크게 보기 -->
+  <div id="overlay-drawing" class="modal modal-drawing" hidden>
+    <div class="modal-card card-drawing" role="dialog" aria-modal="true" aria-labelledby="dv-word">
+      <header class="modal-head">
+        <h3 id="dv-word" class="card-title"></h3>
+        <div class="modal-actions"><button id="btn-dv-close" class="btn btn-ghost btn-sm" type="button">닫기</button></div>
+      </header>
+      <div class="dv-frame"><img id="dv-img" alt="" referrerpolicy="no-referrer"></div>
+      <div class="dv-foot">
+        <span id="dv-meta" class="dv-meta"></span>
+        <button id="btn-dv-delete" class="btn btn-ghost btn-sm" type="button">삭제</button>
+        <button id="btn-dv-download" class="btn btn-secondary btn-sm" type="button">받기</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 회원 탈퇴 확인 -->
   <div id="overlay-delete" class="modal modal-confirm" hidden>
     <div class="modal-card card-confirm" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-desc">
@@ -523,6 +553,7 @@
     }
   </script>
   <script src="sound.js"></script>
+  <script src="zip.js"></script>
   <script src="account.js"></script>
   <script src="client.js"></script>
 </body>

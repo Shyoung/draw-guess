@@ -6,7 +6,10 @@
                     기본은 로그인된 상태로 시작. &auth_state=out 이면 로그아웃 상태로 시작. window.__mockAuth 로 상태 확인
                     모크 사용자는 소셜 사진(인라인 SVG data URL)을 가진다. &auth_photo=0 이면 사진 없음.
                     storage.from('avatars').upload/getPublicUrl/remove 는 메모리에 blob 을 두고 blob: URL 을 공개 URL 로 준다
-                    (window.__mockAuth.storage.avatars[path]). 실제 서버라면 허용 호스트가 아니라 img 를 버리겠지만 모크 소켓은 서버를 거치지 않는다 */
+                    (window.__mockAuth.storage.avatars[path]). 실제 서버라면 허용 호스트가 아니라 img 를 버리겠지만 모크 소켓은 서버를 거치지 않는다
+                    그림 보관: tables.drawings(100장 제한) + storage.drawings(createSignedUrls → blob: URL, download → Blob).
+                    &drawings=0 이면 drawings 테이블이 없는 것처럼(0004 실행 전) PGRST205 오류를 돌려준다
+   window.__mockFire(ev, payload) : 서버 → 클라이언트 이벤트를 흉내 낸다(테스트용, 예: game:over) */
 (function () {
   var handlers = {}, ME = 'me', chosen = null;
   var qs = new URLSearchParams(location.search);
@@ -31,11 +34,13 @@
     markSession();
     var nowIso = new Date().toISOString();
     var tables = {
+      drawings: [],
       profiles: [{ user_id: 'mock-user-1', nickname: '모크유저', avatar_url: SOCIAL_PHOTO, social_avatar_url: SOCIAL_PHOTO, avatar_mode: SOCIAL_PHOTO ? 'photo' : 'emoji', avatar_emoji: null, avatar_color: null, created_at: nowIso, updated_at: nowIso }],
       word_sets: []
     };
     // 가짜 Storage: bucket → { path: { blob, type, size, url } }. RLS 흉내: 로그인 · 본인 폴더(<uid>/…) · 1MB · jpeg/png/webp
-    var storage = { avatars: {} };
+    var storage = { avatars: {}, drawings: {} };
+    var noDrawings = qs.get('drawings') === '0';
     var later10 = function (v) { return new Promise(function (r) { setTimeout(function () { r(v); }, 10); }); };
     var storageBucket = function (name) {
       var files = storage[name] || (storage[name] = {});
@@ -51,6 +56,17 @@
           if (files[path] && !(opts && opts.upsert)) return denied('The resource already exists');
           files[path] = { blob: blob, type: type, size: blob.size, url: URL.createObjectURL(blob) };
           return later10({ data: { path: path, fullPath: name + '/' + path }, error: null });
+        },
+        createSignedUrls: function (paths) {
+          if (!mockSession) return denied('not authenticated');
+          return later10({ data: (paths || []).map(function (p) {
+            var f = ownPath(p) ? files[p] : null;
+            return f ? { path: p, signedUrl: f.url, error: null } : { path: p, signedUrl: null, error: 'Object not found' };
+          }), error: null });
+        },
+        download: function (path) {
+          var f = ownPath(path) ? files[path] : null;
+          return f ? later10({ data: f.blob, error: null }) : denied('Object not found');
         },
         getPublicUrl: function (path) {
           var f = files[path];
@@ -70,21 +86,27 @@
     var builder = function (table) {
       var rows = tables[table] || (tables[table] = []);
       var op = 'select', payload = null, filters = [], order = null, single = false, maybe = false, returning = false;
-      function match(r) { return filters.every(function (f) { return r[f[0]] === f[1]; }); }
+      function match(r) { return filters.every(function (f) { return f[2] === 'in' ? f[1].indexOf(r[f[0]]) !== -1 : r[f[0]] === f[1]; }); }
       function run() {
         var now = new Date().toISOString(), out;
         try {
+          if (table === 'drawings' && noDrawings) return { data: null, error: { message: "Could not find the table 'public.drawings' in the schema cache", code: 'PGRST205' } };
           if (op === 'select') {
             out = rows.filter(match).map(clone);
             if (order) out.sort(function (a, b) { var x = a[order.key], y = b[order.key]; return (x < y ? -1 : x > y ? 1 : 0) * (order.asc ? 1 : -1); });
           } else if (op === 'insert') {
             out = [];
             (Array.isArray(payload) ? payload : [payload]).forEach(function (v) {
+              if (table === 'drawings') {
+                if (!mockSession || v.owner_id !== mockSession.user.id || String(v.path || '').split('/')[0] !== v.owner_id) throw new Error('new row violates row-level security policy for table "drawings"');
+                if (rows.filter(function (r) { return r.owner_id === v.owner_id; }).length >= 100) throw new Error('그림은 100장까지 보관할 수 있어요');
+              }
               if (table === 'word_sets') {
                 if (rows.filter(function (r) { return r.owner_id === v.owner_id; }).length >= 20) throw new Error('단어 세트는 20개까지 만들 수 있어요');
                 if ((v.words || []).length > 500) throw new Error('new row for relation "word_sets" violates check constraint "word_sets_words_check"');
               }
-              var row = Object.assign(table === 'word_sets' ? { id: 'ws-' + (seq++), is_public: false } : {}, { created_at: now, updated_at: now }, v);
+              var row = Object.assign(table === 'word_sets' ? { id: 'ws-' + (seq++), is_public: false } : table === 'drawings' ? { id: 'dr-' + (seq++) } : {}, { created_at: now, updated_at: now }, v);
+              if (table === 'drawings') { now = new Date(Date.parse(now) + 1).toISOString(); } // 같은 ms 에 여러 장이어도 순서가 갈리도록
               rows.push(row); out.push(clone(row));
             });
           } else if (op === 'update') {
@@ -107,6 +129,7 @@
         upsert: function (v) { op = 'insert'; payload = v; return b; },
         delete: function () { op = 'delete'; return b; },
         eq: function (k, v) { filters.push([k, v]); return b; },
+        in: function (k, v) { filters.push([k, Array.isArray(v) ? v : [], 'in']); return b; },
         order: function (k, o) { order = { key: k, asc: !o || o.ascending !== false }; return b; },
         limit: function () { return b; },
         single: function () { single = true; return b; },
@@ -148,11 +171,11 @@
         if (!mockSession || bearer !== 'Bearer ' + mockSession.access_token) return jsonRes(401, { ok: false, error: '다시 로그인한 뒤 시도해주세요' });
         if (qs.get('delete_fail') === '1') return jsonRes(500, { ok: false, error: '탈퇴 처리에 실패했어요. 잠시 후 다시 시도해주세요' });
         var uid = mockSession.user.id;
-        ['profiles', 'word_sets'].forEach(function (t) {
+        ['profiles', 'word_sets', 'drawings'].forEach(function (t) {
           var key = t === 'profiles' ? 'user_id' : 'owner_id';
           for (var i = tables[t].length - 1; i >= 0; i--) if (tables[t][i][key] === uid) tables[t].splice(i, 1);
         });
-        Object.keys(storage.avatars).forEach(function (p) { if (p.split('/')[0] === uid) delete storage.avatars[p]; });
+        ['avatars', 'drawings'].forEach(function (bk) { Object.keys(storage[bk]).forEach(function (p) { if (p.split('/')[0] === uid) delete storage[bk][p]; }); });
         window.__mockAuth.deleted = true;
         return jsonRes(200, { ok: true });
       }
@@ -160,6 +183,7 @@
     };
     console.log('[mock] fake supabase installed (auth=1)');
   }
+  window.__mockFire = function (ev, payload) { fire(ev, payload); };
   function fire(ev, payload) {
     (handlers[ev] || []).forEach(function (fn) { try { fn(payload); } catch (e) { console.error('[mock]', ev, e); } });
   }
@@ -235,7 +259,14 @@
     { label: 'gameOver', delay: 3000, run: function () {
       setPhase('gameOver', null);
       var ranking = players.slice().sort(function (a, b) { return b.score - a.score; }).map(function (p) { return { id: p.id, name: p.name, avatar: p.avatar, score: p.score }; });
-      fire('game:over', { ranking: ranking });
+      var cone = [{ type: 'stroke', tool: 'pen', color: '#8d5524', size: 8, points: [[330, 300], [400, 480], [470, 300], [330, 300]] },
+        { type: 'stroke', tool: 'pen', color: '#f06292', size: 8, points: circle(400, 240, 85) }, { type: 'fill', x: 400, y: 240, color: '#f8c9a0' }];
+      var apple = [{ type: 'stroke', tool: 'pen', color: '#e53935', size: 10, points: circle(400, 320, 140) }, { type: 'fill', x: 400, y: 320, color: '#ef5350' },
+        { type: 'stroke', tool: 'pen', color: '#6d4c41', size: 12, points: [[400, 180], [420, 110]] }];
+      fire('game:over', { ranking: ranking, gallery: [
+        { round: 1, word: 'ice cream', category: '음식', drawerId: 'p2', drawerName: '토끼', guessed: 3, ops: cone },
+        { round: 1, word: chosen || '사과', category: '과일', drawerId: ME, drawerName: players[0].name, guessed: 3, ops: apple }
+      ] });
     } },
     { label: 'backToLobby', delay: 10000, run: function () { room.round = 0; setPhase('lobby', null); chat('system', '게임이 끝났어요. 다시 시작할 수 있어요!'); } }
   ];

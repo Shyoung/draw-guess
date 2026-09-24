@@ -17,6 +17,14 @@
 같은 방법으로 [`supabase/migrations/0002_avatars.sql`](../supabase/migrations/0002_avatars.sql) 도 실행합니다.
 프로필에 사진 표시 방식(`avatar_mode`)과 소셜 원본 사진(`social_avatar_url`) 칸이 생기고, 업로드용 공개 저장소 버킷 `avatars`(1MB, jpeg/png/webp, 본인 폴더만 쓰기)가 만들어집니다.
 
+### 2-2. 목록 공개 범위 좁히기 (0003)
+[`supabase/migrations/0003_avatars_select_own.sql`](../supabase/migrations/0003_avatars_select_own.sql) — avatars 버킷 목록을 본인 폴더로만 좁힙니다.
+
+### 2-3. 그림 보관 (0004)
+[`supabase/migrations/0004_drawings.sql`](../supabase/migrations/0004_drawings.sql) 도 같은 방법으로 실행합니다.
+그림 메타데이터 테이블(`drawings`, 사용자당 100장 제한 트리거, 본인 것만 읽기·만들기·지우기 RLS)과 **비공개** 저장소 버킷 `drawings`(한 장 512KB, webp/png, 본인 폴더만)가 만들어집니다.
+실행 전에는 게임이 끝나도 그림을 저장하지 않고, 내 정보 › 그림 탭에 "준비 중"이 보입니다.
+
 ## 3. 로그인 제공자 켜기
 **Authentication → Providers**
 

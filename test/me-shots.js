@@ -61,6 +61,22 @@ async function shots(browser, tag, ctxOpts) {
   else { await p.click('#btn-room-profile-close'); await p.click('#btn-account-top'); }
   await sleep(300);
   await p.screenshot({ path: path.join(OUT, `${tag}-leave-to-me.png`) });
+  // 그림 보관: 게임 종료 → 저장 안내 → 내 정보 › 그림
+  await p.click('#btn-leave-cancel');
+  const ops = (c) => [{ type: 'stroke', tool: 'pen', color: c, size: 10, points: [[120, 420], [260, 160], [400, 420], [540, 160], [680, 420]] }, { type: 'fill', x: 400, y: 520, color: '#fff59d' }];
+  await p.evaluate((g) => window.__mockFire('game:over', { ranking: [{ id: 'me', name: '모크유저', avatar: { emoji: '😀', color: '#bae1ff' }, score: 300 }], gallery: g }),
+    [{ round: 1, word: '번개', category: '자연', drawerId: 'me', drawerName: '모크유저', guessed: 2, ops: ops('#1e88e5') }, { round: 2, word: '산', category: '자연', drawerId: 'me', drawerName: '모크유저', guessed: 3, ops: ops('#43a047') }]);
+  await p.waitForSelector('#results-save.rs-saved', { timeout: 5000 }).catch(() => {});
+  await sleep(300);
+  await p.screenshot({ path: path.join(OUT, `${tag}-results-saved.png`) });
+  await p.evaluate(() => document.getElementById('btn-leave').click());
+  await p.waitForSelector('#landing-step-room:not([hidden])');
+  await p.click('#btn-account-open');
+  await p.waitForSelector('#landing-step-me:not([hidden])');
+  await p.click('#tab-gallery');
+  await p.waitForSelector('#drawings-grid .drawing-item', { timeout: 5000 }).catch(() => {});
+  await sleep(500);
+  await p.screenshot({ path: path.join(OUT, `${tag}-me-drawings.png`), fullPage: true });
   await ctx.close();
 }
 

@@ -61,20 +61,26 @@ function createAuth(env = process.env) {
   }
 
   /**
-   * 회원 탈퇴: 업로드한 프로필 사진(avatars/<userId>/*)을 지우고 Auth 사용자를 삭제한다.
-   * profiles · word_sets 는 auth.users 에 on delete cascade 로 묶여 함께 지워진다.
+   * 회원 탈퇴: 업로드한 프로필 사진(avatars/<userId>/*)과 보관한 그림(drawings/<userId>/*)을 지우고 Auth 사용자를 삭제한다.
+   * profiles · word_sets · drawings 행은 auth.users 에 on delete cascade 로 묶여 함께 지워진다.
    */
   async function deleteUser(userId) {
     if (!enabled || !admin) throw new Error('로그인 기능이 꺼져 있어요');
     if (typeof userId !== 'string' || !/^[0-9a-f-]{36}$/i.test(userId)) throw new Error('잘못된 사용자');
-    const bucket = admin.storage.from('avatars');
-    for (let i = 0; i < 5; i++) { // 한 번에 최대 1000개 — 보통 1~2개
-      const { data: files, error } = await bucket.list(userId, { limit: 1000 });
-      if (error) throw error;
-      if (!files || !files.length) break;
-      const { error: rmErr } = await bucket.remove(files.map((f) => `${userId}/${f.name}`));
-      if (rmErr) throw rmErr;
-      if (files.length < 1000) break;
+    // 프로필 사진(avatars) · 보관한 그림(drawings, 0004 이전이면 버킷이 없을 수 있다)
+    for (const name of ['avatars', 'drawings']) {
+      const bucket = admin.storage.from(name);
+      for (let i = 0; i < 5; i++) { // 한 번에 최대 1000개 — 그림은 100장 제한
+        const { data: files, error } = await bucket.list(userId, { limit: 1000 });
+        if (error) {
+          if (name === 'drawings' && /not found/i.test(error.message || '')) break;
+          throw error;
+        }
+        if (!files || !files.length) break;
+        const { error: rmErr } = await bucket.remove(files.map((f) => `${userId}/${f.name}`));
+        if (rmErr) throw rmErr;
+        if (files.length < 1000) break;
+      }
     }
     const { error } = await admin.auth.admin.deleteUser(userId);
     if (error) throw error;

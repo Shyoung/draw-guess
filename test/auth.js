@@ -756,6 +756,127 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check((await del.locator('#toasts .toast').filter({ hasText: '탈퇴했어요' }).count()) >= 1, '탈퇴: 안내 토스트');
     await del.context().close();
 
+    // ---------- 2-f. 그림 보관함 ----------
+    console.log('\n== 그림 보관함 (가짜 Supabase) ==');
+    const v = await newPage(browser, '보관함');
+    const enterRoomAs = async (pg, url) => {
+      await pg.goto(url);
+      await pg.waitForSelector('#landing-step-profile:not([hidden]), #landing-step-room:not([hidden])', { timeout: 5000 });
+      if (await pg.locator('#landing-step-profile').isVisible()) {
+        await pg.click('#btn-profile-next');
+        await pg.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+      }
+      await pg.waitForSelector('#me-account:not([hidden])', { timeout: 5000 });
+      await pg.click('#btn-create');
+      await pg.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
+      await sleep(300);
+    };
+    const leaveToMain = async (pg) => {
+      await pg.evaluate(() => document.getElementById('btn-leave').click()); // 결과 화면이 떠 있어도
+      await pg.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    };
+    const openGalleryTab = async (pg) => {
+      await pg.click('#btn-account-open');
+      await pg.waitForSelector('#landing-step-me:not([hidden])', { timeout: 3000 });
+      await pg.click('#tab-gallery');
+    };
+    const pen = (pts, color) => ({ type: 'stroke', tool: 'pen', color: color || '#e53935', size: 8, points: pts });
+    const myOps = [pen([[100, 100], [300, 300], [500, 120]]), { type: 'fill', x: 400, y: 450, color: '#ffeb3b' }];
+    const gameOver = (pg, items) => pg.evaluate((items) => window.__mockFire('game:over', {
+      ranking: [{ id: 'me', name: '나', avatar: { emoji: '😀', color: '#bae1ff' }, score: 300 }], gallery: items,
+    }), items);
+    const game1 = [
+      { round: 1, word: '사과', category: '과일', drawerId: 'me', drawerName: '나', guessed: 2, ops: myOps },
+      { round: 1, word: '아이스크림', drawerId: 'p2', drawerName: '토끼', guessed: 1, ops: myOps },
+    ];
+    await enterRoomAs(v, `${URL}/?mock=1&auth=1&stay=1`);
+    await gameOver(v, game1);
+    await v.waitForSelector('#results-save.rs-saved', { timeout: 5000 }).catch(() => {});
+    check((await txt(v, '#results-save')).includes('1장을 보관함에 저장'), '게임 종료: 내가 그린 그림만 보관함에 저장(1장)', await txt(v, '#results-save'));
+    const vrow = await v.evaluate(() => { const t = window.__mockAuth.tables.drawings; const st = window.__mockAuth.storage.drawings; return { n: t.length, r: t[0], files: Object.keys(st).map((k) => [k, st[k].type, st[k].size]) }; });
+    check(vrow.n === 1 && vrow.r.word === '사과' && vrow.r.category === '과일' && vrow.r.guessed === 2 && vrow.r.path.startsWith('mock-user-1/'), '보관함: 행(제시어·분류·맞힌 수·본인 폴더 경로)', vrow.r);
+    check(vrow.files.length === 1 && vrow.files[0][0] === vrow.r.path && vrow.files[0][1] === 'image/webp' && vrow.files[0][2] > 500 && vrow.files[0][2] <= 512 * 1024, '보관함: 이미지 파일(webp, 512KB 이하)', vrow.files);
+    await gameOver(v, game1); // 재접속 등으로 같은 결과를 다시 받아도
+    await sleep(600);
+    check((await v.evaluate(() => window.__mockAuth.tables.drawings.length)) === 1 && await v.locator('#results-save').isHidden(), '같은 게임 결과를 다시 받아도 두 번 저장하지 않음');
+    await leaveToMain(v);
+    await openGalleryTab(v);
+    await v.waitForSelector('#drawings-grid .drawing-item', { timeout: 3000 });
+    check((await v.locator('#drawings-grid .drawing-item').count()) === 1 && (await txt(v, '#drawings-count')) === '1 / 100', '내 정보 › 그림: 1장 · 1 / 100', await txt(v, '#drawings-count'));
+    check((await txt(v, '#drawings-grid .drawing-word')) === '사과' && (await txt(v, '#drawings-grid .drawing-sub')).includes('과일'), '그림 카드: 제시어 · 분류');
+    check(((await v.getAttribute('#drawings-grid .drawing-thumb img', 'src')) || '').startsWith('blob:'), '그림 카드: 서명 URL 이미지');
+    const [dl1] = await Promise.all([v.waitForEvent('download', { timeout: 5000 }), v.click('#drawings-grid .dr-download')]);
+    check(dl1.suggestedFilename().includes('사과') && dl1.suggestedFilename().endsWith('.webp'), '그림 받기: 제시어가 들어간 webp 파일', dl1.suggestedFilename());
+    const [dz] = await Promise.all([v.waitForEvent('download', { timeout: 5000 }), v.click('#btn-drawings-zip')]);
+    const zipBuf = require('fs').readFileSync(await dz.path());
+    const zipEntries = zipBuf.readUInt16LE(zipBuf.length - 22 + 10);
+    check(dz.suggestedFilename().endsWith('.zip') && zipBuf.readUInt32LE(0) === 0x04034b50 && zipBuf.readUInt32LE(zipBuf.length - 22) === 0x06054b50 && zipEntries === 1, '전체 받기: ZIP(1장)', `${dz.suggestedFilename()} entries=${zipEntries}`);
+    const zipName = zipBuf.slice(30, 30 + zipBuf.readUInt16LE(26)).toString('utf8');
+    check(zipName.includes('사과') && zipName.endsWith('.webp'), 'ZIP 안 파일 이름(한글 UTF-8)', zipName);
+    await v.click('#drawings-grid .drawing-thumb');
+    await v.waitForSelector('#overlay-drawing:not([hidden])', { timeout: 2000 });
+    check((await txt(v, '#dv-word')) === '사과' && ((await v.getAttribute('#dv-img', 'src')) || '').startsWith('blob:'), '크게 보기');
+    await v.keyboard.press('Escape');
+    check(await v.locator('#overlay-drawing').isHidden(), '크게 보기: ESC 로 닫힘');
+    v.once('dialog', (dlg) => dlg.accept());
+    await v.click('#drawings-grid .dr-delete');
+    await v.waitForSelector('#drawings-empty:not([hidden])', { timeout: 3000 });
+    check(await v.evaluate(() => window.__mockAuth.tables.drawings.length === 0 && Object.keys(window.__mockAuth.storage.drawings).length === 0), '그림 삭제: 행 · 파일 모두 삭제');
+    check((await v.locator('#drawings-grid .drawing-item').count()) === 0 && (await txt(v, '#drawings-count')) === '0 / 100', '그림 삭제: 빈 안내 · 0 / 100');
+
+    // 100장 가득: 오래된 그림 받고 바꾸기
+    await v.evaluate(() => {
+      const t = window.__mockAuth.tables.drawings;
+      for (let i = 0; i < 100; i++) t.push({ id: 'seed-' + i, owner_id: 'mock-user-1', path: 'mock-user-1/seed-' + i + '.webp', word: '채움' + i, category: null, round: 1, guessed: 0, created_at: new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString() });
+      // 가장 오래된 한 장은 실제 파일도 있다(받아서 ZIP 에 들어가야 함)
+      const blob = new Blob([new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4])], { type: 'image/webp' });
+      window.__mockAuth.storage.drawings['mock-user-1/seed-0.webp'] = { blob, type: 'image/webp', size: blob.size, url: URL.createObjectURL(blob) };
+    });
+    await v.click('#btn-me-back');
+    await v.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    await v.click('#btn-create');
+    await v.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
+    const game2 = [
+      { round: 1, word: '바나나', drawerId: 'me', drawerName: '나', guessed: 1, ops: myOps },
+      { round: 2, word: '포도', drawerId: 'me', drawerName: '나', guessed: 0, ops: [pen([[50, 50], [700, 500]], '#7b1fa2')] },
+    ];
+    await gameOver(v, game2);
+    await v.waitForSelector('#results-save.rs-full', { timeout: 5000 }).catch(() => {});
+    check((await txt(v, '#results-save')).includes('가득') && (await txt(v, '#results-save')).includes('2장'), '가득 참: 정리 안내(오래된 2장)', await txt(v, '#results-save'));
+    const [dfull] = await Promise.all([v.waitForEvent('download', { timeout: 5000 }), v.click('#results-save .btn-primary')]);
+    await v.waitForSelector('#results-save.rs-saved', { timeout: 5000 }).catch(() => {});
+    const fullBuf = require('fs').readFileSync(await dfull.path());
+    check(dfull.suggestedFilename().endsWith('.zip') && fullBuf.readUInt16LE(fullBuf.length - 22 + 10) === 1, '받고 바꾸기: 오래된 그림 ZIP(파일 있는 1장)', dfull.suggestedFilename());
+    const after = await v.evaluate(() => { const t = window.__mockAuth.tables.drawings; return { n: t.length, seed0: t.some((r) => r.id === 'seed-0'), seed1: t.some((r) => r.id === 'seed-1'), seed2: t.some((r) => r.id === 'seed-2'), words: t.filter((r) => !String(r.id).startsWith('seed')).map((r) => r.word).sort() }; });
+    check(after.n === 100 && !after.seed0 && !after.seed1 && after.seed2 && JSON.stringify(after.words) === JSON.stringify(['바나나', '포도']), '받고 바꾸기: 가장 오래된 2장 삭제 · 새 2장 저장(100장 유지)', after);
+    check((await txt(v, '#results-save')).includes('2장을 보관함에 저장') && (await txt(v, '#results-save')).includes('정리'), '받고 바꾸기: 완료 안내', await txt(v, '#results-save'));
+    // 저장 안 함
+    await gameOver(v, [{ round: 1, word: '키위', drawerId: 'me', drawerName: '나', guessed: 0, ops: myOps }]);
+    await v.waitForSelector('#results-save.rs-full', { timeout: 5000 }).catch(() => {});
+    await v.click('#results-save .btn-ghost');
+    check((await txt(v, '#results-save')).includes('저장하지 않았어요') && (await v.evaluate(() => window.__mockAuth.tables.drawings.length)) === 100, '저장 안 함: 안내 · 보관함 그대로');
+    await gameOver(v, [{ round: 1, word: '키위', drawerId: 'me', drawerName: '나', guessed: 0, ops: myOps }]);
+    await sleep(500);
+    check(await v.locator('#results-save').isHidden(), '저장 안 함 뒤 같은 결과: 다시 묻지 않음');
+    await leaveToMain(v);
+    await openGalleryTab(v);
+    await v.waitForSelector('#drawings-grid .drawing-item', { timeout: 3000 });
+    check(await v.locator('#drawings-full').isVisible() && (await txt(v, '#drawings-count')) === '100 / 100', '내 정보 › 그림: 가득 참 안내 · 100 / 100');
+    check((await v.locator('#drawings-grid .dt-missing').count()) >= 1, '파일이 없는 그림: 대체 문구');
+    await v.context().close();
+
+    // 0004 실행 전(테이블 없음): 조용히 건너뛰고 "준비 중"
+    const nv = await newPage(browser, '보관함-없음');
+    await enterRoomAs(nv, `${URL}/?mock=1&auth=1&stay=1&drawings=0`);
+    await gameOver(nv, game1);
+    await sleep(700);
+    check(await nv.locator('#results-save').isHidden() && (await nv.locator('#toasts .toast.toast-error').count()) === 0, '테이블 없음: 결과 화면에 저장 안내·오류 없음');
+    await leaveToMain(nv);
+    await openGalleryTab(nv);
+    await nv.waitForSelector('#drawings-unavailable:not([hidden])', { timeout: 3000 });
+    check(await nv.locator('#drawings-unavailable').isVisible() && await nv.locator('#btn-drawings-zip').isHidden(), '테이블 없음: 그림 탭 "준비 중"');
+    await nv.context().close();
+
     // ---------- 2-e. OAuth 복귀 뒤 뒤로가기 ----------
     console.log('\n== OAuth 복귀 뒤 뒤로가기 (가짜 Supabase) ==');
     const o = await newPage(browser, 'OAuth복귀');
@@ -813,6 +934,11 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
       const b = await m.locator(sel).boundingBox();
       check(!!b && b.x >= 0 && b.x + b.width <= 390, `모바일 내 정보: ${sel} 화면 안`, b && Math.round(b.x + b.width));
     }
+    await m.click('#tab-gallery');
+    await m.waitForSelector('#drawings-empty:not([hidden])', { timeout: 3000 });
+    sw = await m.evaluate(() => document.documentElement.scrollWidth);
+    check(sw <= 390 && await m.locator('#drawings-empty').isVisible(), '모바일 내 정보 › 그림: 빈 안내 · 가로 스크롤 없음', sw);
+    await m.click('#tab-sets');
     await m.click('#btn-me-back');
     await m.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
     await m.click('#btn-create');

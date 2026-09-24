@@ -966,6 +966,36 @@ img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cove
 .me-foot { display: flex; justify-content: center; gap: 20px; border-top: 1px solid var(--line); padding-top: 12px; font-size: 13px; }
 .me-foot .link-btn { padding: 6px 4px; }
 
+/* ---------- 내 정보 › 그림(보관함) ---------- */
+.drawings-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.drawings-full { font-size: 13px; font-weight: 700; color: #9a5b00; background: var(--amber-soft); border-radius: 12px; padding: 8px 12px; }
+.drawings-error { color: var(--red); }
+.drawings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.drawings-grid:empty { display: none; }
+.drawing-item { background: #f8f6fc; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.drawing-thumb { display: block; width: 100%; aspect-ratio: 4 / 3; padding: 0; border: 0; background: #fff; cursor: zoom-in; border-bottom: 1px solid var(--line); }
+.drawing-thumb img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.drawing-thumb .dt-missing { display: grid; place-items: center; height: 100%; font-size: 12px; color: var(--muted); }
+.drawing-meta { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 4px; min-width: 0; }
+.drawing-word { font-size: 14px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawing-sub { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drawing-actions { display: flex; gap: 4px; padding: 4px 8px 8px; }
+.drawing-actions .btn { flex: 1 1 0; padding: 5px 6px; font-size: 12px; }
+/* 크게 보기 */
+.modal-drawing { z-index: 65; }
+.card-drawing { width: min(860px, 100%); }
+.dv-frame { background: #fff; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); overflow: hidden; aspect-ratio: 4 / 3; max-height: 70vh; display: grid; place-items: center; }
+.dv-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.dv-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dv-meta { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--muted); }
+/* 결과 화면: 보관함 저장 안내 */
+.results-save { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 13px; line-height: 1.5; border-radius: 14px; padding: 10px 12px; background: #f3fbf6; color: #1d6b43; }
+.results-save.rs-saving { background: #f8f6fc; color: var(--muted); }
+.results-save.rs-full { background: var(--amber-soft); color: #7a4a00; }
+.results-save.rs-error { background: #fdecec; color: var(--red); }
+.results-save.rs-skipped { background: #f8f6fc; color: var(--muted); }
+.results-save .rs-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
 /* ---------- 방 안 프로필 수정(데스크톱 모달 / 모바일 시트) ---------- */
 .modal-profile { z-index: 60; }
 .card-room-profile { width: min(480px, 100%); }
