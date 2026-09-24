@@ -136,7 +136,28 @@
         };
       }
     };
-    window.__mockAuth = { tables: tables, storage: storage, socialPhoto: SOCIAL_PHOTO, session: function () { return mockSession; } };
+    window.__mockAuth = { tables: tables, storage: storage, socialPhoto: SOCIAL_PHOTO, session: function () { return mockSession; }, deleted: false };
+    // 회원 탈퇴(게임 서버 POST /api/account/delete) 흉내: 토큰 확인 → 본인 행·파일 삭제
+    var realFetch = window.fetch ? window.fetch.bind(window) : null;
+    var jsonRes = function (status, body) { return Promise.resolve(new Response(JSON.stringify(body), { status: status, headers: { 'Content-Type': 'application/json' } })); };
+    window.fetch = function (input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (/\/api\/account\/delete$/.test(String(url).split('?')[0])) {
+        var h = (init && init.headers) || {};
+        var bearer = h.Authorization || h.authorization || '';
+        if (!mockSession || bearer !== 'Bearer ' + mockSession.access_token) return jsonRes(401, { ok: false, error: '다시 로그인한 뒤 시도해주세요' });
+        if (qs.get('delete_fail') === '1') return jsonRes(500, { ok: false, error: '탈퇴 처리에 실패했어요. 잠시 후 다시 시도해주세요' });
+        var uid = mockSession.user.id;
+        ['profiles', 'word_sets'].forEach(function (t) {
+          var key = t === 'profiles' ? 'user_id' : 'owner_id';
+          for (var i = tables[t].length - 1; i >= 0; i--) if (tables[t][i][key] === uid) tables[t].splice(i, 1);
+        });
+        Object.keys(storage.avatars).forEach(function (p) { if (p.split('/')[0] === uid) delete storage.avatars[p]; });
+        window.__mockAuth.deleted = true;
+        return jsonRes(200, { ok: true });
+      }
+      return realFetch ? realFetch(input, init) : Promise.reject(new Error('fetch unavailable'));
+    };
     console.log('[mock] fake supabase installed (auth=1)');
   }
   function fire(ev, payload) {
@@ -257,6 +278,19 @@
         if (i > 0) { chat('system', players[i].name + '님이 강퇴되었어요'); players.splice(i, 1); fire('room:state', st()); }
       } else if (ev === 'game:start') { if (pending && pending.label === 'choosing') resume('choosing'); else if (idx === 1) { idx = 2; steps[1].run(); } }
       else if (ev === 'auth:token') { if (started) fire('room:state', st()); }
+      else if (ev === 'player:update' && payload) {
+        if (room.phase !== 'lobby') { if (ack) ack({ ok: false, error: '대기실에서만 바꿀 수 있어요' }); }
+        else {
+          var nm = String(payload.name || '').trim();
+          if (!nm || Array.from(nm).length > 12) { if (ack) ack({ ok: false, error: '닉네임은 1~12자예요' }); }
+          else {
+            if (players[0].name !== nm) chat('system', players[0].name + '님이 닉네임을 ' + nm + '(으)로 바꿨습니다.');
+            players[0].name = nm; if (payload.avatar) players[0].avatar = payload.avatar;
+            if (ack) ack({ ok: true });
+            fire('room:state', st());
+          }
+        }
+      }
       return sock;
     }
   };

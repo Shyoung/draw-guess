@@ -115,6 +115,59 @@
 
         <button id="btn-invite-dismiss" class="link-btn link-muted invite-dismiss" type="button" hidden>다른 방 코드 입력하기</button>
       </div>
+
+      <!-- ===== 내 정보(/me, 로그인 사용자): 프로필 요약 · 단어 세트 | 그림 · 로그아웃 · 회원 탈퇴 ===== -->
+      <div id="landing-step-me" class="landing-step step-me" aria-label="내 정보" hidden>
+        <div class="me-page-head">
+          <button id="btn-me-back" class="btn btn-ghost btn-sm me-back" type="button" aria-label="메인으로">‹ 메인</button>
+          <h2 class="me-page-title">내 정보</h2>
+        </div>
+        <div class="me-card">
+          <div class="me-main">
+            <span id="mp-avatar" class="me-avatar" aria-hidden="true"></span>
+            <div class="me-info">
+              <strong id="mp-name" class="me-name"></strong>
+              <span id="mp-provider" class="me-status me-provider"></span>
+            </div>
+            <button id="btn-mp-profile" class="btn btn-ghost btn-sm" type="button">프로필 수정</button>
+          </div>
+        </div>
+        <div class="seg me-tabs" role="tablist" aria-label="내 정보 메뉴">
+          <button id="tab-sets" class="seg-btn" type="button" role="tab" aria-selected="true" aria-controls="me-panel-sets" data-tab="sets">단어 세트</button>
+          <button id="tab-gallery" class="seg-btn" type="button" role="tab" aria-selected="false" aria-controls="me-panel-gallery" data-tab="gallery">그림</button>
+        </div>
+        <div id="me-panel-sets" class="me-panel" role="tabpanel" aria-labelledby="tab-sets">
+          <section class="acct-section" aria-labelledby="acct-sets-title">
+          <h3 id="acct-sets-title" class="sr-only">내 단어 세트</h3>
+          <p class="me-panel-note">방 설정의 "내 세트 불러오기"로 쓸 수 있어요 <span id="wordset-count" class="panel-sub"></span></p>
+          <p id="wordset-loading" class="card-note">불러오는 중…</p>
+          <p id="wordset-empty" class="card-note" hidden>아직 단어 세트가 없어요. 새 세트를 만들어보세요!</p>
+          <ul id="wordset-list" class="wordset-list"></ul>
+          <button id="btn-wordset-new" class="btn btn-primary btn-sm" type="button">+ 새 세트</button>
+          <form id="wordset-form" class="wordset-form" autocomplete="off" hidden>
+            <span id="ws-form-title" class="ws-form-title">새 세트</span>
+            <input id="ws-name" type="text" maxlength="30" placeholder="세트 이름 (1~30자)" aria-label="세트 이름">
+            <textarea id="ws-words" rows="4" placeholder="쉼표로 구분, 각 1~20자 · 최대 500개&#10;예) 사과, 자전거, 무지개" aria-label="단어 목록"></textarea>
+            <div class="ws-form-foot">
+              <span id="ws-count" class="ws-count">0개</span>
+              <span id="ws-error" class="ws-error" role="alert"></span>
+              <button id="btn-ws-cancel" class="btn btn-ghost btn-sm" type="button">취소</button>
+              <button id="btn-ws-submit" class="btn btn-primary btn-sm" type="submit">저장</button>
+            </div>
+          </form>
+        </section>
+        </div>
+        <div id="me-panel-gallery" class="me-panel" role="tabpanel" aria-labelledby="tab-gallery" hidden>
+          <div class="me-empty">
+            <span class="me-empty-icon" aria-hidden="true">🖼️</span>
+            <p>게임에서 그린 그림이 여기에 모여요.<br>곧 열릴 예정이에요!</p>
+          </div>
+        </div>
+        <div class="me-foot">
+          <button id="btn-mp-logout" class="link-btn link-muted" type="button">로그아웃</button>
+          <button id="btn-mp-delete" class="link-btn link-muted link-danger" type="button">회원 탈퇴</button>
+        </div>
+      </div>
     </section>
 
     <!-- 개인정보 처리방침: 카드 밖, 화면 맨 아래 가운데(모든 랜딩 단계 공통) -->
@@ -141,6 +194,7 @@
 
       <div class="topbar-right">
         <div id="timer" class="timer" aria-label="남은 시간">–</div>
+        <button id="btn-room-profile" class="btn btn-ghost btn-sm" type="button">프로필</button>
         <button id="btn-account-top" class="btn btn-ghost btn-sm" type="button" hidden>내 정보</button>
         <button id="btn-sound" class="btn btn-ghost btn-sm btn-icon" type="button" aria-pressed="false" title="효과음 끄기">🔊</button>
         <button id="btn-leave" class="btn btn-ghost btn-sm" type="button">나가기</button>
@@ -230,6 +284,11 @@
           <div id="wordset-tools" class="wordset-tools" hidden>
             <select id="wordset-load" aria-label="내 세트 불러오기" hidden></select>
             <button id="btn-wordset-save" class="btn btn-ghost btn-sm" type="button">💾 현재 단어를 세트로 저장</button>
+            <div id="wordset-quick" class="wordset-quick" hidden>
+              <input id="ws-quick-name" type="text" maxlength="30" placeholder="세트 이름 (1~30자)" aria-label="새 세트 이름">
+              <button id="btn-ws-quick-save" class="btn btn-secondary btn-sm" type="button">저장</button>
+              <button id="btn-ws-quick-cancel" class="btn btn-ghost btn-sm" type="button">취소</button>
+            </div>
           </div>
           <label class="check">
             <input id="set-customWordsOnly" type="checkbox">
@@ -384,6 +443,7 @@
         <div class="menu-row" id="menu-slot-code"></div>
         <div class="menu-row" id="menu-slot-copy"></div>
         <div class="menu-row menu-row-split"><span class="menu-label">효과음</span><span id="menu-slot-sound"></span></div>
+        <div class="menu-row" id="menu-slot-profile"></div>
         <div class="menu-row" id="menu-slot-account" hidden></div>
         <div class="menu-row menu-row-danger" id="menu-slot-leave"></div>
       </div>
@@ -416,70 +476,38 @@
     </div>
   </div>
 
-  <!-- ================= 내 정보 (로그인 사용자) =================
-       데스크톱: 갤러리와 같은 .modal / 모바일: .sheet. 본문 #account-body 는 열릴 때 client.js 가 해당 컨테이너로 옮긴다. -->
-  <div id="overlay-account" class="modal modal-account" hidden>
-    <div class="modal-card modal-card-account" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
+  <!-- ================= 방 안 프로필 수정(대기실에서만) =================
+       데스크톱: .modal / 모바일: .sheet. 랜딩의 #landing-step-profile 노드를 열 때 옮겨 와서 쓰고, 닫으면 돌려놓는다. -->
+  <div id="overlay-profile" class="modal modal-profile" hidden>
+    <div class="modal-card card-room-profile" role="dialog" aria-modal="true" aria-labelledby="room-profile-title">
       <header class="modal-head">
-        <h3 id="account-modal-title" class="card-title">👤 내 정보</h3>
-        <div class="modal-actions">
-          <button id="btn-account-close" class="btn btn-ghost btn-sm" type="button">닫기</button>
-        </div>
+        <h3 id="room-profile-title" class="card-title">프로필 수정</h3>
+        <div class="modal-actions"><button id="btn-room-profile-close" class="btn btn-ghost btn-sm" type="button">닫기</button></div>
       </header>
-      <div id="account-modal-body" class="account-modal-body">
-        <div id="account-body" class="account-body">
-          <section class="acct-section" aria-labelledby="acct-profile-title">
-            <h4 id="acct-profile-title" class="acct-title">프로필</h4>
-            <div class="acct-profile">
-              <span id="acct-avatar" class="avatar acct-avatar" aria-hidden="true"></span>
-              <div class="acct-fields">
-                <label class="field">
-                  <span class="field-label">닉네임 <small>(1~12자)</small></span>
-                  <span class="acct-nick-row">
-                    <input id="acct-nick" type="text" maxlength="12" autocomplete="off" spellcheck="false">
-                    <button id="btn-acct-nick-save" class="btn btn-secondary btn-sm" type="button">저장</button>
-                  </span>
-                </label>
-                <div class="acct-meta">
-                  <span id="acct-provider" class="acct-provider"></span>
-                  <button id="btn-acct-logout" class="btn btn-ghost btn-sm" type="button">로그아웃</button>
-                </div>
-              </div>
-            </div>
-          </section>
-          <section class="acct-section" aria-labelledby="acct-sets-title">
-            <h4 id="acct-sets-title" class="acct-title">내 단어 세트 <span id="wordset-count" class="panel-sub"></span></h4>
-            <p id="wordset-loading" class="card-note">불러오는 중…</p>
-            <p id="wordset-empty" class="card-note" hidden>아직 단어 세트가 없어요. 새 세트를 만들어보세요!</p>
-            <ul id="wordset-list" class="wordset-list"></ul>
-            <p id="wordset-apply-hint" class="wordset-apply-hint" hidden>"이 세트로 방 설정"은 호스트로 대기실에 있을 때 쓸 수 있어요.</p>
-            <button id="btn-wordset-new" class="btn btn-primary btn-sm" type="button">+ 새 세트</button>
-            <form id="wordset-form" class="wordset-form" autocomplete="off" hidden>
-              <span id="ws-form-title" class="ws-form-title">새 세트</span>
-              <input id="ws-name" type="text" maxlength="30" placeholder="세트 이름 (1~30자)" aria-label="세트 이름">
-              <textarea id="ws-words" rows="4" placeholder="쉼표로 구분, 각 1~20자 · 최대 500개&#10;예) 사과, 자전거, 무지개" aria-label="단어 목록"></textarea>
-              <div class="ws-form-foot">
-                <span id="ws-count" class="ws-count">0개</span>
-                <span id="ws-error" class="ws-error" role="alert"></span>
-                <button id="btn-ws-cancel" class="btn btn-ghost btn-sm" type="button">취소</button>
-                <button id="btn-ws-submit" class="btn btn-primary btn-sm" type="submit">저장</button>
-              </div>
-            </form>
-          </section>
-        </div>
-      </div>
+      <div id="room-profile-modal-body" class="room-profile-body"></div>
+    </div>
+  </div>
+  <div id="sheet-profile" class="sheet" hidden>
+    <div class="sheet-backdrop" data-sheet-close></div>
+    <div class="sheet-panel sheet-panel-profile" role="dialog" aria-modal="true" aria-labelledby="sheet-profile-title">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <header class="sheet-head">
+        <h3 id="sheet-profile-title" class="sheet-title">프로필 수정</h3>
+        <button class="sheet-close" type="button" aria-label="닫기" data-sheet-close>✕</button>
+      </header>
+      <div class="sheet-body room-profile-body" id="sheet-profile-body"></div>
     </div>
   </div>
 
-  <div id="sheet-account" class="sheet" hidden>
-    <div class="sheet-backdrop" data-sheet-close></div>
-    <div class="sheet-panel sheet-panel-account" role="dialog" aria-modal="true" aria-labelledby="sheet-account-title">
-      <div class="sheet-handle" aria-hidden="true"></div>
-      <header class="sheet-head">
-        <h3 id="sheet-account-title" class="sheet-title">👤 내 정보</h3>
-        <button class="sheet-close" type="button" aria-label="닫기" data-sheet-close>✕</button>
-      </header>
-      <div class="sheet-body" id="sheet-account-body"></div>
+  <!-- 회원 탈퇴 확인 -->
+  <div id="overlay-delete" class="modal modal-confirm" hidden>
+    <div class="modal-card card-confirm" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-desc">
+      <h3 id="delete-title" class="card-title">정말 탈퇴할까요?</h3>
+      <p id="delete-desc" class="confirm-desc">프로필, 단어 세트, 올린 사진이 모두 지워지고 되돌릴 수 없어요. 게스트로는 계속 플레이할 수 있어요.</p>
+      <div class="confirm-actions">
+        <button id="btn-delete-cancel" class="btn btn-outline btn-lg" type="button">취소</button>
+        <button id="btn-delete-confirm" class="btn btn-danger btn-lg" type="button">탈퇴하기</button>
+      </div>
     </div>
   </div>
 

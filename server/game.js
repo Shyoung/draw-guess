@@ -601,6 +601,20 @@ class Room {
     return true;
   }
 
+  /** 방 안에서 닉네임·아바타 바꾸기. 대기실에서만(게임 중에는 채점·목록이 헷갈리지 않게). 오류 문자열 | null */
+  updatePlayer(id, { name, avatar }) {
+    const p = this.getPlayer(id);
+    if (!p) return '방에 참가하지 않았습니다.';
+    if (this.phase !== 'lobby') return '대기실에서만 바꿀 수 있어요';
+    const renamed = p.name !== name;
+    const old = p.name;
+    p.name = name;
+    p.avatar = avatar;
+    if (renamed) this.systemMessage(`${old}님이 닉네임을 ${name}(으)로 바꿨습니다.`);
+    this.broadcastState();
+    return null;
+  }
+
   /** 접속 중 로그인/로그아웃 반영 */
   setUser(id, user) {
     const p = this.getPlayer(id);

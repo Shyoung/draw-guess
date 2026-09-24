@@ -269,6 +269,17 @@ async function main() {
   const lobbyChats = await Promise.all(lobbyChatP);
   check('lobby chat broadcast to all as kind chat with id/name/avatar', lobbyChats.every((m) => m.kind === 'chat' && m.id === c2.id && m.name === '게스트2' && m.avatar && m.avatar.emoji === '🐱'));
 
+  // 2-b) player:update — 대기실에서 닉네임·아바타 바꾸기
+  const upP = waitFor(c1, 'room:state', (st) => st.players.some((p) => p.id === c3.id && p.name === '새이름'));
+  const up = await emitAck(c3, 'player:update', { name: '  새이름 ', avatar: { emoji: '🦊', color: '#123ABC', img: 'https://lh3.googleusercontent.com/a/x' } });
+  check('player:update (lobby) ack ok', up && up.ok === true, up);
+  const me3 = (await upP).players.find((p) => p.id === c3.id);
+  check('player:update: 이름 trim · 아바타 반영 · 게스트 img 제거', me3.name === '새이름' && me3.avatar.emoji === '🦊' && me3.avatar.color === '#123abc' && !me3.avatar.img, me3);
+  const upBad = await emitAck(c3, 'player:update', { name: '   ', avatar: {} });
+  check('player:update rejects blank name', upBad && upBad.ok === false && typeof upBad.error === 'string', upBad);
+  const upBack = await emitAck(c3, 'player:update', { name: '게스트3', avatar: { emoji: '🐰', color: 'not-a-color' } });
+  check('player:update back to 게스트3', upBack && upBack.ok === true, upBack);
+
   // 3) 게임 시작 → 턴 1 (상세 검증)
   let active = [c1, c2, c3];
   const usedWords = new Set();
@@ -283,6 +294,8 @@ async function main() {
   drawersSeen.push(drawerId1);
   check('turn 1: drawer is first player in join order (P1)', drawerId1 === c1.id);
   check('turn 1: game:choosing {drawerId, drawerName, timeLeft:15} consistent to all', choosings.every((p) => p.drawerId === drawerId1 && p.drawerName === '호스트' && p.timeLeft === 15));
+  const upGame = await emitAck(c3, 'player:update', { name: '게임중', avatar: {} });
+  check('player:update during game → ok:false', upGame && upGame.ok === false, upGame);
   const withOptions = choosings.filter((p) => Array.isArray(p.wordOptions));
   check('turn 1: exactly one client (drawer) got wordOptions (3 unique strings), others undefined', withOptions.length === 1 && choosings[active.indexOf(drawer)].wordOptions.length === 3 && new Set(withOptions[0].wordOptions).size === 3 && choosings.every((p, i) => active[i] === drawer || p.wordOptions === undefined));
   const stateChoosing = await waitFor(c2, 'room:state', (s) => s.phase === 'choosing', 3000).catch(() => c2.log.map((e) => e.payload).filter((p) => p && p.phase === 'choosing').pop());

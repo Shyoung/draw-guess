@@ -54,8 +54,8 @@ function sendIndex(req, res) {
   res.set('Expires', '0');
   res.type('html').send(INDEX_HTML);
 }
-// 랜딩 3화면(/login · /profile · /)은 같은 페이지. 주소는 클라이언트가 pushState 로 바꾼다
-app.get(['/', '/index.html', '/login', '/profile'], sendIndex);
+// 랜딩 화면(/login · /profile · / · /me)은 같은 페이지. 주소는 클라이언트가 pushState 로 바꾼다
+app.get(['/', '/index.html', '/login', '/profile', '/me'], sendIndex);
 
 // 헬스체크 / keep-alive 핑 대상 (정적 파일보다 가볍게)
 // 클라이언트 공개 설정 (Supabase URL/anon 키). 로그인이 꺼져 있으면 빈 객체 → 클라이언트는 게스트 UI 만 보여준다
@@ -65,6 +65,34 @@ app.get('/config.js', (req, res) => {
 });
 // 개인정보 처리방침 (소셜 로그인 심사에 URL 이 필요하다)
 app.get('/privacy', (req, res) => { res.set('Cache-Control', 'no-cache'); res.sendFile(path.join(PUBLIC_DIR, 'privacy.html')); });
+
+// 회원 탈퇴: Authorization: Bearer <Supabase access token>. 쿠키를 쓰지 않으므로 CSRF 대상이 아니다
+const deleteHits = new Map(); // ip → [시각] — 잘못된 토큰으로 Supabase 를 두드리지 못하게 분당 5회
+app.post('/api/account/delete', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!auth.enabled) return res.status(404).json({ ok: false, error: '로그인 기능이 꺼져 있어요' });
+  const ip = String(req.get('x-forwarded-for') || req.socket.remoteAddress || '').split(',')[0].trim();
+  const now = Date.now();
+  const hits = (deleteHits.get(ip) || []).filter((t) => now - t < 60 * 1000);
+  if (hits.length >= 5) return res.status(429).json({ ok: false, error: '잠시 후 다시 시도해주세요' });
+  hits.push(now); deleteHits.set(ip, hits);
+  if (deleteHits.size > 5000) deleteHits.clear();
+  const m = /^Bearer\s+(\S+)$/i.exec(req.get('authorization') || '');
+  const user = m ? await auth.verifyToken(m[1]) : null;
+  if (!user) return res.status(401).json({ ok: false, error: '다시 로그인한 뒤 시도해주세요' });
+  try {
+    await auth.deleteUser(user.userId);
+  } catch (err) {
+    console.error('[auth] delete user failed:', err && err.message);
+    return res.status(500).json({ ok: false, error: '탈퇴 처리에 실패했어요. 잠시 후 다시 시도해주세요' });
+  }
+  // 방 안에 있던 이 계정의 플레이어는 게스트로
+  for (const room of rooms.values()) {
+    for (const p of room.players) if (p.userId === user.userId) room.setUser(p.id, null);
+  }
+  console.log('[auth] account deleted');
+  res.json({ ok: true });
+});
 
 app.get('/healthz', (req, res) => res.json({ ok: true, env: process.env.APP_ENV || 'production', version: ASSET_VERSION, store: store.kind, rooms: rooms.size, allowSolo: process.env.ALLOW_SOLO === '1', auth: auth.enabled, uptime: Math.round(process.uptime()) }));
 
@@ -425,6 +453,18 @@ io.on('connection', (socket) => {
     if (room) room.setUser(pid(), user);
   });
 
+  // player:update { name, avatar } — 방 안에서 내 닉네임·아바타 바꾸기(대기실에서만). ack { ok } | { ok:false, error }
+  on('player:update', (data, ack) => {
+    const reply = typeof ack === 'function' ? ack : () => {};
+    const room = currentRoom();
+    if (!room) return reply({ ok: false, error: '방에 참가하지 않았습니다.' });
+    const name = sanitizeName(data && data.name);
+    if (!name) return reply({ ok: false, error: '닉네임은 1~12자예요' });
+    const avatar = sanitizeAvatar(data && data.avatar, socket.data.user);
+    const err = room.updatePlayer(pid(), { name, avatar });
+    reply(err ? { ok: false, error: err } : { ok: true });
+  });
+
   // results:done — 게임 종료 결과 화면을 닫고 대기실로 (본인만)
   on('results:done', () => {
     const room = currentRoom();
@@ -560,6 +600,15 @@ async function shutdown(signal) {
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Supabase 무료 프로젝트는 7일 동안 요청이 없으면 일시 정지된다 → 하루 한 번 가볍게 조회
+if (auth.enabled) {
+  const pingSupabase = () => auth.ping()
+    .then(() => console.log('[auth] supabase ping ok'))
+    .catch((err) => console.warn('[auth] supabase ping failed:', err && err.message));
+  setTimeout(pingSupabase, 60 * 1000).unref();
+  setInterval(pingSupabase, 24 * 60 * 60 * 1000).unref();
+}
 
 server.listen(PORT, () => {
   console.log(`[draw-guess] listening on http://localhost:${PORT} (asset version ${ASSET_VERSION}, store=${store.kind}, rooms restore on demand)`);

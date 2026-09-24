@@ -57,7 +57,8 @@ $env:SUPABASE_URL="https://xxxx.supabase.co"; $env:SUPABASE_ANON_KEY="..."; $env
 ## 5. 확인
 - `https://…/healthz` 응답에 `"auth":true` 가 보이면 서버가 키를 읽은 것입니다.
 - 랜딩 첫 화면에 "Google로 시작하기 / 카카오로 시작하기 / 게스트로 시작하기" 버튼이 나타납니다.
-- 로그인 후 새로고침해도 유지되고, 오른쪽 위 아바타 메뉴에서 **내 정보**(닉네임·단어 세트)를 열 수 있어야 합니다.
+- 로그인 후 새로고침해도 유지되고, 메인의 **내 정보**(/me)에서 단어 세트·로그아웃·회원 탈퇴를 할 수 있어야 합니다.
+- 회원 탈퇴는 게임 서버가 service_role 키로 처리합니다(업로드한 사진 삭제 → Auth 사용자 삭제 → profiles·word_sets cascade).
 
 ## 무료 한도 (2026 기준 Supabase Free)
 - Postgres 500MB, Storage 1GB, 월 50,000 MAU, 이메일 로그인 시간당 30회. 이 게임 규모에 충분합니다.

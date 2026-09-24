@@ -18,6 +18,10 @@
 - 서버는 토큰을 검증해 플레이어에 `userId` 를 붙인다. `room:state.players[].loggedIn` 으로 노출(id 자체는 노출하지 않음). 접속 중 로그인/로그아웃은 `auth:token { token|null }`.
 - 프로필·단어 세트는 클라이언트가 supabase-js 로 직접 읽고 쓴다(RLS 로 본인 것만). 게임 서버는 관여하지 않는다.
 
+### HTTP (로그인 켜짐일 때만)
+- `POST /api/account/delete` — 헤더 `Authorization: Bearer <Supabase access token>`. 업로드한 프로필 사진(`avatars/<uid>/*`)을 지우고 Auth 사용자를 삭제(profiles·word_sets 는 cascade). 응답 `{ ok:true }` · 401 토큰 무효 · 500 실패. 방 안에 있던 그 계정 플레이어는 `loggedIn:false` 로.
+- 서버는 하루 한 번 Supabase 에 가벼운 조회를 보내 무료 프로젝트 일시 정지(7일 무활동)를 막는다.
+
 ## Identity
 - 플레이어 id = 최초 접속 시의 `socket.id`. 재접속(`room:rejoin`)해도 바뀌지 않는다(서버가 playerId→socketId를 매핑).
 - `avatar` = `{ emoji: string, color: string, img?: string }` (color는 `#rrggbb`). `img`(프로필 사진 URL)는 **로그인 사용자만** 허용되며 서버가 https + 허용 호스트(우리 Supabase Storage `avatars` 버킷, `*.googleusercontent.com`, `*.kakaocdn.net`)만 통과시킨다. 클라이언트는 `img` 가 있으면 사진을, 로드 실패 시 emoji+color 로 대체해 그린다.
@@ -66,6 +70,7 @@
 | `draw:undo` | – | 마지막 op 제거 |
 | `chat:message` | `{ text }` | 1..100자. 정답 판정은 서버가 함 |
 | `player:kick` | `{ playerId }` | 호스트 |
+| `player:update` | `{ name, avatar }` | 내 닉네임·아바타 바꾸기. **lobby 단계에서만**(게임 중이면 ack `{ ok:false, error }`). 검증은 `room:join` 과 같음(이름 1..12자, 게스트 `img` 제거). ack `{ ok:true }`, 이후 `room:state` 갱신 · 이름이 바뀌면 시스템 메시지 |
 
 ## Server → Client
 

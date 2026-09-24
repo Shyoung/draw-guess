@@ -81,6 +81,10 @@ ul, ol { padding: 0; list-style: none; }
 }
 .link-btn:hover { text-decoration: underline; text-underline-offset: 2px; }
 .link-muted { color: var(--muted); font-weight: 600; }
+.link-danger:hover, .link-danger:focus-visible { color: var(--red); }
+.btn-danger { background: var(--red); color: #fff; box-shadow: 0 6px 16px rgba(229, 57, 53, 0.28); }
+.btn-danger:hover:not(:disabled) { filter: brightness(.94); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .btn-sm { padding: 7px 12px; font-size: 13px; }
 .btn-icon { padding: 7px 10px; font-size: 16px; line-height: 1; }
 .btn-lg { padding: 13px 22px; font-size: 16px; }
@@ -527,7 +531,7 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 /* 나갈까요? 확인 — 시트·결과·내 정보 위 */
 .modal-confirm { z-index: 80; }
 .modal.modal-confirm { align-items: center; } /* 모바일에서도 가운데(다른 모달은 위쪽 정렬) */
-.card-confirm { width: min(360px, 100%); gap: 8px; text-align: center; padding: 22px 20px 18px; }
+.modal-card.card-confirm { width: min(380px, 100%); gap: 8px; text-align: center; padding: 22px 20px 18px; }
 .confirm-desc { font-size: 14px; color: var(--muted); line-height: 1.5; margin-bottom: 8px; }
 .confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .card-results { width: min(96%, 560px); align-items: center; text-align: center; gap: 10px; }
@@ -941,6 +945,32 @@ img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cove
 .wordset-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: -4px; }
 .wordset-tools select { width: auto; flex: 1 1 200px; min-width: 0; padding: 8px 10px; font-size: 13px; font-weight: 600; }
 .wordset-tools .btn { flex: 0 0 auto; }
+.wordset-quick { display: flex; gap: 8px; align-items: center; flex: 1 1 100%; min-width: 0; }
+.wordset-quick input { flex: 1 1 auto; min-width: 0; padding: 8px 10px; font-size: 13px; }
+
+/* ---------- 내 정보(/me): 랜딩 카드를 넓혀 쓴다 ---------- */
+.landing-card.is-wide { max-width: 680px; }
+.landing-card.is-wide .logo { display: none; }
+.me-page-head { position: relative; display: flex; align-items: center; min-height: 36px; }
+.me-page-title { position: absolute; left: 50%; transform: translateX(-50%); font-size: 20px; font-weight: 900; letter-spacing: -0.02em; white-space: nowrap; }
+.me-back { padding-left: 10px; }
+.me-provider { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg-btn[aria-selected="true"] { background: #fff; color: var(--text); box-shadow: 0 2px 8px rgba(43, 45, 66, 0.10); }
+.me-panel { display: flex; flex-direction: column; gap: 12px; min-height: 160px; }
+.me-panel .acct-section { gap: 10px; }
+.me-panel-note { font-size: 13px; color: var(--muted); }
+.me-empty { display: grid; place-items: center; gap: 8px; text-align: center; padding: 32px 12px; color: var(--muted); font-size: 14px; line-height: 1.5; background: #f8f6fc; border-radius: 16px; }
+.me-empty-icon { font-size: 36px; }
+.me-foot { display: flex; justify-content: center; gap: 20px; border-top: 1px solid var(--line); padding-top: 12px; font-size: 13px; }
+.me-foot .link-btn { padding: 6px 4px; }
+
+/* ---------- 방 안 프로필 수정(데스크톱 모달 / 모바일 시트) ---------- */
+.modal-profile { z-index: 60; }
+.card-room-profile { width: min(480px, 100%); }
+.room-profile-body { overflow: auto; min-height: 0; padding: 2px 2px 10px; }
+.room-profile-body .landing-step { gap: 16px; }
+/* 긴 폼(이모지 모드)에서도 "저장"은 늘 보이게: 스크롤 영역 바닥에 붙인다 */
+.room-profile-body #btn-profile-next { position: sticky; bottom: 0; z-index: 1; box-shadow: 0 6px 16px rgba(255, 122, 89, 0.35), 0 -14px 14px 2px var(--card); }
 /* 내 정보 모달(데스크톱) */
 .modal-account { z-index: 55; }
 .modal-card-account { width: min(640px, 100%); }

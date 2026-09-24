@@ -828,6 +828,9 @@
     var vr = $('view-room');
     if (vr) { vr.setAttribute('data-phase', state.phase); vr.setAttribute('data-role', isDrawer() ? 'drawer' : 'guesser'); }
     placeMobileChrome();
+    if (roomProfile.open && (!inRoom || state.phase !== 'lobby')) { closeRoomProfile(); if (inRoom) toast('게임이 시작돼 프로필 수정을 닫았어요'); }
+    var rpb = $('btn-room-profile');
+    if (rpb) { rpb.disabled = inRoom && state.phase !== 'lobby'; rpb.title = rpb.disabled ? '대기실에서 바꿀 수 있어요' : '닉네임·아바타 바꾸기'; }
     renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderChatPeek(); renderAccount();
   }
 
@@ -1266,7 +1269,7 @@
   //   ?room=CODE(초대)·?mock= 같은 쿼리는 화면을 옮겨도 그대로 따라간다.
   //   세션을 복원하는 중(localStorage 에 sb-…-auth-token 이 있거나 OAuth 복귀 URL)이면 결과가 나올 때까지 화면을 그리지 않는다(깜빡임 방지).
   // ------------------------------------------------------------------
-  var STEPS = ['start', 'profile', 'room'];
+  var STEPS = ['start', 'profile', 'room', 'me'];
   var CONFIRMED_KEY = 'drawguess.profileConfirmed'; // { [userId]: ts } — 이 브라우저에서 프로필 설정을 마친 로그인 사용자
   var landing = { step: null, invite: null, ready: false, authReady: false, readyTimer: null, nickEdited: false }; // nickEdited: 로그인 후 사용자가 닉네임을 직접 고쳤는가
   function cleanCode(v) { return String(v || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); }
@@ -1292,6 +1295,11 @@
     try { var m = JSON.parse(localStorage.getItem(CONFIRMED_KEY) || '{}'); return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; } catch (e) { return {}; }
   }
   function isConfirmed(uid) { return !!(uid && confirmedMap()[uid]); }
+  function forgetConfirmed(uid) {
+    if (!uid) return;
+    var m = confirmedMap(); delete m[uid];
+    try { localStorage.setItem(CONFIRMED_KEY, JSON.stringify(m)); } catch (e) { /* ignore */ }
+  }
   function setConfirmed(uid) {
     if (!uid) return;
     var m = confirmedMap(); m[uid] = Date.now();
@@ -1316,7 +1324,9 @@
     if (inRoom) return;
     STEPS.forEach(function (s) { var n = $('landing-step-' + s); if (n) n.hidden = landing.step !== s; });
     var ld = $('landing-loading'); if (ld) ld.hidden = !!landing.step;
+    var lc = document.querySelector('.landing-card'); if (lc) lc.classList.toggle('is-wide', landing.step === 'me');
     updateNextBtn();
+    renderMePage();
     var logged = acctLoggedIn();
     var sr = $('landing-step-room');
     paintAvatar($('me-avatar'), myAvatar());
@@ -1341,15 +1351,20 @@
   }
   function showLandingStep(step, animate) {
     var prev = landing.step; landing.step = step;
+    // 내 정보 화면이 보이는 동안 acct.open(단어 세트 목록을 그린다)
+    acct.open = step === 'me';
+    if (step !== 'me') { acct.formOpen = false; acct.editing = null; }
+    else if (!acct.setsLoaded) refreshWordSets();
     renderProfile();
     renderLanding();
+    if (step === 'me') renderAccountPanel();
     var node = $('landing-step-' + step);
     if (animate && prev && prev !== step && node) {
       node.classList.remove('step-fwd', 'step-back'); void node.offsetWidth;
       node.classList.add(STEPS.indexOf(step) > STEPS.indexOf(prev) ? 'step-fwd' : 'step-back');
     }
   }
-  var ROUTES = { start: '/login', profile: '/profile', room: '/' };
+  var ROUTES = { start: '/login', profile: '/profile', room: '/', me: '/me' };
   var GUEST_STARTED_KEY = 'drawguess.guestStarted'; // sessionStorage: 이 탭에서 게스트로 시작했는가
   function guestStarted() { try { return sessionStorage.getItem(GUEST_STARTED_KEY) === '1'; } catch (e) { return false; } }
   function setGuestStarted(v) { try { if (v) sessionStorage.setItem(GUEST_STARTED_KEY, '1'); else sessionStorage.removeItem(GUEST_STARTED_KEY); } catch (e) { /* ignore */ } }
@@ -1357,9 +1372,19 @@
     p = String(p || '/').replace(/\/+$/, '') || '/';
     if (p === '/login') return 'start';
     if (p === '/profile') return 'profile';
+    if (p === '/me') return 'me';
     return 'room';
   }
-  function routeUrl(step) { var q = ''; try { q = location.search || ''; } catch (e) { /* ignore */ } return ROUTES[step] + q; }
+  /** 화면 주소 + 지금 쿼리(?room= · ?mock= 등). ?tab= 은 내 정보에서만 */
+  function routeUrl(step) {
+    var q = '';
+    try {
+      var qs = new URLSearchParams(location.search || '');
+      if (step !== 'me') qs.delete('tab');
+      q = qs.toString(); q = q ? '?' + q : '';
+    } catch (e) { /* ignore */ }
+    return ROUTES[step] + q;
+  }
   /** 가려는 화면 → 지금 상태로 들어갈 수 있는 화면 */
   function resolveStep(step) {
     var logged = acctLoggedIn(), canLogin = loginAvailable();
@@ -1367,10 +1392,11 @@
     if (logged) {
       var ok = isConfirmed(acct.user.id) && !!nickValue();
       if (step === 'start') return ok ? 'room' : 'profile';
-      if (step === 'room' && !ok) return 'profile';
+      if ((step === 'room' || step === 'me') && !ok) return 'profile';
       return step;
     }
     if (!guestStarted()) return canLogin ? 'start' : 'profile';
+    if (step === 'me') step = canLogin ? 'start' : 'room'; // 내 정보는 로그인 사용자만
     if (step === 'start' && !canLogin) step = 'profile';
     if (step === 'room' && !nickValue()) return 'profile';
     return step;
@@ -1456,6 +1482,9 @@
       syncAccountProfile(true);
       setConfirmed(acct.user.id);
     } else setGuestStarted(true);
+    if (roomProfile.open) { submitRoomProfile(name); return; }
+    var hsp = history.state;
+    if (hsp && hsp.from === 'me') { returnTo('me', true); return; }
     returnTo('room', true);
     // 키보드면 바로 이어서: 초대 → "이 방에 참가하기", 아니면 방 코드 입력(모바일은 키보드가 튀어나오지 않게 포커스하지 않는다)
     if (landing.invite) focusNode($('btn-join'));
@@ -1521,6 +1550,15 @@
     var bn = $('btn-profile-next'); if (bn) bn.addEventListener('click', submitProfile);
     var bg = $('btn-start-guest'); if (bg) bg.addEventListener('click', function () { setGuestStarted(true); goStep('profile', true, { from: 'start' }); });
     var be = $('btn-profile-edit'); if (be) be.addEventListener('click', function () { goStep('profile', true, { from: 'room' }); });
+    var mb = $('btn-me-back'); if (mb) mb.addEventListener('click', function () { returnTo('room', true); });
+    var mpp = $('btn-mp-profile'); if (mpp) mpp.addEventListener('click', function () { goStep('profile', true, { from: 'me' }); });
+    ['tab-sets', 'tab-gallery'].forEach(function (id) {
+      var b = $(id); if (b) b.addEventListener('click', function () { setMeTab(b.getAttribute('data-tab')); });
+    });
+    var md = $('btn-mp-delete'); if (md) md.addEventListener('click', openDeleteDialog);
+    var dc = $('btn-delete-cancel'); if (dc) dc.addEventListener('click', closeDeleteDialog);
+    var dk = $('btn-delete-confirm'); if (dk) dk.addEventListener('click', doDeleteAccount);
+    var dov = $('overlay-delete'); if (dov) dov.addEventListener('click', function (e) { if (e.target === dov) closeDeleteDialog(); });
     var bl = $('btn-me-login'); if (bl) bl.addEventListener('click', function () { goStep('start', true, { from: 'room' }); });
     ['btn-mode-photo', 'btn-mode-emoji'].forEach(function (id) {
       var b = $(id); if (b) b.addEventListener('click', function () { setPhotoMode(b.getAttribute('data-mode')); });
@@ -1680,6 +1718,7 @@
     var vl = $('view-landing'), vr = $('view-room');
     if (vr) vr.hidden = true; if (vl) vl.hidden = false;
     closeLeaveDialog();
+    closeRoomProfile();
     // 방에서 나오면 메인. 방 항목을 걷어내고(→ 메인 항목), 주소에서 ?room= 을 뺀다
     landing.invite = null; landing.ready = true;
     afterHistory(function () { try { if (history.state && history.state.inRoom) histBack(); } catch (e) { /* ignore */ } });
@@ -1706,10 +1745,21 @@
   }
   // 뒤로가기로 방을 나가려 할 때 묻는 대화상자
   function leaveDialogOpen() { var d = $('overlay-leave'); return !!(d && !d.hidden); }
-  function openLeaveDialog() {
+  var leaveIntent = null; // null = 방 나가기(메인) · 'me' = 방에서 나가 내 정보로
+  function openLeaveDialog(intent) {
     var d = $('overlay-leave'); if (!d || !inRoom) return;
-    var desc = $('leave-desc');
-    if (desc) desc.textContent = state.phase === 'lobby' ? '대기실에서 나가 메인 화면으로 돌아가요.' : '진행 중인 게임에서 빠지고 메인 화면으로 돌아가요. 점수는 사라져요.';
+    leaveIntent = intent === 'me' ? 'me' : null;
+    var game = state.phase !== 'lobby';
+    var title = $('leave-title'), desc = $('leave-desc'), ok0 = $('btn-leave-confirm');
+    if (leaveIntent === 'me') {
+      if (title) title.textContent = '내 정보로 이동할까요?';
+      if (desc) desc.textContent = '내 정보는 방 밖에서 볼 수 있어요. ' + (game ? '진행 중인 게임에서 빠지고 점수는 사라져요.' : '대기실에서 나가 내 정보로 이동해요.');
+      if (ok0) ok0.textContent = '나가고 이동';
+    } else {
+      if (title) title.textContent = '방을 나갈까요?';
+      if (desc) desc.textContent = game ? '진행 중인 게임에서 빠지고 메인 화면으로 돌아가요. 점수는 사라져요.' : '대기실에서 나가 메인 화면으로 돌아가요.';
+      if (ok0) ok0.textContent = '나가기';
+    }
     d.hidden = false;
     var ok = $('btn-leave-confirm'); if (ok) { try { ok.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
   }
@@ -1844,13 +1894,23 @@
     });
     var gm = $('overlay-gallery'); if (gm) gm.addEventListener('click', function (e) { if (e.target === gm) closeGallery(); });
     var lc = $('btn-leave-cancel'); if (lc) lc.addEventListener('click', closeLeaveDialog);
-    var lo = $('btn-leave-confirm'); if (lo) lo.addEventListener('click', function () { closeLeaveDialog(); if (inRoom) resetToLanding(true); });
+    var lo = $('btn-leave-confirm'); if (lo) lo.addEventListener('click', function () {
+      var intent = leaveIntent;
+      closeLeaveDialog();
+      if (!inRoom) return;
+      resetToLanding(true);
+      if (intent === 'me') goStep('me', true, { from: 'room' });
+    });
+    var rpb = $('btn-room-profile'); if (rpb) rpb.addEventListener('click', function () { closeSheet(true); openRoomProfile(); });
+    var rpc = $('btn-room-profile-close'); if (rpc) rpc.addEventListener('click', function () { closeRoomProfile(); });
+    var rpo = $('overlay-profile'); if (rpo) rpo.addEventListener('click', function (e) { if (e.target === rpo) closeRoomProfile(); });
     var ld = $('overlay-leave'); if (ld) ld.addEventListener('click', function (e) { if (e.target === ld) closeLeaveDialog(); });
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
       if (leaveDialogOpen()) { closeLeaveDialog(); return; }
+      var dd = $('overlay-delete'); if (dd && !dd.hidden) { closeDeleteDialog(); return; }
       if (openSheetId) { closeSheet(false); return; }
-      if (acct.open) { closeAccount(); return; }
+      if (roomProfile.open) { closeRoomProfile(); return; }
       if (ui.galleryOpen) closeGallery();
     });
     buildMobileChrome();
@@ -1900,6 +1960,9 @@
     else { placeNode(chip, left, copy && copy.parentNode === left ? copy : null); placeNode(copy, left); }
     if (mobile) { placeNode(sound, $('menu-slot-sound')); placeNode(leave, $('menu-slot-leave')); }
     else { placeNode(sound, right, leave && leave.parentNode === right ? leave : menu); placeNode(leave, right, menu); }
+    var profBtn = $('btn-room-profile');
+    if (mobile) placeNode(profBtn, $('menu-slot-profile'));
+    else placeNode(profBtn, right, sound && sound.parentNode === right ? sound : (leave && leave.parentNode === right ? leave : menu));
     var acctBtn = $('btn-account-top');
     if (mobile) placeNode(acctBtn, $('menu-slot-account'));
     else placeNode(acctBtn, right, sound && sound.parentNode === right ? sound : (leave && leave.parentNode === right ? leave : menu));
@@ -1977,7 +2040,7 @@
   function closeSheet(immediate, fromHistory) {
     var id = openSheetId; if (!id) return;
     var s = $(id); openSheetId = null;
-    if (id === 'sheet-account') acct.open = false;
+    if (id === 'sheet-profile' && roomProfile.open) closeRoomProfile(true);
     document.body.classList.remove('sheet-open');
     if (!fromHistory) sheetHistoryPop();
     if (!s) return;
@@ -2318,7 +2381,6 @@
     });
   }
 
-  function renderAcctAvatar(node) { paintAvatar(node, myAvatar()); }
 
   function renderAccount() {
     var logged = acctLoggedIn();
@@ -2340,34 +2402,66 @@
       sel.disabled = !canApplySet();
     }
     if (acct.open) renderAccountPanel();
+    renderMePage();
   }
 
-  /** 내 정보 열기: 모바일은 바텀 시트(#sheet-account), 데스크톱은 모달(#overlay-account). 본문 노드는 하나를 옮겨 쓴다 */
+  /** 내 정보(/me) 열기. 방 안이면 "방에서 나가고 이동할까요?"를 먼저 묻는다 */
   function openAccount() {
     if (!acctLoggedIn()) return;
-    acct.open = true;
-    var body = $('account-body');
-    if (mobileMq.matches) { placeNode(body, $('sheet-account-body')); openSheet('sheet-account'); }
-    else { placeNode(body, $('account-modal-body')); var m = $('overlay-account'); if (m) m.hidden = false; }
-    if (!acct.setsLoaded) refreshWordSets();
-    renderAccountPanel();
+    if (inRoom) { closeSheet(true); openLeaveDialog('me'); return; }
+    goStep('me', true, { from: 'room' });
   }
-  function closeAccount() {
-    acct.open = false; acct.formOpen = false; acct.editing = null;
-    var m = $('overlay-account'); if (m) m.hidden = true;
-    if (openSheetId === 'sheet-account') closeSheet(false);
+  /** 단어 세트 편집 폼 닫기(내 정보 화면 자체는 주소로 오간다) */
+  function closeAccount() { acct.formOpen = false; acct.editing = null; renderAccountPanel(); }
+  function meTab() { try { return new URLSearchParams(location.search).get('tab') === 'gallery' ? 'gallery' : 'sets'; } catch (e) { return 'sets'; } }
+  function setMeTab(tab) {
+    try {
+      var qs = new URLSearchParams(location.search);
+      if (tab === 'gallery') qs.set('tab', 'gallery'); else qs.delete('tab');
+      var q = qs.toString();
+      history.replaceState(history.state, '', ROUTES.me + (q ? '?' + q : ''));
+    } catch (e) { /* ignore */ }
+    renderMePage();
+  }
+  function renderMePage() {
+    if (landing.step !== 'me' || inRoom) return;
+    paintAvatar($('mp-avatar'), myAvatar());
+    var nm = $('mp-name'); if (nm) nm.textContent = nickValue() || acctName();
+    var pv = $('mp-provider');
+    if (pv) pv.textContent = acctLoggedIn() ? providerLabel(acct.user && acct.user.provider) + ' 계정' + (acct.user && acct.user.email ? ' · ' + acct.user.email : '') : '';
+    var tab = meTab();
+    ['sets', 'gallery'].forEach(function (t) {
+      var b = $('tab-' + t); if (b) { b.setAttribute('aria-selected', t === tab ? 'true' : 'false'); b.tabIndex = t === tab ? 0 : -1; }
+      var p = $('me-panel-' + t); if (p) p.hidden = t !== tab;
+    });
+  }
+  // 회원 탈퇴
+  function openDeleteDialog() {
+    if (!acctLoggedIn()) return;
+    var d = $('overlay-delete'); if (!d) return;
+    d.hidden = false;
+    var b = $('btn-delete-cancel'); if (b) { try { b.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+  }
+  function closeDeleteDialog() { var d = $('overlay-delete'); if (d) d.hidden = true; }
+  function doDeleteAccount() {
+    if (!acctLoggedIn() || !Account || !Account.deleteAccount) return;
+    var uid = acct.user.id, btn = $('btn-delete-confirm');
+    if (btn) { btn.disabled = true; btn.textContent = '탈퇴하는 중…'; }
+    Account.deleteAccount()
+      .then(function () {
+        forgetConfirmed(uid);
+        try { localStorage.removeItem('drawguess.photoCache'); } catch (e) { /* ignore */ }
+        closeDeleteDialog();
+        toast('탈퇴했어요. 게스트로는 언제든 다시 놀 수 있어요', 'ok');
+      })
+      .catch(function (e) { acctErr(e, '탈퇴 처리에 실패했어요'); })
+      .then(function () { if (btn) { btn.disabled = false; btn.textContent = '탈퇴하기'; } });
   }
   function renderAccountPanel() {
     if (!acct.open) return;
-    renderAcctAvatar($('acct-avatar'));
-    var nick = $('acct-nick'); if (nick && document.activeElement !== nick) nick.value = acctName();
-    var pv = $('acct-provider');
-    if (pv) pv.textContent = providerLabel(acct.user && acct.user.provider) + ' 계정으로 로그인' + (acct.user && acct.user.email ? ' · ' + acct.user.email : '');
     var cnt = $('wordset-count'); if (cnt) cnt.textContent = acct.setsLoaded ? acct.sets.length + ' / ' + ACCT_MAX_SETS : '';
     var loading = $('wordset-loading'); if (loading) loading.hidden = acct.setsLoaded;
     var empty = $('wordset-empty'); if (empty) empty.hidden = !acct.setsLoaded || !!acct.sets.length;
-    var apply = canApplySet();
-    var hint = $('wordset-apply-hint'); if (hint) hint.hidden = apply || !acct.sets.length;
     var list = $('wordset-list');
     if (list) {
       list.innerHTML = '';
@@ -2379,14 +2473,11 @@
         li.appendChild(head);
         li.appendChild(el('div', 'ws-preview', s.words.slice(0, 8).join(', ') + (s.words.length > 8 ? ' …' : '')));
         var acts = el('div', 'ws-actions');
-        var ap = el('button', 'btn btn-secondary btn-sm ws-apply', '이 세트로 방 설정'); ap.type = 'button'; ap.disabled = !apply;
-        ap.title = apply ? '' : '호스트로 대기실에 있을 때 적용할 수 있어요';
-        ap.addEventListener('click', function () { applyWordSet(s); });
         var ed = el('button', 'btn btn-ghost btn-sm ws-edit', '수정'); ed.type = 'button';
         ed.addEventListener('click', function () { openWordSetForm(s); });
         var dl = el('button', 'btn btn-ghost btn-sm ws-delete', '삭제'); dl.type = 'button';
         dl.addEventListener('click', function () { deleteWordSet(s); });
-        acts.appendChild(ap); acts.appendChild(ed); acts.appendChild(dl);
+        acts.appendChild(ed); acts.appendChild(dl);
         li.appendChild(acts);
         list.appendChild(li);
       });
@@ -2455,8 +2546,90 @@
     if (cb) cb.checked = true;
     sendSettings();
     toast('"' + s.name + '" 세트를 방 설정에 적용했어요', 'ok');
-    closeAccount();
   }
+  /** 방 설정: 지금 사용자 단어를 이름만 받아 새 세트로 저장 */
+  function openQuickSave() {
+    if (!acctLoggedIn()) return;
+    var ta = $('set-customWords'), r = parseWords(ta ? ta.value : '');
+    if (!r.words.length) { toast('저장할 사용자 단어가 없어요', 'error'); return; }
+    if (acct.setsLoaded && acct.sets.length >= ACCT_MAX_SETS) { toast('단어 세트는 ' + ACCT_MAX_SETS + '개까지 만들 수 있어요', 'error'); return; }
+    var row = $('wordset-quick'), sv = $('btn-wordset-save'), n = $('ws-quick-name');
+    if (row) row.hidden = false; if (sv) sv.hidden = true;
+    if (n) { n.value = ''; focusNode(n); }
+  }
+  function closeQuickSave() {
+    var row = $('wordset-quick'), sv = $('btn-wordset-save');
+    if (row) row.hidden = true; if (sv) sv.hidden = false;
+  }
+  function submitQuickSave() {
+    var n = $('ws-quick-name'), ta = $('set-customWords'), b = $('btn-ws-quick-save');
+    var name = n ? n.value.trim() : '', r = parseWords(ta ? ta.value : '');
+    if (!name) { toast('세트 이름을 입력해주세요', 'error'); focusNode(n); return; }
+    if (Array.from(name).length > 30) { toast('세트 이름은 30자까지예요', 'error'); return; }
+    if (!r.words.length) { toast('저장할 사용자 단어가 없어요', 'error'); return; }
+    if (r.words.length > ACCT_MAX_WORDS) { toast('단어는 세트당 ' + ACCT_MAX_WORDS + '개까지 저장할 수 있어요', 'error'); return; }
+    if (b) b.disabled = true;
+    Account.saveWordSet({ name: name, words: r.words })
+      .then(function () { toast('"' + name + '" 세트를 저장했어요', 'ok'); closeQuickSave(); return refreshWordSets(); })
+      .catch(function (e) { acctErr(e, '저장에 실패했어요'); })
+      .then(function () { if (b) b.disabled = false; });
+  }
+
+  // ------------------------------------------------------------------
+  // 방 안 프로필 수정(대기실에서만): 랜딩의 #landing-step-profile 노드를 모달(데스크톱)/시트(모바일)로 옮겨 쓴다.
+  //   저장 → 이 브라우저·계정 프로필에도 저장 + player:update. 닫기(저장 안 함) → 연 순간의 값으로 되돌린다.
+  // ------------------------------------------------------------------
+  var roomProfile = { open: false, home: null, next: null, snap: null, timer: null };
+  function openRoomProfile() {
+    if (!inRoom) return;
+    if (state.phase !== 'lobby') { toast('프로필은 대기실에서 바꿀 수 있어요', 'error'); return; }
+    var node = $('landing-step-profile'); if (!node) return;
+    if (!roomProfile.home) { roomProfile.home = node.parentNode; roomProfile.next = node.nextElementSibling; }
+    clearTimeout(roomProfile.timer); roomProfile.timer = null;
+    var me = state.players.filter(function (p) { return p.id === myId; })[0];
+    if (me && me.name) profile.name = me.name; // 방에서 쓰는 이름에서 시작
+    var nick = $('nick'); if (nick) nick.value = profile.name;
+    roomProfile.snap = { name: profile.name, emoji: profile.emoji, color: profile.color, mode: photo.mode, url: photo.url };
+    roomProfile.open = true;
+    node.classList.remove('step-fwd', 'step-back');
+    node.hidden = false;
+    if (mobileMq.matches) { placeNode(node, $('sheet-profile-body')); openSheet('sheet-profile'); }
+    else { placeNode(node, $('room-profile-modal-body')); var m = $('overlay-profile'); if (m) m.hidden = false; }
+    renderProfile(); updateNextBtn();
+    if (!mobileMq.matches) focusNode(nick);
+  }
+  /** fromSheet: 시트가 스스로 닫히는 중(드래그·뒤로가기·✕) */
+  function closeRoomProfile(fromSheet) {
+    if (!roomProfile.open) return;
+    roomProfile.open = false;
+    if (roomProfile.snap) { // 저장하지 않고 닫음 → 되돌린다
+      var s = roomProfile.snap;
+      profile.name = s.name; profile.emoji = s.emoji; profile.color = s.color; photo.mode = s.mode; photo.url = s.url;
+      var nick = $('nick'); if (nick) nick.value = profile.name;
+      saveProfile(); renderProfile();
+    }
+    roomProfile.snap = null;
+    var m = $('overlay-profile'); if (m) m.hidden = true;
+    if (!fromSheet && openSheetId === 'sheet-profile') closeSheet(false);
+    // 시트는 내려가는 동안 내용을 두고, 다 닫힌 뒤 랜딩 자리로 돌려놓는다
+    if (fromSheet || mobileMq.matches) roomProfile.timer = setTimeout(restoreProfileNode, 320); else restoreProfileNode();
+  }
+  function restoreProfileNode() {
+    roomProfile.timer = null;
+    if (roomProfile.open) return;
+    var node = $('landing-step-profile');
+    if (node && roomProfile.home) { placeNode(node, roomProfile.home, roomProfile.next); node.hidden = landing.step !== 'profile'; }
+  }
+  function submitRoomProfile(name) {
+    roomProfile.snap = null; // 저장했으니 닫아도 되돌리지 않는다
+    var avatar = myAvatar();
+    closeRoomProfile();
+    emit('player:update', { name: name, avatar: avatar }, function (ack) {
+      if (ack && ack.ok) toast('프로필을 바꿨어요', 'ok');
+      else toast((ack && ack.error) || '프로필을 바꾸지 못했어요', 'error');
+    });
+  }
+
   function startSignIn(provider) {
     if (!Account) return;
     rememberHistoryForOAuth();
@@ -2471,25 +2644,11 @@
     if (!Account) return;
     Account.signOut().then(function () { toast('로그아웃했어요', 'ok'); }).catch(function (e) { acctErr(e, '로그아웃에 실패했어요'); });
   }
-  function saveNickname() {
-    var n = $('acct-nick'), b = $('btn-acct-nick-save');
-    var v = n ? n.value.trim().slice(0, 12) : '';
-    if (!v) { toast('닉네임은 1~12자예요', 'error'); if (n) n.focus(); return; }
-    if (b) b.disabled = true;
-    Account.updateProfile({ nickname: v })
-      .then(function () { toast('닉네임을 저장했어요', 'ok'); })
-      .catch(function (e) { acctErr(e, '닉네임 저장에 실패했어요'); })
-      .then(function () { if (b) b.disabled = false; });
-  }
   function buildAccount() {
     var g = $('btn-login-google'); if (g) g.addEventListener('click', function () { startSignIn('google'); });
     var k = $('btn-login-kakao'); if (k) k.addEventListener('click', function () { startSignIn('kakao'); });
     ['btn-account-open', 'btn-account-top'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', openAccount); });
-    ['btn-logout', 'btn-acct-logout'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', doSignOut); });
-    var cl = $('btn-account-close'); if (cl) cl.addEventListener('click', closeAccount);
-    var ov = $('overlay-account'); if (ov) ov.addEventListener('click', function (e) { if (e.target === ov) closeAccount(); });
-    var ns = $('btn-acct-nick-save'); if (ns) ns.addEventListener('click', saveNickname);
-    var ni = $('acct-nick'); if (ni) ni.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); saveNickname(); } });
+    ['btn-logout', 'btn-mp-logout'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', doSignOut); });
     var nb = $('btn-wordset-new'); if (nb) nb.addEventListener('click', function () { openWordSetForm(null); });
     var wc = $('btn-ws-cancel'); if (wc) wc.addEventListener('click', function () { acct.formOpen = false; acct.editing = null; renderAccountPanel(); });
     var wf = $('wordset-form'); if (wf) wf.addEventListener('submit', function (e) { e.preventDefault(); submitWordSet(); });
@@ -2503,10 +2662,13 @@
       sendSettings();
       toast('"' + s.name + '" 세트를 불러왔어요', 'ok');
     });
-    var sv = $('btn-wordset-save');
-    if (sv) sv.addEventListener('click', function () {
-      var ta = $('set-customWords'); var cur = ta ? ta.value : '';
-      openAccount(); openWordSetForm(null, cur);
+    var sv = $('btn-wordset-save'); if (sv) sv.addEventListener('click', openQuickSave);
+    var qsv = $('btn-ws-quick-save'); if (qsv) qsv.addEventListener('click', submitQuickSave);
+    var qcn = $('btn-ws-quick-cancel'); if (qcn) qcn.addEventListener('click', closeQuickSave);
+    var qn = $('ws-quick-name');
+    if (qn) qn.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submitQuickSave(); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeQuickSave(); }
     });
   }
 

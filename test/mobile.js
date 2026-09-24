@@ -257,6 +257,7 @@ async function mainRun() {
       check(inside(lb), 'drawing: 확인 대화상자가 화면 안', fmt(lb));
       await m.click('#btn-leave-cancel');
       check(await m.locator('#overlay-leave').isHidden() && await m.locator('#view-room').isVisible(), 'drawing: 계속 있기 → 게임 유지');
+      check(await m.locator('#btn-room-profile').isDisabled(), 'drawing: 게임 중에는 "프로필" 버튼 비활성');
       const c = await box(m, '#canvas'), ci = await box(m, '#chat-input'), ds = await box(m, '#draw-status'), strip = await box(m, '#turn-strip');
       check(inside(c), 'drawing(관전자): #canvas 뷰포트 안', fmt(c));
       check(inside(ci), 'drawing(관전자): #chat-input 뷰포트 안', fmt(ci));

@@ -13,7 +13,9 @@
  *      기본 사진으로 · 저장 → avatar_mode/avatar_url 저장 + 안 쓰는 업로드 삭제 · 새로고침(확정 후) → 방 바로
  *    - 방(모크) 플레이어 목록: 사진 모드면 <img>, 이모지 모드면 이모지
  *    - 내 정보(닉네임 저장) · 단어 세트 생성/목록/"이 세트로 방 설정"/수정/삭제 · 20개 제한 · 대기실 세트 도구 · 로그아웃 → 시작
- * 3) 모바일(iPhone 13): 첫 로그인 → 프로필 설정(사진) → 방, 내 정보가 바텀 시트(#sheet-account)로 열리고, 방 메뉴 시트에 "내 정보" 행이 있다.
+ * 3) 모바일(iPhone 13): 첫 로그인 → 프로필 설정(사진) → 방, 내 정보(/me) 화면, 방 메뉴 시트의 "프로필"(시트)·"내 정보"(나가고 이동) 행.
+ * 내 정보는 /me 화면(프로필 요약 · 단어 세트 | 그림 탭 · 로그아웃 · 회원 탈퇴). 방 안에서는 "프로필"(대기실에서만, player:update)과
+ * "내 정보"(방에서 나가고 이동할지 묻는다)만 있다.
  */
 const { spawn } = require('child_process');
 const path = require('path');
@@ -55,7 +57,7 @@ const val = (page, sel) => page.inputValue(sel);
 const txt = async (page, sel) => (await page.locator(sel).first().textContent().catch(() => '') || '').trim();
 const imgSrc = (page, sel) => page.locator(sel).first().getAttribute('src').catch(() => null);
 /** 지금 보이는 랜딩 단계 id(없으면 '') */
-const visibleStep = (page) => page.evaluate(() => ['start', 'profile', 'room'].filter((s) => !document.getElementById('landing-step-' + s).hidden).join(','));
+const visibleStep = (page) => page.evaluate(() => ['start', 'profile', 'room', 'me'].filter((s) => !document.getElementById('landing-step-' + s).hidden).join(','));
 /** 개인정보 처리방침 링크: 카드 밖 · 가로 가운데 · 화면 맨 아래 */
 async function privacyChecks(page, label) {
   const inCard = await page.locator('.landing-card a[href="/privacy"]').count();
@@ -214,7 +216,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await g.locator('#wordset-tools').isHidden(), '게스트: 설정의 내 세트 도구 숨김');
     check((await g.locator('.login-badge').count()) === 0, '게스트: 플레이어 목록에 ✔ 배지 없음');
     check((await g.locator('#player-list .avatar img').count()) === 0, '게스트(실서버): 플레이어 목록 아바타는 이모지');
-    check(await g.locator('#overlay-account').isHidden() && await g.locator('#sheet-account').isHidden(), '게스트: 내 정보 모달/시트 숨김');
+    check(await g.locator('#btn-room-profile').isVisible() && await g.locator('#btn-account-top').isHidden(), '게스트 방: "프로필" 버튼 있음 · "내 정보" 없음');
     // 방 안 뒤로가기 → "방을 나갈까요?" (방은 그대로)
     await sleep(200);
     check(pathOf(g) === '/' && g.url().includes('room=') && await g.evaluate(() => !!(history.state && history.state.inRoom)), '방: 메인 위에 방 항목(/?room=)', g.url());
@@ -497,14 +499,16 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
     await p.waitForFunction(() => window.__mockAuth.tables.profiles[0].avatar_mode === 'photo' && window.__mockAuth.tables.profiles[0].nickname === '모크유저', null, { timeout: 3000 }).catch(() => {});
 
-    // ---------- 2-c. 내 정보 · 단어 세트 ----------
-    console.log('\n== 내 정보 · 단어 세트 (가짜 Supabase, 데스크톱) ==');
+    // ---------- 2-c. 내 정보(/me) · 단어 세트 ----------
+    console.log('\n== 내 정보(/me) · 단어 세트 (가짜 Supabase, 데스크톱) ==');
     await p.click('#btn-account-open');
-    await p.waitForSelector('#overlay-account:not([hidden])', { timeout: 3000 });
-    check((await p.locator('#account-modal-body #account-body').count()) === 1, '데스크톱: 내 정보가 모달(.modal)에 렌더링');
-    check((await txt(p, '#acct-provider')).includes('Google'), '내 정보: 제공자 라벨(Google)', await txt(p, '#acct-provider'));
-    check((await val(p, '#acct-nick')) === '모크유저', '내 정보: 닉네임 입력 프리필');
-    check((await imgSrc(p, '#acct-avatar img')) === social, '내 정보: 아바타 = 프로필 사진');
+    await p.waitForSelector('#landing-step-me:not([hidden])', { timeout: 3000 });
+    check(pathOf(p) === '/me' && (await visibleStep(p)) === 'me', '메인 "내 정보" → /me', p.url());
+    check(await p.evaluate(() => document.querySelector('.landing-card').classList.contains('is-wide')), '/me: 넓은 카드');
+    check((await txt(p, '#mp-provider')).includes('Google') && (await txt(p, '#mp-provider')).includes('mock@example.com'), '내 정보: 제공자 · 이메일', await txt(p, '#mp-provider'));
+    check((await txt(p, '#mp-name')) === '모크유저' && (await imgSrc(p, '#mp-avatar img')) === social, '내 정보: 닉네임 · 프로필 사진');
+    check((await p.getAttribute('#tab-sets', 'aria-selected')) === 'true' && await p.locator('#me-panel-sets').isVisible() && await p.locator('#me-panel-gallery').isHidden(), '내 정보: 기본 탭 = 단어 세트');
+    check(await p.locator('#btn-mp-logout').isVisible() && await p.locator('#btn-mp-delete').isVisible(), '내 정보: 로그아웃 · 회원 탈퇴');
     await p.waitForSelector('#wordset-empty:not([hidden])', { timeout: 3000 });
     check(await p.locator('#wordset-empty').isVisible(), '내 정보: 세트 없음 안내');
     check((await txt(p, '#wordset-count')) === '0 / 20', '내 정보: 세트 개수 0 / 20', await txt(p, '#wordset-count'));
@@ -524,8 +528,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check((await txt(p, '#wordset-list .ws-name')) === '과일' && (await txt(p, '#wordset-list .ws-meta')).startsWith('3개'), '새 세트: 이름·단어 수 표시', `${await txt(p, '#wordset-list .ws-name')} / ${await txt(p, '#wordset-list .ws-meta')}`);
     check((await txt(p, '#wordset-count')) === '1 / 20', '새 세트: 개수 1 / 20');
     check(await p.locator('#wordset-form').isHidden(), '새 세트: 저장 후 폼 닫힘');
-    check(await p.locator('#wordset-list .ws-apply').isDisabled(), '방 밖: "이 세트로 방 설정" 비활성');
-    check(await p.locator('#wordset-apply-hint').isVisible(), '방 밖: 적용 불가 안내 표시');
+    check((await p.locator('#wordset-list .ws-apply').count()) === 0, '내 정보: "이 세트로 방 설정" 버튼 없음(방 밖 화면)');
     check(await p.evaluate(() => window.__mockAuth.tables.word_sets.length === 1 && window.__mockAuth.tables.word_sets[0].owner_id === 'mock-user-1'), '새 세트: DB 행에 owner_id 포함');
 
     // 빈 폼 검증
@@ -537,15 +540,40 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.click('#btn-ws-cancel');
     check(await p.locator('#wordset-form').isHidden(), '검증: 취소로 폼 닫힘');
 
-    // 닉네임 저장 → 랜딩 입력 · 요약 카드에 반영
-    await p.fill('#acct-nick', '모크짱');
-    await p.click('#btn-acct-nick-save');
-    await p.waitForFunction(() => (document.getElementById('me-name').textContent || '').trim() === '모크짱', null, { timeout: 3000 }).catch(() => {});
-    check((await val(p, '#nick')) === '모크짱', '닉네임 저장: 랜딩 닉네임 입력 갱신', await val(p, '#nick'));
-    check((await txt(p, '#me-name')) === '모크짱', '닉네임 저장: 방 단계 요약 카드 갱신', await txt(p, '#me-name'));
-    check(await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname === '모크짱'), '닉네임 저장: DB 반영');
-    await p.click('#btn-account-close');
-    check(await p.locator('#overlay-account').isHidden(), '내 정보: 닫기');
+    // 탭: 그림 → ?tab=gallery · 빈 안내 → 단어 세트로 돌아오면 tab 제거
+    await p.click('#tab-gallery');
+    check(await p.locator('#me-panel-gallery').isVisible() && await p.locator('#me-panel-sets').isHidden() && p.url().includes('tab=gallery'), '그림 탭: 패널 전환 · 주소 ?tab=gallery', p.url());
+    check((await txt(p, '#me-panel-gallery')).includes('그림'), '그림 탭: 빈 안내');
+    await p.click('#tab-sets');
+    check(await p.locator('#me-panel-sets').isVisible() && !p.url().includes('tab='), '단어 세트 탭: 주소에서 tab 제거', p.url());
+
+    // 프로필 수정: /me → /profile → 저장 → /me
+    await p.click('#btn-mp-profile');
+    await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
+    check(pathOf(p) === '/profile', '내 정보 → 프로필 수정(/profile)', p.url());
+    await p.fill('#nick', '모크짱');
+    await p.click('#btn-profile-next');
+    await p.waitForSelector('#landing-step-me:not([hidden])', { timeout: 3000 });
+    await sleep(300);
+    check(pathOf(p) === '/me' && (await txt(p, '#mp-name')) === '모크짱', '프로필 저장 → 내 정보로 돌아옴(닉네임 갱신)', `${p.url()} ${await txt(p, '#mp-name')}`);
+    await p.waitForFunction(() => window.__mockAuth.tables.profiles[0].nickname === '모크짱', null, { timeout: 3000 }).catch(() => {});
+    check(await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname === '모크짱'), '프로필 저장: DB 반영');
+    // 프로필 수정 → 뒤로가기 → /me
+    await p.click('#btn-mp-profile');
+    await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
+    await p.goBack();
+    await p.waitForSelector('#landing-step-me:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check((await visibleStep(p)) === 'me' && pathOf(p) === '/me', '내 정보 → 프로필 수정 → 뒤로가기: 내 정보', p.url());
+    // ‹ 메인 → 메인, 다시 들어가서 기기 뒤로가기 → 메인
+    await p.click('#btn-me-back');
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    await sleep(300);
+    check(pathOf(p) === '/' && await p.evaluate(() => !document.querySelector('.landing-card').classList.contains('is-wide')), '‹ 메인 → 메인(/)', p.url());
+    await p.click('#btn-account-open');
+    await p.waitForSelector('#landing-step-me:not([hidden])', { timeout: 3000 });
+    await p.goBack();
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check((await visibleStep(p)) === 'room' && pathOf(p) === '/', '메인 → 내 정보 → 뒤로가기: 메인', p.url());
 
     // 프로필 설정에서 닉네임을 바꾸고 "저장" → 프로필에 저장, 그 뒤 방 만들기(모크 대기실, 호스트)
     await p.click('#btn-profile-edit');
@@ -559,24 +587,12 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.click('#btn-create');
     await p.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     await p.waitForSelector('#settings-panel:not([hidden])', { timeout: 5000 });
-    check(await p.locator('.topbar #btn-account-top').isVisible(), '방 안(데스크톱): 상단바 "내 정보" 버튼');
+    check(await p.locator('.topbar #btn-account-top').isVisible() && await p.locator('.topbar #btn-room-profile').isVisible(), '방 안(데스크톱): 상단바 "프로필" · "내 정보" 버튼');
     check(await p.locator('#wordset-tools').isVisible() && await p.locator('#btn-wordset-save').isVisible(), '설정: "현재 단어를 세트로 저장" 표시');
     check(await p.locator('#wordset-load').isVisible() && (await p.locator('#wordset-load option').count()) === 2, '설정: "내 세트 불러오기" 셀렉트(세트 1개)', await p.locator('#wordset-load option').count());
     await p.waitForFunction(() => window.__dg.state.players.some((pl) => pl.loggedIn), null, { timeout: 3000 }).catch(() => {});
     check(await p.evaluate(() => window.__dg.state.players.some((pl) => pl.id === window.__dg.myId() && pl.loggedIn)), '데이터: players[].loggedIn 은 그대로 받음');
     check((await p.locator('.login-badge').count()) === 0, '플레이어 목록: 로그인해도 ✔ 배지를 그리지 않음');
-
-    // "이 세트로 방 설정"
-    await p.click('#btn-account-top');
-    await p.waitForSelector('#overlay-account:not([hidden])', { timeout: 3000 });
-    check(!(await p.locator('#wordset-list .ws-apply').isDisabled()), '호스트·대기실: "이 세트로 방 설정" 활성');
-    await p.click('#wordset-list .ws-apply');
-    await p.waitForSelector('#overlay-account', { state: 'hidden', timeout: 3000 });
-    await p.waitForFunction(() => window.__dg.state.settings.customWordsOnly === true, null, { timeout: 3000 }).catch(() => {});
-    const cw = await val(p, '#set-customWords');
-    check(cw.includes('사과') && cw.includes('바나나') && cw.includes('포도'), '세트 적용: #set-customWords 에 단어', cw);
-    check(await p.isChecked('#set-customWordsOnly'), '세트 적용: #set-customWordsOnly 체크');
-    check(await p.evaluate(() => window.__dg.state.settings.customWordsOnly && /사과/.test(window.__dg.state.settings.customWords)), '세트 적용: room:settings 전송 → state 반영');
 
     // 셀렉트로 불러오기 (텍스트 영역만 채움)
     await p.fill('#set-customWords', '임시');
@@ -585,67 +601,76 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await sleep(300);
     check((await val(p, '#set-customWords')) === '사과, 바나나, 포도', '셀렉트 불러오기: 텍스트 영역 채움', await val(p, '#set-customWords'));
     check((await val(p, '#wordset-load')) === '', '셀렉트 불러오기: 셀렉트는 기본값으로 복귀');
+    await p.waitForFunction(() => /사과/.test(window.__dg.state.settings.customWords), null, { timeout: 3000 }).catch(() => {});
+    check(await p.evaluate(() => /사과/.test(window.__dg.state.settings.customWords)), '셀렉트 불러오기: room:settings 전송 → state 반영');
 
-    // 현재 단어를 세트로 저장 → 폼 프리필
+    // 현재 단어를 세트로 저장 → 그 자리에서 이름만 받는다
     await p.fill('#set-customWords', '고양이, 강아지');
     await p.locator('#set-customWords').blur();
     await p.click('#btn-wordset-save');
-    await p.waitForSelector('#overlay-account:not([hidden])', { timeout: 3000 });
-    await p.waitForSelector('#wordset-form:not([hidden])', { timeout: 2000 });
-    check((await val(p, '#ws-words')) === '고양이, 강아지', '현재 단어 저장: 폼에 단어 프리필', await val(p, '#ws-words'));
-    await p.fill('#ws-name', '동물');
-    await p.click('#btn-ws-submit');
-    await p.waitForFunction(() => document.querySelectorAll('#wordset-list .wordset-item').length === 2, null, { timeout: 3000 });
-    check((await p.locator('#wordset-list .wordset-item').count()) === 2, '현재 단어 저장: 세트 2개');
-    check((await p.locator('#wordset-load option').count()) === 3, '설정 셀렉트도 갱신(세트 2개)');
+    check(await p.locator('#wordset-quick').isVisible() && await p.locator('#btn-wordset-save').isHidden(), '현재 단어 저장: 이름 입력칸 표시');
+    await p.click('#btn-ws-quick-save');
+    check((await p.locator('#toasts .toast').filter({ hasText: '세트 이름' }).count()) >= 1 && await p.locator('#wordset-quick').isVisible(), '현재 단어 저장: 이름 없으면 안내');
+    await p.fill('#ws-quick-name', '동물');
+    await p.press('#ws-quick-name', 'Enter');
+    await p.waitForFunction(() => document.querySelectorAll('#wordset-load option').length === 3, null, { timeout: 3000 }).catch(() => {});
+    check((await p.locator('#wordset-load option').count()) === 3 && await p.locator('#wordset-quick').isHidden(), '현재 단어 저장: 세트 2개 · 입력칸 닫힘', await p.locator('#wordset-load option').count());
+    check(await p.evaluate(() => { const r = window.__mockAuth.tables.word_sets.find((x) => x.name === '동물'); return !!r && JSON.stringify(r.words) === JSON.stringify(['고양이', '강아지']); }), '현재 단어 저장: DB 에 단어 그대로');
 
-    // 수정
-    const fruit = p.locator('#wordset-list .wordset-item', { hasText: '과일' });
-    await fruit.locator('.ws-edit').click();
-    await p.waitForSelector('#wordset-form:not([hidden])', { timeout: 2000 });
-    check((await txt(p, '#ws-form-title')) === '세트 수정' && (await val(p, '#ws-name')) === '과일' && (await val(p, '#ws-words')) === '사과, 바나나, 포도', '수정: 폼에 기존 값 프리필');
-    await p.fill('#ws-name', '과일2');
-    await p.fill('#ws-words', '사과, 바나나, 포도, 키위');
-    await p.click('#btn-ws-submit');
-    await p.waitForFunction(() => [...document.querySelectorAll('#wordset-list .ws-name')].some((n) => n.textContent === '과일2'), null, { timeout: 3000 });
-    const edited = p.locator('#wordset-list .wordset-item', { hasText: '과일2' });
-    check((await edited.count()) === 1 && (await edited.locator('.ws-meta').textContent()).startsWith('4개'), '수정: 이름·단어 수 갱신');
-    check((await p.locator('#wordset-list .wordset-item').count()) === 2, '수정: 세트 수 그대로 2개');
-
-    // 20개 제한: DB 에 18개를 직접 넣고 새로 만들면 트리거 메시지가 그대로 폼 오류로 뜬다
-    await p.evaluate(() => { for (let i = 0; i < 18; i++) window.__mockAuth.tables.word_sets.push({ id: 'seed-' + i, owner_id: 'mock-user-1', name: '채움' + i, words: ['a'], is_public: false, created_at: '2020-01-01T00:00:00Z', updated_at: '2020-01-01T00:00:00Z' }); });
-    await p.click('#btn-wordset-new');
-    await p.fill('#ws-name', '스물한번째');
-    await p.fill('#ws-words', '하나');
-    await p.click('#btn-ws-submit');
-    await p.waitForFunction(() => (document.getElementById('ws-error').textContent || '').length > 0, null, { timeout: 3000 }).catch(() => {});
-    check((await txt(p, '#ws-error')) === '단어 세트는 20개까지 만들 수 있어요', '20개 제한: DB 오류 메시지가 그대로 노출', await txt(p, '#ws-error'));
-    check((await p.locator('#toasts .toast').filter({ hasText: '20개까지' }).count()) >= 1, '20개 제한: 토스트에도 안내');
-    await p.click('#btn-ws-cancel');
-    // 실패 후 목록을 다시 불러오므로 20개가 보이고 "새 세트"는 비활성
-    await p.waitForFunction(() => document.querySelectorAll('#wordset-list .wordset-item').length === 20, null, { timeout: 3000 }).catch(() => {});
-    check((await p.locator('#wordset-list .wordset-item').count()) === 20 && await p.locator('#btn-wordset-new').isDisabled(), '20개 제한: 목록 20개면 "새 세트" 비활성', await p.locator('#wordset-list .wordset-item').count());
-    check((await txt(p, '#wordset-count')) === '20 / 20', '20개 제한: 개수 20 / 20', await txt(p, '#wordset-count'));
-    await p.evaluate(() => { const t = window.__mockAuth.tables; t.word_sets = t.word_sets.filter((r) => !String(r.id).startsWith('seed-')); });
-
-    // 삭제 (confirm 수락) → 목록 새로 고침(채움 행은 이미 DB 에서 빠졌으므로 1개 남는다)
-    p.once('dialog', (d) => d.accept());
-    await edited.locator('.ws-delete').click();
-    await p.waitForFunction(() => document.querySelectorAll('#wordset-list .wordset-item').length === 1, null, { timeout: 3000 });
-    check((await p.locator('#wordset-list .wordset-item', { hasText: '과일2' }).count()) === 0, '삭제: 목록에서 제거');
-    check(await p.evaluate(() => !window.__mockAuth.tables.word_sets.some((r) => r.name === '과일2')), '삭제: DB 에서 제거');
-    check(!(await p.locator('#btn-wordset-new').isDisabled()), '삭제 후: "새 세트" 다시 활성');
-
-    // ESC 로 모달 닫기
+    // 방 안 프로필 수정(대기실) — 데스크톱 모달
+    console.log('\n== 방 안 프로필 수정 (가짜 Supabase, 데스크톱) ==');
+    await p.click('#btn-room-profile');
+    await p.waitForSelector('#overlay-profile:not([hidden])', { timeout: 3000 });
+    check((await p.locator('#room-profile-modal-body #landing-step-profile').count()) === 1 && await p.locator('#landing-step-profile').isVisible(), '방 프로필: 모달 안에 프로필 폼', await p.locator('#room-profile-modal-body #landing-step-profile').count());
+    check((await val(p, '#nick')) === '방장모크' && await p.locator('#avatar-mode').isVisible(), '방 프로필: 지금 이름 · 사진|이모지 선택', await val(p, '#nick'));
+    await p.click('#btn-mode-emoji');
+    await p.locator('#emoji-strip .emoji-btn').nth(3).click();
+    const roomEmoji = (await p.locator('#emoji-strip .emoji-btn').nth(3).textContent()).trim();
+    await p.fill('#nick', '방안모크');
+    await p.click('#btn-profile-next');
+    await p.waitForSelector('#overlay-profile', { state: 'hidden', timeout: 3000 });
+    await p.waitForFunction(() => { const me = window.__dg.state.players.find((pl) => pl.id === window.__dg.myId()); return me && me.name === '방안모크'; }, null, { timeout: 3000 }).catch(() => {});
+    const meNow = await p.evaluate(() => window.__dg.state.players.find((pl) => pl.id === window.__dg.myId()));
+    check(meNow && meNow.name === '방안모크' && meNow.avatar.emoji === roomEmoji && !meNow.avatar.img, '방 프로필 저장: player:update → 방 목록 이름·이모지', JSON.stringify(meNow && { n: meNow.name, a: meNow.avatar }));
+    await p.waitForFunction(() => window.__mockAuth.tables.profiles[0].nickname === '방안모크', null, { timeout: 3000 }).catch(() => {});
+    check(await p.evaluate(() => { const r = window.__mockAuth.tables.profiles[0]; return r.nickname === '방안모크' && r.avatar_mode === 'emoji'; }), '방 프로필 저장: 계정 프로필에도 저장');
+    check((await p.locator('#toasts .toast').filter({ hasText: '프로필을 바꿨어요' }).count()) >= 1, '방 프로필 저장: 토스트');
+    check(await p.evaluate(() => { const n = document.getElementById('landing-step-profile'); return n.parentElement.classList.contains('landing-card') && n.hidden; }), '방 프로필: 닫으면 폼이 랜딩 자리로 돌아감');
+    // 저장하지 않고 닫으면 되돌림
+    await p.click('#btn-room-profile');
+    await p.waitForSelector('#overlay-profile:not([hidden])', { timeout: 3000 });
+    await p.fill('#nick', '임시이름');
+    await p.click('#btn-mode-photo');
+    await p.click('#btn-room-profile-close');
+    check(await p.locator('#overlay-profile').isHidden(), '방 프로필: 닫기');
+    await p.click('#btn-room-profile');
+    await p.waitForSelector('#overlay-profile:not([hidden])', { timeout: 3000 });
+    check((await val(p, '#nick')) === '방안모크' && (await p.getAttribute('#btn-mode-emoji', 'aria-checked')) === 'true', '방 프로필: 저장 안 하고 닫으면 되돌림', await val(p, '#nick'));
     await p.keyboard.press('Escape');
-    check(await p.locator('#overlay-account').isHidden(), 'ESC: 내 정보 모달 닫힘');
+    check(await p.locator('#overlay-profile').isHidden(), '방 프로필: ESC 로 닫힘');
 
-    // 로그아웃(방 안에서, 새로고침 없이) → 게스트 UI
+    // 방 안 "내 정보" → 나가고 이동할지 묻기
     await p.click('#btn-account-top');
-    await p.waitForSelector('#overlay-account:not([hidden])', { timeout: 3000 });
-    await p.click('#btn-acct-logout');
+    await p.waitForSelector('#overlay-leave:not([hidden])', { timeout: 3000 });
+    check((await txt(p, '#leave-title')) === '내 정보로 이동할까요?' && (await txt(p, '#btn-leave-confirm')) === '나가고 이동', '방 "내 정보": 나가고 이동할지 묻기', await txt(p, '#leave-title'));
+    await p.click('#btn-leave-cancel');
+    check(await p.locator('#view-room').isVisible() && await p.locator('#overlay-leave').isHidden(), '방 "내 정보": 계속 있기 → 방 유지');
+    await p.click('#btn-account-top');
+    await p.waitForSelector('#overlay-leave:not([hidden])', { timeout: 3000 });
+    await p.click('#btn-leave-confirm');
+    await p.waitForSelector('#landing-step-me:not([hidden])', { timeout: 3000 });
+    await sleep(400);
+    check(await p.locator('#view-room').isHidden() && pathOf(p) === '/me' && !p.url().includes('room='), '방 "내 정보": 나가고 이동 → /me', p.url());
+    check((await p.locator('#wordset-list .wordset-item').count()) === 2, '/me: 방에서 저장한 세트도 목록에', await p.locator('#wordset-list .wordset-item').count());
+    await p.goBack();
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check((await visibleStep(p)) === 'room' && pathOf(p) === '/' && await p.locator('#view-room').isHidden(), '방 → 내 정보 → 뒤로가기: 메인(방에 다시 들어가지 않음)', p.url());
+
+    // 로그아웃이 다른 곳에서 일어나도(방 안, 새로고침 없이) → 게스트 UI
+    await p.click('#btn-create');
+    await p.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
+    await p.evaluate(() => window.Account.signOut());
     await p.waitForSelector('#btn-account-top', { state: 'hidden', timeout: 3000 });
-    check(await p.locator('#overlay-account').isHidden(), '로그아웃: 내 정보 닫힘');
     check(await p.locator('#btn-account-top').isHidden() && await p.locator('#wordset-tools').isHidden(), '로그아웃: 방 안 계정 UI 숨김');
     check(await p.locator('#view-room').isVisible(), '로그아웃: 방은 그대로(새로고침 없음)');
     await p.waitForFunction(() => !window.__dg.state.players.some((pl) => pl.loggedIn), null, { timeout: 3000 }).catch(() => {});
@@ -677,9 +702,10 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check((await txt(p, '#me-status')) === '카카오 계정' && await p.locator('#me-account').isVisible(), '재로그인(카카오, 확정한 적 있음): 방 단계로 · "카카오 계정"', await txt(p, '#me-status'));
     check(await p.locator('#invite-card').isVisible() && (await txt(p, '#invite-code')) === 'ABCD', '재로그인: 초대 카드 유지');
     await p.click('#btn-account-open');
-    await p.waitForSelector('#overlay-account:not([hidden])', { timeout: 3000 });
-    check((await txt(p, '#acct-provider')).includes('카카오'), '재로그인: 제공자 라벨(카카오)', await txt(p, '#acct-provider'));
-    await p.click('#btn-account-close');
+    await p.waitForSelector('#landing-step-me:not([hidden])', { timeout: 3000 });
+    check((await txt(p, '#mp-provider')).includes('카카오'), '재로그인: 내 정보 제공자 라벨(카카오)', await txt(p, '#mp-provider'));
+    await p.click('#btn-me-back');
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
     // 로그인 버튼을 누르기 전의 초대 코드는 OAuth 리다이렉트 뒤 복원하도록 임시 저장된다(모크는 실제로 이동하지 않으므로 남아 있음) → 다시 열면 초대 카드로 복원되고 소비된다
     check(await p.evaluate(() => sessionStorage.getItem('drawguess.pendingRoom') === 'ABCD'), '로그인 시도 전 방 코드 임시 저장(리다이렉트 복원용)');
     await p.goto(`${URL}/?mock=1&auth=1&stay=1`);
@@ -695,7 +721,42 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check((await visibleStep(p)) === 'start' && await p.locator('#btn-login-google').isVisible() && await p.evaluate(() => window.__samePage === 9), '로그아웃(방 단계) → 시작 단계, 페이지 유지', await visibleStep(p));
     check(pathOf(p) === '/login' && await p.evaluate(() => !!(history.state && history.state.landing === 'start')), '로그아웃: 지금 항목을 시작(/login)으로', `${p.url()} ${await p.evaluate(() => JSON.stringify(history.state))}`);
 
-    // ---------- 2-c. OAuth 복귀 뒤 뒤로가기 ----------
+    // ---------- 2-d. 회원 탈퇴 ----------
+    console.log('\n== 회원 탈퇴 (가짜 Supabase) ==');
+    const del = await newPage(browser, '탈퇴');
+    await del.goto(`${URL}/me?mock=1&auth=1&stay=1&delete_fail=1`);
+    await del.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 }); // 이 브라우저에서 처음 → 프로필부터
+    check(pathOf(del) === '/profile', '/me 직접 방문(처음 로그인): 프로필 설정부터', del.url());
+    await del.click('#btn-profile-next');
+    await del.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    await del.click('#btn-account-open');
+    await del.waitForSelector('#landing-step-me:not([hidden])', { timeout: 3000 });
+    await del.click('#btn-mp-delete');
+    await del.waitForSelector('#overlay-delete:not([hidden])', { timeout: 2000 });
+    check((await txt(del, '#delete-desc')).includes('되돌릴 수 없어요'), '탈퇴 확인: 되돌릴 수 없다는 안내');
+    await del.click('#btn-delete-cancel');
+    check(await del.locator('#overlay-delete').isHidden() && await del.locator('#landing-step-me').isVisible(), '탈퇴 확인: 취소');
+    // 서버 실패 → 로그인 그대로, 안내
+    await del.click('#btn-mp-delete');
+    await del.click('#btn-delete-confirm');
+    await del.waitForFunction(() => [...document.querySelectorAll('#toasts .toast')].some((t) => /실패/.test(t.textContent)), null, { timeout: 3000 }).catch(() => {});
+    check((await del.locator('#toasts .toast').filter({ hasText: '실패' }).count()) >= 1 && await del.locator('#landing-step-me').isVisible() && !(await del.locator('#btn-delete-confirm').isDisabled()), '탈퇴 실패: 안내 · 로그인 유지 · 다시 시도 가능');
+    await del.click('#btn-delete-cancel');
+    // 성공
+    await del.goto(`${URL}/me?mock=1&auth=1&stay=1`);
+    await del.waitForSelector('#landing-step-me:not([hidden])', { timeout: 5000 });
+    check(pathOf(del) === '/me', '/me 직접 방문(확정한 적 있음): 내 정보', del.url());
+    await del.click('#btn-mp-delete');
+    await del.click('#btn-delete-confirm');
+    await del.waitForSelector('#landing-step-start:not([hidden])', { timeout: 5000 });
+    await sleep(300);
+    check(pathOf(del) === '/login' && await del.locator('#overlay-delete').isHidden(), '탈퇴: 시작(/login)으로 · 확인 창 닫힘', del.url());
+    check(await del.evaluate(() => window.__mockAuth.deleted === true && window.__mockAuth.tables.profiles.length === 0 && window.__mockAuth.session() === null), '탈퇴: 서버 요청(토큰) · 프로필 삭제 · 로그아웃');
+    check(await del.evaluate(() => { try { return !JSON.parse(localStorage.getItem('drawguess.profileConfirmed') || '{}')['mock-user-1']; } catch (e) { return false; } }), '탈퇴: 이 브라우저의 확정 표시도 지움');
+    check((await del.locator('#toasts .toast').filter({ hasText: '탈퇴했어요' }).count()) >= 1, '탈퇴: 안내 토스트');
+    await del.context().close();
+
+    // ---------- 2-e. OAuth 복귀 뒤 뒤로가기 ----------
     console.log('\n== OAuth 복귀 뒤 뒤로가기 (가짜 Supabase) ==');
     const o = await newPage(browser, 'OAuth복귀');
     await o.goto(`${URL}/privacy?before=1`);                                       // 로그인 화면으로 오기 전 페이지
@@ -743,34 +804,51 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(sw <= 390, '모바일 랜딩(로그인, 방 단계): 가로 스크롤 없음', sw);
     check((await txt(m, '#me-status')) === 'Google 계정' && (await m.locator('#me-avatar img').count()) === 1, '모바일: 방 단계 + 제공자 라벨 + 사진');
     await m.click('#btn-account-open');
-    await m.waitForSelector('#sheet-account.open', { timeout: 3000 });
-    check((await m.locator('#sheet-account-body #account-body').count()) === 1, '모바일: 내 정보가 바텀 시트에 렌더링');
-    check(await m.locator('#overlay-account').isHidden(), '모바일: 데스크톱 모달은 열리지 않음');
+    await m.waitForSelector('#landing-step-me:not([hidden])', { timeout: 3000 });
+    sw = await m.evaluate(() => document.documentElement.scrollWidth);
+    check(sw <= 390, '모바일 내 정보: 가로 스크롤 없음', sw);
     const bb = await m.locator('#btn-wordset-new').boundingBox();
-    check(!!bb && bb.x >= 0 && bb.x + bb.width <= 390, '모바일: 시트 안 "새 세트" 버튼이 화면 안', bb && Math.round(bb.x + bb.width));
-    await m.click('#sheet-account .sheet-close');
-    await m.waitForSelector('#sheet-account', { state: 'hidden', timeout: 3000 });
-    check(await m.evaluate(() => window.__dg.acct.open === false), '모바일: ✕로 닫으면 열림 상태 해제');
-    check(await m.locator('#landing-step-room').isVisible(), '모바일: 시트를 닫아도 방 단계 유지');
+    check(!!bb && bb.x >= 0 && bb.x + bb.width <= 390, '모바일 내 정보: "새 세트" 버튼이 화면 안', bb && Math.round(bb.x + bb.width));
+    for (const sel of ['#btn-me-back', '#btn-mp-profile', '#tab-sets', '#tab-gallery']) {
+      const b = await m.locator(sel).boundingBox();
+      check(!!b && b.x >= 0 && b.x + b.width <= 390, `모바일 내 정보: ${sel} 화면 안`, b && Math.round(b.x + b.width));
+    }
+    await m.click('#btn-me-back');
+    await m.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
     await m.click('#btn-create');
     await m.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     await m.waitForSelector('#settings-panel:not([hidden])', { timeout: 5000 });
     check((await m.locator('.topbar #btn-account-top').count()) === 0 && (await m.locator('#sheet-menu #btn-account-top').count()) === 1, '모바일 방: "내 정보" 버튼은 헤더가 아니라 메뉴 시트에');
+    check((await m.locator('.topbar #btn-room-profile').count()) === 0 && (await m.locator('#sheet-menu #btn-room-profile').count()) === 1, '모바일 방: "프로필" 버튼도 메뉴 시트에');
     check((await m.locator('#player-list li.me .avatar img').count()) === 1, '모바일 방: 내 플레이어 칩에 사진');
     await m.click('#btn-menu');
     await m.waitForSelector('#sheet-menu.open', { timeout: 3000 });
-    check(await m.locator('#sheet-menu #btn-account-top').isVisible(), '모바일 메뉴 시트: "내 정보" 행 표시');
-    await m.click('#sheet-menu #btn-account-top');
-    await m.waitForSelector('#sheet-account.open', { timeout: 3000 });
-    check(await m.locator('#sheet-menu').isHidden(), '모바일: 메뉴 → 내 정보 시트로 전환(메뉴 닫힘)');
-    await m.waitForSelector('#wordset-empty:not([hidden])', { timeout: 3000 });
-    check(await m.locator('#wordset-empty').isVisible(), '모바일: 시트 안 세트 목록(빈 상태) 표시');
+    check(await m.locator('#sheet-menu #btn-account-top').isVisible() && await m.locator('#sheet-menu #btn-room-profile').isVisible(), '모바일 메뉴 시트: "프로필" · "내 정보" 행');
+    await m.click('#sheet-menu #btn-room-profile');
+    await m.waitForSelector('#sheet-profile.open', { timeout: 3000 });
+    check(await m.locator('#sheet-menu').isHidden() && (await m.locator('#sheet-profile-body #landing-step-profile').count()) === 1, '모바일: 메뉴 → 프로필 시트(메뉴 닫힘, 폼이 시트 안)');
     sw = await m.evaluate(() => document.documentElement.scrollWidth);
-    check(sw <= 390, '모바일 대기실(로그인): 가로 스크롤 없음', sw);
-    await m.keyboard.press('Escape');
-    await m.waitForSelector('#sheet-account', { state: 'hidden', timeout: 3000 });
+    check(sw <= 390, '모바일 프로필 시트: 가로 스크롤 없음', sw);
+    await sleep(400); // 시트가 올라오는 애니메이션이 끝난 뒤
+    const sb = await m.locator('#sheet-profile #btn-profile-next').boundingBox();
+    check(!!sb && sb.x >= 0 && sb.x + sb.width <= 390 && sb.y + sb.height <= m.viewportSize().height, '모바일 프로필 시트: "저장" 버튼이 화면 안', sb && `${Math.round(sb.y + sb.height)}`);
+    // 기기 뒤로가기 = 시트 닫기(방은 그대로)
+    await m.goBack();
+    await m.waitForSelector('#sheet-profile', { state: 'hidden', timeout: 3000 });
+    check(await m.locator('#view-room').isVisible() && await m.locator('#overlay-leave').isHidden(), '모바일: 뒤로가기로 프로필 시트만 닫힘');
+    await sleep(400);
+    check(await m.evaluate(() => document.getElementById('landing-step-profile').parentElement.classList.contains('landing-card')), '모바일: 시트가 닫히면 폼이 랜딩 자리로');
+    // 메뉴 → 내 정보 → 나가고 이동할지 묻기
+    await m.click('#btn-menu');
+    await m.waitForSelector('#sheet-menu.open', { timeout: 3000 });
+    await m.click('#sheet-menu #btn-account-top');
+    await m.waitForSelector('#overlay-leave:not([hidden])', { timeout: 3000 });
+    check(await m.locator('#sheet-menu').isHidden() && (await txt(m, '#leave-title')) === '내 정보로 이동할까요?', '모바일: 메뉴 → 내 정보 → 나가고 이동할지 묻기');
+    await m.click('#btn-leave-cancel');
     check(await m.locator('#wordset-tools').isVisible(), '모바일 설정: 세트 도구 표시');
     check((await m.locator('.login-badge').count()) === 0, '모바일: ✔ 로그인 배지 없음');
+    sw = await m.evaluate(() => document.documentElement.scrollWidth);
+    check(sw <= 390, '모바일 대기실(로그인): 가로 스크롤 없음', sw);
     // 사진이 깨지면 이모지로 (한 번 실패한 주소는 이 페이지에서 다시 쓰지 않으므로 맨 마지막에)
     await m.evaluate(() => { const i = document.querySelector('#player-list li.me .avatar img'); i.dispatchEvent(new Event('error')); });
     check((await m.locator('#player-list li.me .avatar img').count()) === 0 && ((await txt(m, '#player-list li.me .avatar')) || '').length > 0, '사진 로드 실패: 이모지로 대체', await txt(m, '#player-list li.me .avatar'));

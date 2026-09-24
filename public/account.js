@@ -13,6 +13,7 @@
      getSession(), getUser(), getProfile(), getToken()
      signIn('google'|'kakao'): Promise   OAuth 리다이렉트 시작 (redirectTo = origin + pathname)
      signOut(): Promise
+     deleteAccount(): Promise<true>     회원 탈퇴(서버가 사진·계정 삭제, profiles·word_sets 는 cascade) 후 로컬 로그아웃
      updateProfile({ nickname?, avatar_emoji?, avatar_color?, avatar_mode?: 'photo'|'emoji', avatar_url?: string|null }): Promise<profile>
                                          avatar_url 이 바뀌면 이전에 올린 사진(본인 폴더 avatars/<uid>/… 만)은 지운다(best-effort)
      uploadAvatar(file|blob): Promise<publicUrl>
@@ -194,6 +195,24 @@
         setSession(null);
         return true;
       });
+  }
+
+  /** 회원 탈퇴: 게임 서버(POST /api/account/delete)가 사진·계정을 지운다. 성공하면 이 기기에서도 로그아웃 */
+  function deleteAccount() {
+    var err = requireLogin(); if (err) return err;
+    var token = session && session.access_token;
+    if (!token) return fail('다시 로그인한 뒤 시도해주세요');
+    return fetch('/api/account/delete', { method: 'POST', headers: { Authorization: 'Bearer ' + token } })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (b) {
+          if (!r.ok || !b || !b.ok) throw new Error((b && b.error) || '탈퇴 처리에 실패했어요');
+        });
+      })
+      .then(function () {
+        // 서버 세션은 이미 없으니 이 기기의 세션만 지운다
+        return Promise.resolve().then(function () { return client.auth.signOut({ scope: 'local' }); }).catch(function () { /* ignore */ });
+      })
+      .then(function () { setSession(null); return true; });
   }
 
   function updateProfile(patch) {
@@ -394,6 +413,7 @@
     getToken: function () { return session && session.access_token ? session.access_token : null; },
     signIn: signIn,
     signOut: signOut,
+    deleteAccount: deleteAccount,
     updateProfile: updateProfile,
     uploadAvatar: uploadAvatar,
     listWordSets: listWordSets,

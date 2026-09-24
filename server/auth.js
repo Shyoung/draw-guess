@@ -60,12 +60,41 @@ function createAuth(env = process.env) {
     return user;
   }
 
+  /**
+   * 회원 탈퇴: 업로드한 프로필 사진(avatars/<userId>/*)을 지우고 Auth 사용자를 삭제한다.
+   * profiles · word_sets 는 auth.users 에 on delete cascade 로 묶여 함께 지워진다.
+   */
+  async function deleteUser(userId) {
+    if (!enabled || !admin) throw new Error('로그인 기능이 꺼져 있어요');
+    if (typeof userId !== 'string' || !/^[0-9a-f-]{36}$/i.test(userId)) throw new Error('잘못된 사용자');
+    const bucket = admin.storage.from('avatars');
+    for (let i = 0; i < 5; i++) { // 한 번에 최대 1000개 — 보통 1~2개
+      const { data: files, error } = await bucket.list(userId, { limit: 1000 });
+      if (error) throw error;
+      if (!files || !files.length) break;
+      const { error: rmErr } = await bucket.remove(files.map((f) => `${userId}/${f.name}`));
+      if (rmErr) throw rmErr;
+      if (files.length < 1000) break;
+    }
+    const { error } = await admin.auth.admin.deleteUser(userId);
+    if (error) throw error;
+    for (const [k, v] of cache) if (v.user && v.user.userId === userId) cache.delete(k);
+  }
+
+  /** Supabase 무료 프로젝트 일시 정지(7일 무활동) 방지용 가벼운 조회 */
+  async function ping() {
+    if (!enabled || !admin) return false;
+    const { error } = await admin.from('profiles').select('user_id', { head: true, count: 'exact' }).limit(1);
+    if (error) throw error;
+    return true;
+  }
+
   /** 클라이언트에 내려줄 공개 설정 (비밀 키 없음) */
   function publicConfig() {
     return enabled ? { supabaseUrl: url, supabaseAnonKey: anonKey } : {};
   }
 
-  return { enabled, verifyToken, publicConfig };
+  return { enabled, verifyToken, publicConfig, deleteUser, ping };
 }
 
 module.exports = { createAuth };
