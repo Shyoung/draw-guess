@@ -26,7 +26,9 @@
 1. https://developers.kakao.com → 내 애플리케이션 → 애플리케이션 추가.
 2. **앱 설정 → 플랫폼 → Web**: 사이트 도메인에 `https://draw-guess-i927.onrender.com`, `https://draw-guess-staging.onrender.com` 등록.
 3. **제품 설정 → 카카오 로그인**: 활성화 ON. **Redirect URI** 에 Supabase 의 Callback URL 등록.
-4. **동의 항목**: 닉네임(필수), 프로필 사진(선택)만 사용합니다. 이메일은 비즈 앱 심사가 필요하므로 요청하지 않습니다.
+4. **동의 항목**: 닉네임(필수), 프로필 사진(선택), **카카오계정(이메일)(선택)**.
+   - Supabase Auth 는 카카오에 `account_email` 권한을 **항상** 요청합니다(supabase/auth `provider/kakao.go` 기본 scope 고정, "Allow users without an email" 을 켜도 요청 자체는 빠지지 않음). 이메일 항목이 "권한 없음"이면 로그인 시 **KOE205** 오류가 납니다.
+   - 해결: **개인 개발자 비즈 앱 전환**(사업자 등록 없이 가능) 후 이메일을 **선택 동의**로 설정. 사용자가 이메일을 거부해도 Supabase 의 "Allow users without an email" 이 켜져 있으면 로그인됩니다.
 5. **앱 키 → REST API 키** 를 Supabase Kakao provider 의 Client ID 에, **보안 → Client Secret** 을 발급해 Client Secret 에 입력하고 Enable.
 
 ### 공통: 리다이렉트 허용 목록
