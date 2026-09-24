@@ -613,7 +613,7 @@
     state.players.forEach(function (pl) { pl.hasGuessed = false; pl.isDrawing = pl.id === state.drawerId; });
     renderAll();
     if (isDrawer()) { setTool(tool === 'eraser' ? 'pen' : tool); }
-    else { var ci = $('chat-input'); if (ci && document.activeElement !== ci && window.innerWidth >= 1100) ci.focus(); }
+    else { var ci = $('chat-input'); if (ci && document.activeElement !== ci && canAutoFocusChat()) ci.focus(); }
   }
 
   function onHint(p) {
@@ -1698,7 +1698,7 @@
     // 메인 위에 방 항목(/?room=CODE)을 쌓는다 → 뒤로가기는 방 항목을 벗어나며 "나갈까요?"를 띄운다. 걷어내는 중인 항목이 있으면 그 뒤에
     afterHistory(pushRoomEntry);
     renderAll();
-    var ci = $('chat-input'); if (ci && window.innerWidth >= 1100) ci.focus();
+    var ci = $('chat-input'); if (ci && canAutoFocusChat()) ci.focus();
   }
 
   function resetToLanding(sendLeave) {
@@ -1932,10 +1932,17 @@
   }
 
   // ------------------------------------------------------------------
-  // Mobile chrome (≤767px) — 바텀 시트 · 노드 재배치 · visualViewport 추적 · 채팅 티커/말풍선
+  // Mobile chrome (≤767px · 세로 터치 태블릿) — 바텀 시트 · 노드 재배치 · visualViewport 추적 · 채팅 티커/말풍선
   //   데스크톱/태블릿에서는 아무 노드도 옮기지 않고 시트도 열리지 않는다(CSS 가 모바일 전용 요소를 display:none 처리).
   // ------------------------------------------------------------------
-  var mobileMq = window.matchMedia ? window.matchMedia('(max-width: 767px)') : { matches: false, addEventListener: null, addListener: null };
+  // style.css 의 모바일 미디어 블록과 같은 조건: 폰(≤767px) 또는 세로로 든 터치 태블릿(≤1099px, 아이패드 세로)
+  var MOBILE_MQ = '(max-width: 767px), (max-width: 1099px) and (orientation: portrait) and (pointer: coarse)';
+  var mobileMq = window.matchMedia ? window.matchMedia(MOBILE_MQ) : { matches: false, addEventListener: null, addListener: null };
+  /** 넓은 화면 + 마우스일 때만 채팅 입력창에 자동 포커스(터치 기기는 가상 키보드가 튀어나온다) */
+  function canAutoFocusChat() {
+    if (window.innerWidth < 1100) return false;
+    try { return !window.matchMedia || !window.matchMedia('(pointer: coarse)').matches; } catch (e) { return true; }
+  }
   var COMPACT_MAX_H = 520; // visualViewport 높이가 이보다 짧으면(키보드) 컴팩트 모드
   var openSheetId = null, sheetTimer = null, tickerTimer = null, lastCompact = false;
 
