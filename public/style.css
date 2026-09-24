@@ -550,7 +550,10 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 }
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .modal-actions { display: flex; gap: 8px; }
-.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; overflow: auto; padding: 2px; }
+/* 행이 모달 높이에 맞춰 찌부러지지 않게(max-content) — 넘치면 격자만 스크롤. 전에는 행이 줄어 저장 버튼이 잘렸다 */
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); grid-auto-rows: max-content; align-content: start; gap: 14px; overflow: auto; padding: 2px; flex: 1 1 auto; min-height: 0; }
+.gallery-foot { display: flex; justify-content: center; flex: 0 0 auto; }
+.gallery-foot .link-btn { font-size: 13px; padding: 4px 8px; }
 .gallery-item { background: #f8f6fc; border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; box-shadow: var(--shadow-sm); }
 .gallery-item img { display: block; width: 100%; aspect-ratio: 4 / 3; background: #fff; object-fit: contain; border-bottom: 1px solid var(--line); }
 .gallery-item .gallery-empty { display: grid; place-items: center; aspect-ratio: 4 / 3; color: var(--muted); font-size: 13px; background: #fff; }
@@ -607,6 +610,13 @@ body.sheet-open { overflow: hidden; }
 .menu-row-split { justify-content: space-between; padding: 2px 6px; font-weight: 700; font-size: 15px; }
 .menu-row-split .btn { width: auto; padding: 8px 16px; font-size: 20px; }
 .menu-row-danger .btn { background: var(--red-soft); color: var(--red); }
+/* 아이콘 버튼(프로필 · 내 정보 · 게임 끝내기 · 나가기): 헤더에서는 아이콘만(이름은 title/aria-label), 메뉴 시트에서는 아이콘 + 이름 */
+.btn-ico { gap: 8px; }
+.btn-ico .ico { width: 18px; height: 18px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.topbar .btn-ico { width: 38px; height: 38px; padding: 0; }
+.topbar .btn-ico .btn-label { display: none; }
+.topbar .btn-ico-danger { color: var(--red); }
+.menu-row .btn-ico .ico { width: 20px; height: 20px; }
 /* 채팅 시트: 기존 #chat-list / #chat-form 을 옮겨 넣는다 */
 .sheet-chat-body { display: flex; flex-direction: column; }
 .sheet-chat-body .chat-list { flex: 1 1 auto; min-height: 0; }
@@ -971,6 +981,8 @@ img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cove
 
 /* ---------- 내 정보 › 그림(보관함) ---------- */
 .drawings-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.drawings-tools { display: inline-flex; align-items: center; gap: 10px; }
+.drawings-tools .link-btn { font-size: 12px; }
 .drawings-full { font-size: 13px; font-weight: 700; color: #9a5b00; background: var(--amber-soft); border-radius: 12px; padding: 8px 12px; }
 .drawings-error { color: var(--red); }
 .drawings-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }

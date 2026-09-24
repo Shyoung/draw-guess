@@ -1148,8 +1148,24 @@ class Room {
     return this.players.filter((p) => p.connected && p.atResults);
   }
 
-  /** lobby 복귀 (점수는 다음 game:start 까지 유지) */
-  backToLobby() {
+  /**
+   * 방장이 게임을 즉시 끝내고 모두 대기실로 (결과 화면 · 갤러리 없이). choosing / drawing / turnEnd 에서만.
+   * @returns {string|null} 오류 메시지 또는 null
+   */
+  abort(id) {
+    if (!this.isHost(id)) return '방장만 게임을 끝낼 수 있어요.';
+    if (this.phase === 'lobby' || this.phase === 'gameOver') return '진행 중인 게임이 없어요.';
+    const host = this.getPlayer(id);
+    this.lastGameOver = null;
+    this.gallery = [];
+    for (const p of this.players) p.atResults = false;
+    this.emitAll('game:aborted', { by: host ? host.name : '' });
+    this.backToLobby(`${host ? host.name : '방장'}님이 게임을 끝냈어요. 대기실로 돌아왔어요.`);
+    return null;
+  }
+
+  /** lobby 복귀 (점수는 다음 game:start 까지 유지). message: 대기실로 돌아올 때 알릴 시스템 메시지 */
+  backToLobby(message = '게임이 끝났어요. 결과를 확인한 뒤 대기실로 돌아와 주세요.') {
     this.clearTimers();
     this.phase = 'lobby';
     this.lobbyStep = 'settings'; // 게임이 끝나고 돌아오면 모드는 그대로, 설정 화면으로
@@ -1170,7 +1186,7 @@ class Room {
       p.hasGuessed = false;
     }
     this.broadcastState();
-    this.systemMessage('게임이 끝났어요. 결과를 확인한 뒤 대기실로 돌아와 주세요.');
+    this.systemMessage(message);
   }
 
   // ── 채팅 / 정답 판정 ───────────────────────────────────────

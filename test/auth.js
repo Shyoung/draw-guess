@@ -807,6 +807,10 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(((await v.getAttribute('#drawings-grid .drawing-thumb img', 'src')) || '').startsWith('blob:'), '그림 카드: 서명 URL 이미지');
     const [dl1] = await Promise.all([v.waitForEvent('download', { timeout: 5000 }), v.click('#drawings-grid .dr-download')]);
     check(dl1.suggestedFilename().includes('사과') && dl1.suggestedFilename().endsWith('.webp'), '그림 받기: 제시어가 들어간 webp 파일', dl1.suggestedFilename());
+    check(await v.locator('#btn-drawings-all').isVisible() && (await txt(v, '#btn-drawings-all')) === '모두 저장', '그림 탭: "모두 저장" 버튼');
+    const [dAll] = await Promise.all([v.waitForEvent('download', { timeout: 5000 }), v.click('#btn-drawings-all')]);
+    check(dAll.suggestedFilename().includes('사과') && dAll.suggestedFilename().endsWith('.webp'), '모두 저장(데스크톱): 그림 파일을 한 장씩', dAll.suggestedFilename());
+    await v.waitForFunction(() => !document.getElementById('btn-drawings-all').disabled, null, { timeout: 5000 }).catch(() => {});
     const [dz] = await Promise.all([v.waitForEvent('download', { timeout: 5000 }), v.click('#btn-drawings-zip')]);
     const zipBuf = require('fs').readFileSync(await dz.path());
     const zipEntries = zipBuf.readUInt16LE(zipBuf.length - 22 + 10);
@@ -902,6 +906,38 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await sleep(200);
     await squareCheck('방 플레이어 목록', '#player-list li.me .avatar');
     await tp.context().close();
+
+    // ---------- 2-h. 모바일: 여러 장 저장 = 공유 시트(사진에 저장) ----------
+    console.log('\n== 모바일 여러 장 저장 (공유 시트 흉내) ==');
+    const ms = await newPage(browser, '모바일저장', { ...devices['iPhone 13'] });
+    await ms.addInitScript(() => {
+      window.__shared = [];
+      navigator.canShare = (d) => !!(d && d.files && d.files.length);
+      navigator.share = (d) => { window.__shared.push((d.files || []).map((x) => x.name + ':' + x.type)); return Promise.resolve(); };
+    });
+    await enterRoomAs(ms, `${URL}/?mock=1&auth=1&stay=1`);
+    await gameOver(ms, game1);
+    await ms.waitForSelector('#results-save.rs-saved', { timeout: 5000 }).catch(() => {});
+    await ms.click('#btn-gallery-open');
+    await ms.waitForSelector('#overlay-gallery:not([hidden])', { timeout: 3000 });
+    await ms.click('#btn-gallery-all');
+    await ms.waitForFunction(() => window.__shared.length === 1, null, { timeout: 3000 }).catch(() => {});
+    const sh1 = await ms.evaluate(() => window.__shared[0] || []);
+    check(sh1.length === 2 && sh1.every((x) => /\.png:image\/png$/.test(x)), '모바일 게임 갤러리 "모두 저장": 공유 시트에 PNG 2장', sh1);
+    const mcard = await ms.$$eval('#gallery-grid .gallery-item', (cards) => cards.every((c) => { const r = c.getBoundingClientRect(), b = c.querySelector('.btn').getBoundingClientRect(); return b.bottom <= r.bottom + 0.5 && b.height > 20; }));
+    check(mcard, '모바일 게임 갤러리: 저장 버튼이 카드 안에 온전히');
+    await ms.click('#btn-gallery-close');
+    await leaveToMain(ms);
+    await openGalleryTab(ms);
+    await ms.waitForSelector('#drawings-grid .drawing-item', { timeout: 3000 });
+    await ms.click('#btn-drawings-all');
+    await ms.waitForFunction(() => /장 저장하기/.test(document.getElementById('btn-drawings-all').textContent), null, { timeout: 5000 }).catch(() => {});
+    check((await txt(ms, '#btn-drawings-all')) === '1장 저장하기' && (await ms.evaluate(() => window.__shared.length)) === 1, '모바일 내 정보 "모두 저장": 먼저 받아 두고 "1장 저장하기"', await txt(ms, '#btn-drawings-all'));
+    await ms.click('#btn-drawings-all');
+    await ms.waitForFunction(() => window.__shared.length === 2, null, { timeout: 3000 }).catch(() => {});
+    const sh2 = await ms.evaluate(() => window.__shared[1] || []);
+    check(sh2.length === 1 && /사과.*\.webp:image\/webp$/.test(sh2[0]) && (await txt(ms, '#btn-drawings-all')) === '모두 저장', '모바일 내 정보: 두 번째 탭에 공유 시트(webp 1장)', sh2);
+    await ms.context().close();
 
     // ---------- 2-e. OAuth 복귀 뒤 뒤로가기 ----------
     console.log('\n== OAuth 복귀 뒤 뒤로가기 (가짜 Supabase) ==');

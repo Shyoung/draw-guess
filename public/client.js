@@ -530,6 +530,7 @@
     on('game:timer', function (p) { if (p && p.timeLeft != null) setTimeLeft(num(p.timeLeft, 0), true); });
     on('game:turnEnd', onTurnEnd);
     on('game:over', onGameOver);
+    on('game:aborted', onGameAborted);
     on('chat:message', onChatMessage);
     on('player:guessed', function (p) {
       var pl = p && findPlayer(p.id); if (pl) { pl.hasGuessed = true; renderPlayers(); renderChatInput(); }
@@ -638,6 +639,18 @@
     renderAll();
   }
 
+  /** 방장이 게임을 즉시 끝냄: 턴·단어·오버레이를 지우고 대기실로(결과 화면 없음). room:state(lobby) 가 곧 뒤따른다 */
+  function onGameAborted(p) {
+    cancelLocalStroke(false);
+    closeLeaveDialog();
+    ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null;
+    ui.saveStatus = null; ui.saveJob = null; ui.resultsPending = false;
+    setTimeLeft(null);
+    resetCanvasState();
+    var by = p && p.by ? String(p.by) : '';
+    toast(by && !isHost() ? by + '님이 게임을 끝냈어요' : '게임을 끝냈어요');
+    renderAll();
+  }
   function onGameOver(p) {
     state.phase = 'gameOver';
     SFX.play('gameOver');
@@ -738,6 +751,58 @@
     });
     return cv.toDataURL('image/png');
   }
+  // ---------- 여러 장 저장: 모바일(터치)은 공유 시트(사진 앱에 한 번에 저장), 그 외는 한 장씩 내려받기 ----------
+  function isTouchDevice() { try { return !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } }
+  function toFiles(list) {
+    try { return list.map(function (f) { return new File([f.blob], f.name, { type: f.blob.type || 'image/png' }); }); } catch (e) { return null; }
+  }
+  function canShareFiles(files) {
+    try { return !!files && files.length > 0 && isTouchDevice() && !!navigator.share && !!navigator.canShare && navigator.canShare({ files: files }); } catch (e) { return false; }
+  }
+  function dataUrlToBlob(u) {
+    var i = u.indexOf(','), type = (u.slice(5, i).split(';')[0]) || 'image/png', bin = atob(u.slice(i + 1)), a = new Uint8Array(bin.length);
+    for (var k = 0; k < bin.length; k++) a[k] = bin.charCodeAt(k);
+    return new Blob([a], { type: type });
+  }
+  function downloadSequential(list) {
+    return new Promise(function (resolve) {
+      var i = 0;
+      (function next() {
+        if (i >= list.length) { resolve('downloaded'); return; }
+        var f = list[i++];
+        try { downloadBlob(f.blob, f.name); } catch (e) { /* ignore */ }
+        setTimeout(next, 350); // 브라우저가 연속 다운로드를 한 번에 막지 않도록 간격을 둔다
+      })();
+    });
+  }
+  /** list: [{ name, blob }]. 반드시 사용자 탭 안에서 부른다(공유 시트는 사용자 동작이 필요). 결과: 'shared' | 'cancelled' | 'downloaded' */
+  function saveManyFiles(list, title) {
+    var files = toFiles(list);
+    if (canShareFiles(files)) {
+      return navigator.share({ files: files, title: title || '그림' }).then(function () { return 'shared'; }, function (err) {
+        if (err && err.name === 'AbortError') return 'cancelled';
+        return downloadSequential(list);
+      });
+    }
+    return downloadSequential(list);
+  }
+  function galleryFileName(i) {
+    var g = ui.gallery[i];
+    return safeFile('그림맞추기_' + (state.roomCode || '') + '_' + (i + 1) + '_' + g.word) + '.png';
+  }
+  /** 게임 갤러리 "모두 저장": 그림마다 PNG 한 장씩 */
+  function saveGalleryAll() {
+    var items = ui.gallery || [];
+    var list = [];
+    items.forEach(function (g, i) {
+      if (!g.ops.length && g.trimmed) return;
+      try { list.push({ name: galleryFileName(i), blob: dataUrlToBlob(galleryItemPng(i)) }); } catch (e) { /* ignore */ }
+    });
+    if (!list.length) { toast('저장할 그림이 없어요', 'error'); return; }
+    saveManyFiles(list, '그림 갤러리').then(function (how) {
+      if (how === 'downloaded') toast('그림 ' + list.length + '장을 한 장씩 저장했어요', 'ok');
+    });
+  }
   function openGallery() { if (!ui.gallery || !ui.gallery.length) { toast('아직 갤러리에 담을 그림이 없어요'); return; } ui.galleryOpen = true; renderGallery(); }
   function closeGallery() { ui.galleryOpen = false; renderGallery(); }
   function renderGallery() {
@@ -748,6 +813,7 @@
     var bl = $('btn-gallery-lobby'); if (bl) bl.hidden = !(items.length && state.phase === 'lobby');
     if (m.hidden) return;
     var cnt = $('gallery-count'); if (cnt) cnt.textContent = items.length + '장';
+    var ga = $('btn-gallery-all'); if (ga) ga.textContent = '모두 저장 (' + items.length + '장)';
     var grid = $('gallery-grid'); if (!grid) return;
     grid.innerHTML = '';
     items.forEach(function (g, i) {
@@ -767,7 +833,7 @@
       sub.appendChild(el('span', 'gallery-by', (g.round ? g.round + 'R · ' : '') + '✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘'));
       var dl = el('button', 'btn btn-secondary btn-sm', 'PNG 저장'); dl.type = 'button';
       dl.addEventListener('click', function () {
-        try { downloadDataUrl(galleryItemPng(i), safeFile('그림맞추기_' + (state.roomCode || '') + '_' + (i + 1) + '_' + g.word) + '.png'); }
+        try { downloadDataUrl(galleryItemPng(i), galleryFileName(i)); }
         catch (e) { toast('이미지를 만들지 못했어요', 'error'); }
       });
       sub.appendChild(dl);
@@ -782,7 +848,7 @@
   //   저장한 게임은 이 탭에서 표시해 두어(sessionStorage) 재접속으로 game:over 를 다시 받아도 두 번 저장하지 않는다.
   // ------------------------------------------------------------------
   var MAX_DRAWINGS = 100, SAVED_GAMES_KEY = 'drawguess.savedGames';
-  var vault = { rows: null, loading: false, unavailable: false, error: '', loadedAt: 0, viewing: null, busy: false };
+  var vault = { rows: null, loading: false, unavailable: false, error: '', loadedAt: 0, viewing: null, busy: false, prepared: null };
   function myGalleryItems() {
     return (ui.gallery || []).filter(function (g) { return g.drawerId === myId && g.ops && g.ops.length; });
   }
@@ -846,20 +912,51 @@
     downloadDataUrl(url, filename);
     setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
   }
-  /** 행들을 받아 ZIP 한 파일로 저장. 파일이 이미 없는 행은 건너뛴다. 하나도 못 받으면(없는 파일 제외) 실패 */
-  function zipDrawings(rows, zipName) {
-    if (!window.MiniZip) return Promise.reject(new Error('ZIP 을 만들 수 없어요'));
+  /** 행들의 이미지 파일을 받는다 → [{ name, blob, date }]. 파일이 이미 없는 행은 건너뛴다. 그 밖의 실패가 있으면 전체 실패 */
+  function fetchDrawingFiles(rows) {
     var failed = 0;
     return Promise.all(rows.map(function (r) {
       return Account.downloadDrawing(r)
-        .then(function (b) { return { name: drawingFileName(r, b.type), data: b, date: r.created_at ? new Date(r.created_at) : new Date() }; })
+        .then(function (b) { return { name: drawingFileName(r, b.type), blob: b, date: r.created_at ? new Date(r.created_at) : new Date() }; })
         .catch(function (e) { if (!/not found/i.test(e && e.message || '')) failed++; return null; });
     })).then(function (files) {
-      files = files.filter(Boolean);
       if (failed) throw new Error('그림을 받지 못했어요. 잠시 후 다시 시도해주세요');
-      if (!files.length) return 0;
-      return window.MiniZip.make(files).then(function (blob) { downloadBlob(blob, zipName); return files.length; });
+      return files.filter(Boolean);
     });
+  }
+  /** 행들을 받아 ZIP 한 파일로 저장. 받은 장 수를 돌려준다 */
+  function zipDrawings(rows, zipName) {
+    if (!window.MiniZip) return Promise.reject(new Error('ZIP 을 만들 수 없어요'));
+    return fetchDrawingFiles(rows).then(function (files) {
+      if (!files.length) return 0;
+      return window.MiniZip.make(files.map(function (f) { return { name: f.name, data: f.blob, date: f.date }; }))
+        .then(function (blob) { downloadBlob(blob, zipName); return files.length; });
+    });
+  }
+  function drawingsKey(rows) { return rows.map(function (r) { return r.id; }).join('|'); }
+  /** 내 정보 › 그림 "모두 저장": 한 장씩. 모바일은 파일을 먼저 받아 두고, 한 번 더 누르면 공유 시트(사진에 저장)를 연다 */
+  function saveAllDrawings() {
+    var rows = vault.rows || []; if (!rows.length || vault.busy) return;
+    var prep = vault.prepared;
+    if (prep && prep.key === drawingsKey(rows)) {
+      vault.prepared = null; renderMeGallery();
+      saveManyFiles(prep.list, '내 그림').then(function (how) { if (how === 'downloaded') toast('그림 ' + prep.list.length + '장을 한 장씩 저장했어요', 'ok'); });
+      return;
+    }
+    vault.busy = true; vault.prepared = null; renderMeGallery();
+    toast('그림 ' + rows.length + '장을 준비하는 중…');
+    fetchDrawingFiles(rows)
+      .then(function (list) {
+        if (!list.length) { toast('받을 수 있는 그림이 없어요', 'error'); return; }
+        if (canShareFiles(toFiles(list))) {
+          vault.prepared = { key: drawingsKey(rows), list: list };
+          toast('준비됐어요. "' + list.length + '장 저장하기"를 눌러 주세요', 'ok');
+          return;
+        }
+        return downloadSequential(list).then(function () { toast('그림 ' + list.length + '장을 한 장씩 저장했어요', 'ok'); });
+      })
+      .catch(function (e) { acctErr(e, '그림을 받지 못했어요'); })
+      .then(function () { vault.busy = false; renderMeGallery(); });
   }
   function stampNow() { var d = new Date(), p2 = function (x) { return (x < 10 ? '0' : '') + x; }; return d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()); }
   /** 가득 참: 오래된 그림 need 장을 ZIP 으로 받고 지운 뒤 이번 그림 저장 */
@@ -942,6 +1039,13 @@
     show('drawings-full', n >= MAX_DRAWINGS);
     var cnt = $('drawings-count'); if (cnt) cnt.textContent = vault.rows && !vault.unavailable ? n + ' / ' + MAX_DRAWINGS : '';
     var zb = $('btn-drawings-zip'); if (zb) { zb.hidden = !n || vault.unavailable; zb.disabled = vault.busy; }
+    var ab = $('btn-drawings-all');
+    if (ab) {
+      ab.hidden = !n || vault.unavailable; ab.disabled = vault.busy;
+      var ready = vault.prepared && vault.prepared.key === drawingsKey(rows);
+      ab.textContent = vault.busy ? '준비하는 중…' : ready ? vault.prepared.list.length + '장 저장하기' : '모두 저장';
+      ab.classList.toggle('btn-primary', !!ready); ab.classList.toggle('btn-secondary', !ready);
+    }
     var grid = $('drawings-grid'); if (!grid) return;
     var key = vault.unavailable ? '' : rows.map(function (r) { return r.id + ':' + (r.url ? 1 : 0); }).join('|');
     if (grid.getAttribute('data-key') === key) return;
@@ -1060,8 +1164,11 @@
     renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderResultsSave(); renderChatPeek(); renderAccount();
   }
 
+  function canEndGame() { return inRoom && isHost() && (state.phase === 'choosing' || state.phase === 'drawing' || state.phase === 'turnEnd'); }
   function renderTopbar() {
     var rc = $('room-code'); if (rc) rc.textContent = state.roomCode || '----';
+    var beg = $('btn-end-game'); if (beg) beg.hidden = !canEndGame();
+    if (leaveDialogOpen() && leaveIntent === 'end' && !canEndGame()) closeLeaveDialog(); // 그 사이 게임이 끝났거나 방장이 바뀜
     var ri = $('round-indicator');
     if (ri) {
       if (state.phase === 'lobby') ri.textContent = '대기실';
@@ -1974,10 +2081,14 @@
   var leaveIntent = null; // null = 방 나가기(메인) · 'me' = 방에서 나가 내 정보로
   function openLeaveDialog(intent) {
     var d = $('overlay-leave'); if (!d || !inRoom) return;
-    leaveIntent = intent === 'me' ? 'me' : null;
+    leaveIntent = intent === 'me' || intent === 'end' ? intent : null;
     var game = state.phase !== 'lobby';
     var title = $('leave-title'), desc = $('leave-desc'), ok0 = $('btn-leave-confirm');
-    if (leaveIntent === 'me') {
+    if (leaveIntent === 'end') {
+      if (title) title.textContent = '게임을 끝낼까요?';
+      if (desc) desc.textContent = '모두 바로 대기실로 돌아가요. 이번 게임의 결과와 그림은 남지 않아요.';
+      if (ok0) ok0.textContent = '게임 끝내기';
+    } else if (leaveIntent === 'me') {
       if (title) title.textContent = '내 정보로 이동할까요?';
       if (desc) desc.textContent = '내 정보는 방 밖에서 볼 수 있어요. ' + (game ? '진행 중인 게임에서 빠지고 점수는 사라져요.' : '대기실에서 나가 내 정보로 이동해요.');
       if (ok0) ok0.textContent = '나가고 이동';
@@ -2119,15 +2230,18 @@
       catch (e) { toast('이미지를 만들지 못했어요', 'error'); }
     });
     var gm = $('overlay-gallery'); if (gm) gm.addEventListener('click', function (e) { if (e.target === gm) closeGallery(); });
+    var ga = $('btn-gallery-all'); if (ga) ga.addEventListener('click', saveGalleryAll);
     var lc = $('btn-leave-cancel'); if (lc) lc.addEventListener('click', closeLeaveDialog);
     var lo = $('btn-leave-confirm'); if (lo) lo.addEventListener('click', function () {
       var intent = leaveIntent;
       closeLeaveDialog();
       if (!inRoom) return;
+      if (intent === 'end') { if (canEndGame()) emit('game:end'); return; }
       resetToLanding(true);
       if (intent === 'me') goStep('me', true, { from: 'room' });
     });
     var rpb = $('btn-room-profile'); if (rpb) rpb.addEventListener('click', function () { closeSheet(true); openRoomProfile(); });
+    var beg = $('btn-end-game'); if (beg) beg.addEventListener('click', function () { closeSheet(true); if (canEndGame()) openLeaveDialog('end'); });
     var rpc = $('btn-room-profile-close'); if (rpc) rpc.addEventListener('click', function () { closeRoomProfile(); });
     var rpo = $('overlay-profile'); if (rpo) rpo.addEventListener('click', function (e) { if (e.target === rpo) closeRoomProfile(); });
     var ld = $('overlay-leave'); if (ld) ld.addEventListener('click', function (e) { if (e.target === ld) closeLeaveDialog(); });
@@ -2194,6 +2308,9 @@
     else { placeNode(chip, left, copy && copy.parentNode === left ? copy : null); placeNode(copy, left); }
     if (mobile) { placeNode(sound, $('menu-slot-sound')); placeNode(leave, $('menu-slot-leave')); }
     else { placeNode(sound, right, leave && leave.parentNode === right ? leave : menu); placeNode(leave, right, menu); }
+    var endBtn = $('btn-end-game');
+    if (mobile) placeNode(endBtn, $('menu-slot-end'));
+    else placeNode(endBtn, right, right ? right.querySelector('#btn-room-profile') : null);
     var profBtn = $('btn-room-profile');
     if (mobile) placeNode(profBtn, $('menu-slot-profile'));
     else placeNode(profBtn, right, sound && sound.parentNode === right ? sound : (leave && leave.parentNode === right ? leave : menu));
@@ -2887,6 +3004,7 @@
     ['btn-account-open', 'btn-account-top'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', openAccount); });
     ['btn-logout', 'btn-mp-logout'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', doSignOut); });
     var dz = $('btn-drawings-zip'); if (dz) dz.addEventListener('click', downloadAllDrawings);
+    var da = $('btn-drawings-all'); if (da) da.addEventListener('click', saveAllDrawings);
     var dvc = $('btn-dv-close'); if (dvc) dvc.addEventListener('click', closeDrawing);
     var dvd = $('btn-dv-download'); if (dvd) dvd.addEventListener('click', function () { if (vault.viewing) downloadDrawingRow(vault.viewing); });
     var dvx = $('btn-dv-delete'); if (dvx) dvx.addEventListener('click', function () { if (vault.viewing) deleteDrawingRow(vault.viewing); });

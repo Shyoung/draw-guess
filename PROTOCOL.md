@@ -62,6 +62,7 @@
 | `results:done` | – | 게임 종료 결과 화면을 닫음(본인). `players[].atResults` 가 false 로 바뀜 |
 | `lobby:step` | `{ step:'mode'\|'settings' }` | 호스트, lobby. 대기실 화면 단계 전환. 방을 만들면 `mode`, 게임이 끝나 돌아오면 `settings`(모드 유지) |
 | `game:start` | – | 호스트, lobby, 접속 플레이어 ≥ 2. fixed 모드는 출제자가 접속 중이어야 함 |
+| `game:end` | – | 호스트, 게임 중(choosing / drawing / turnEnd). 즉시 끝내고 모두 lobby 로 — 결과 화면·갤러리 없음(점수는 다음 `game:start` 까지 표시만). 방 전체에 `game:aborted` → `room:state` → 시스템 메시지 |
 | `word:choose` | `{ word }` | 출제자, choosing 단계, 제시된 후보 중 하나여야 함 |
 | `draw:start` | `{ tool:'pen'\|'eraser', color:'#rrggbb', size:number, x, y }` | 출제자, drawing 단계 |
 | `draw:move` | `{ pts: [[x,y], ...] }` | 배치(≈16~30ms 단위) |
@@ -97,6 +98,7 @@
 | `game:hint` | `{ wordMask, category? }` | 초성 공개 갱신 (출제자·이미 정답을 맞힌 사람 제외). 누군가 정답을 맞히면 그 사람에게만 별도로 `wordMask`가 실제 글자로 전체 공개된 `game:hint`가 온다(초성이 아님) |
 | `game:timer` | `{ timeLeft }` | 매 1초 (choosing / drawing 단계) |
 | `game:turnEnd` | `{ word, reason:'time'\|'allGuessed'\|'drawerLeft'\|'notEnoughPlayers', deltas:[{ id, delta }], timeLeft }` | 5초간 표시. `deltas`에는 이번 턴 획득 점수(0 포함 전원) |
+| `game:aborted` | `{ by }` | 방장(`by` = 이름)이 `game:end` 로 게임을 끝냄. 클라이언트는 턴/단어/오버레이를 지우고 대기실을 그린다(결과 화면 없음) |
 | `game:over` | `{ ranking:[{ id, name, avatar, score }], mode, drawer?:{ id, name, avatar }, gallery:[{ round, word, category, drawerId, drawerName, guessed, ops, trimmed? }] }` | 점수 내림차순. 이후 방은 **즉시** lobby 로 돌아가지만 모든 플레이어의 `atResults` 가 true 로 설정되어 각자 `results:done` 을 보낼 때까지 결과 화면을 유지한다. 접속 중인 누군가가 `atResults` 이면 `game:start` 는 거부된다. `gallery`는 이 게임에서 실제로 그린 턴들의 (제시어, 그림 ops) 기록 — 클라이언트가 갤러리로 렌더링하고 PNG로 저장. 전체가 약 1.5MB를 넘으면 오래된 턴의 `ops`를 비우고 `trimmed:true`. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
 
 ### 드로잉 (출제자를 제외한 방 전체에 그대로 중계)

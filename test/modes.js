@@ -194,6 +194,36 @@ const lastState = (c) => { const e = c.log.filter((x) => x.ev === 'room:state').
   const noHint = !b2.log.some((e) => e.ev === 'game:hint' && e.payload && (e.payload.wordMask || '').replace(/ /g, '') !== bd1.word);
   check('blitz: no choseong hints were sent (hints setting ignored)', noHint);
 
+  // ── 방장이 게임 즉시 끝내기(game:end) ──────────────────────────
+  const e1 = await connect('E1'), e2 = await connect('E2'), e3 = await connect('E3');
+  const ec = await emitAck(e1, 'room:create', { name: '끝방장', avatar: {}, token: 'tok-e1-end-00000001' });
+  await emitAck(e2, 'room:join', { roomCode: ec.roomCode, name: '끝둘', avatar: {}, token: 'tok-e2-end-00000002' });
+  await emitAck(e3, 'room:join', { roomCode: ec.roomCode, name: '끝셋', avatar: {}, token: 'tok-e3-end-00000003' });
+  const lobbyErrP = waitNext(e1, 'error:msg', undefined, 3000, 'end in lobby');
+  e1.emit('game:end');
+  check('game:end in lobby → error', /진행 중인 게임/.test((await lobbyErrP).message));
+  e1.emit('room:settings', { settings: { mode: 'classic', rounds: 2, drawTime: 30, customWords: '자전거,냉장고,해바라기,고슴도치,선풍기', customWordsOnly: true } });
+  const eChoose = waitNext(e2, 'game:choosing', undefined, 5000, 'end choosing');
+  e1.emit('game:start');
+  await eChoose;
+  const nonHostErrP = waitNext(e2, 'error:msg', undefined, 3000, 'end non-host');
+  e2.emit('game:end');
+  check('game:end by non-host → error', /방장만/.test((await nonHostErrP).message));
+  const abortedP = [e1, e2, e3].map((c) => waitNext(c, 'game:aborted', undefined, 3000, 'aborted'));
+  const lobbyStP = waitNext(e3, 'room:state', (st) => st.phase === 'lobby', 3000, 'aborted lobby');
+  const sysP = waitNext(e2, 'chat:message', (m) => m.kind === 'system' && /게임을 끝냈어요/.test(m.text), 3000, 'aborted system');
+  const noOverP = waitNext(e2, 'game:over', undefined, 1500).then(() => true).catch(() => false);
+  e1.emit('game:end');
+  const ab = await Promise.all(abortedP);
+  check('game:end: everyone gets game:aborted {by: host name}', ab.every((x) => x.by === '끝방장'), ab);
+  const lst = await lobbyStP;
+  check('game:end: room back to lobby · no drawer · round 0 · nobody at results', lst.phase === 'lobby' && lst.drawerId === null && lst.round === 0 && lst.players.every((p) => !p.atResults && !p.isDrawing), lst);
+  check('game:end: system message', !!(await sysP));
+  check('game:end: no game:over (no results screen)', (await noOverP) === false);
+  const restartP = waitNext(e2, 'game:choosing', undefined, 5000, 'restart after end');
+  e1.emit('game:start');
+  check('game:end: host can start a new game right away', !!(await restartP.catch(() => null)));
+
   cleanup(failures ? 1 : 0);
 })().catch((err) => {
   check(`unexpected error: ${err && err.message}`, false, err && err.stack);

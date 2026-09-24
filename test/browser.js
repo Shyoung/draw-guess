@@ -402,7 +402,11 @@ async function say(page, text) {
     check(nonWhiteThumb > 500, '첫 장 썸네일에 실제 그림 픽셀', nonWhiteThumb);
     const words = await host.$$eval('#gallery-grid .gallery-word', (els) => els.map((e) => e.firstChild.textContent.trim()));
     check(words.every((w) => w.length > 0), '갤러리 카드마다 제시어 표시', words);
-    check((await host.locator('#gallery-grid .gallery-item .btn').count()) === 3 && await host.locator('#btn-gallery-sheet').isVisible(), '개별 PNG 저장 버튼 3개 + 전체 저장 버튼');
+    check((await host.locator('#gallery-grid .gallery-item .btn').count()) === 3 && await host.locator('#btn-gallery-all').isVisible() && await host.locator('#btn-gallery-sheet').isVisible(), '개별 PNG 저장 버튼 3개 + "모두 저장" + "한 장으로 모아 저장"');
+    // 카드마다 저장 버튼이 카드 안에 온전히 보인다(행이 줄어 잘리지 않음)
+    const cardFit = await host.$$eval('#gallery-grid .gallery-item', (cards) => cards.every((c) => { const r = c.getBoundingClientRect(), b = c.querySelector('.btn').getBoundingClientRect(); return b.top >= r.top && b.bottom <= r.bottom + 0.5 && b.height > 20; }));
+    check(cardFit, '갤러리: 저장 버튼이 카드 안에 온전히');
+    check((await host.textContent('#btn-gallery-all')).includes('3장'), '"모두 저장 (3장)" 표시', await host.textContent('#btn-gallery-all'));
     // 다운로드가 실제로 일어나는지 (Playwright download 이벤트)
     const dlPromise = host.waitForEvent('download', { timeout: 5000 }).catch(() => null);
     await host.locator('#gallery-grid .gallery-item .btn').first().click();
@@ -411,7 +415,16 @@ async function say(page, text) {
     const dlSheet = host.waitForEvent('download', { timeout: 5000 }).catch(() => null);
     await host.click('#btn-gallery-sheet');
     const ds = await dlSheet;
-    check(!!ds && /전체\.png$/.test(ds.suggestedFilename()), '전체 시트 PNG 다운로드', ds && ds.suggestedFilename());
+    check(!!ds && /전체\.png$/.test(ds.suggestedFilename()), '한 장으로 모아 저장: 시트 PNG 다운로드', ds && ds.suggestedFilename());
+    // 모두 저장(데스크톱): 그림마다 PNG 한 장씩 — 다운로드 3번
+    const allNames = [];
+    const onDl = (d) => allNames.push(d.suggestedFilename());
+    host.on('download', onDl);
+    await host.click('#btn-gallery-all');
+    await host.waitForFunction(() => true, null, { timeout: 100 });
+    for (let i = 0; i < 30 && allNames.length < 3; i++) await sleep(100);
+    host.off('download', onDl);
+    check(allNames.length === 3 && allNames.every((n) => /\.png$/.test(n)) && new Set(allNames).size === 3, '모두 저장: PNG 3장을 한 장씩', allNames);
     await host.screenshot({ path: path.join(SHOTS, 'e2e-gallery.png') });
     await host.click('#btn-gallery-close');
     check(await host.locator('#overlay-gallery').isHidden(), '갤러리 닫기');
@@ -436,6 +449,35 @@ async function say(page, text) {
     check(await host.locator('#btn-start').isVisible(), '게임 종료 후 로비 복귀');
     check(await host.locator('#btn-gallery-lobby').isVisible(), '로비에 "지난 게임 그림 갤러리" 버튼 유지');
     check(await host.locator('#mode-panel').isHidden() && (await host.locator('#mode-badge').textContent()).includes('돌아가며'), '게임 종료 후 대기실은 설정 화면 + 모드 유지');
+
+    // 방장: 게임 즉시 끝내기 → 모두 대기실(결과 화면 없음)
+    check(await host.locator('#btn-end-game').isHidden(), '대기실에서는 "게임 끝내기" 버튼 없음');
+    await host.click('#btn-start');
+    await p2.waitForFunction(() => ['choosing', 'drawing'].includes(window.__dg.state.phase), null, { timeout: 8000 });
+    await host.waitForSelector('#btn-end-game:not([hidden])', { timeout: 3000 });
+    check(await host.locator('#btn-end-game').isVisible() && await p2.locator('#btn-end-game').isHidden(), '게임 중: 방장에게만 "게임 끝내기"(아이콘)');
+    check((await host.getAttribute('#btn-end-game', 'aria-label')) === '게임 끝내기' && (await host.locator('.topbar #btn-end-game svg').count()) === 1, '"게임 끝내기": 아이콘 + aria-label');
+    await host.click('#btn-end-game');
+    await host.waitForSelector('#overlay-leave:not([hidden])', { timeout: 2000 });
+    check((await host.textContent('#leave-title')) === '게임을 끝낼까요?' && (await host.textContent('#btn-leave-confirm')) === '게임 끝내기', '게임 끝내기: 확인 창');
+    await host.click('#btn-leave-cancel');
+    check(await host.evaluate(() => window.__dg.state.phase !== 'lobby'), '게임 끝내기 취소: 게임 계속');
+    await host.click('#btn-end-game');
+    await host.waitForSelector('#overlay-leave:not([hidden])', { timeout: 2000 });
+    await host.click('#btn-leave-confirm');
+    await p2.waitForFunction(() => window.__dg.state.phase === 'lobby', null, { timeout: 3000 }).catch(() => {});
+    await sleep(300);
+    for (const [i, pg] of names.entries()) {
+      check(await pg.evaluate(() => window.__dg.state.phase === 'lobby') && await pg.locator('#overlay-gameover').isHidden() && await pg.locator('#overlay-choosing').isHidden(), `게임 끝내기: ${nick[i]} 대기실 · 결과 화면 없음`);
+    }
+    check((await p2.locator('#toasts .toast').filter({ hasText: '호스트님이 게임을 끝냈어요' }).count()) >= 1, '게임 끝내기: 다른 사람에게 "호스트님이 게임을 끝냈어요"');
+    check(await host.locator('#btn-end-game').isHidden() && await host.locator('#settings-panel').isVisible(), '게임 끝내기 뒤: 버튼 숨김 · 설정 화면');
+
+    // 헤더 아이콘 버튼: 이름은 aria-label/title, 글자는 숨김
+    for (const id of ['btn-room-profile', 'btn-leave']) {
+      const info = await host.evaluate((id) => { const b = document.getElementById(id); const l = b.querySelector('.btn-label'); return { svg: !!b.querySelector('svg'), label: b.getAttribute('aria-label'), title: b.title, shown: !!l && getComputedStyle(l).display !== 'none' }; }, id);
+      check(info.svg && info.label && info.title && !info.shown, `헤더 ${id}: 아이콘만(이름은 aria-label · title)`, info);
+    }
 
     // 나가기 → 호스트 이전
     await host.click('#btn-leave');

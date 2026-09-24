@@ -274,13 +274,13 @@
   ];
   var scene = (new URLSearchParams(location.search).get('scene') || '').trim();
   var target = -1; steps.forEach(function (s, i) { if (s.label === scene) target = i; });
-  var idx = 0, pending = null, started = false;
+  var idx = 0, pending = null, started = false, stopped = false;
   function advance() {
     var s = steps[idx]; if (!s) return;
     var fast = idx <= target;
     if ((s.manual || (stayLobby && s.label === 'choosing')) && !fast) { pending = s; return; }
     idx++;
-    setTimeout(function () { s.run(); advance(); }, fast ? 0 : (s.delay || 0));
+    setTimeout(function () { if (stopped) return; s.run(); advance(); }, fast ? 0 : (s.delay || 0));
   }
   function resume(label) { if (pending && pending.label === label) { var s = pending; pending = null; idx++; s.run(); advance(); } }
   function norm(t) { return String(t || '').trim().toLowerCase().replace(/\s+/g, ' '); }
@@ -311,6 +311,10 @@
         if (i > 0) { chat('system', players[i].name + '님이 강퇴되었어요'); players.splice(i, 1); fire('room:state', st()); }
       } else if (ev === 'game:start') { if (pending && pending.label === 'choosing') resume('choosing'); else if (idx === 1) { idx = 2; steps[1].run(); } }
       else if (ev === 'auth:token') { if (started) fire('room:state', st()); }
+      else if (ev === 'game:end') {
+        if (room.phase === 'lobby' || room.phase === 'gameOver') fire('error:msg', { message: '진행 중인 게임이 없어요.' });
+        else { stopped = true; pending = null; fire('game:aborted', { by: players[0].name }); room.round = 0; timeLeft = 0; setPhase('lobby', null); chat('system', players[0].name + '님이 게임을 끝냈어요. 대기실로 돌아왔어요.'); }
+      }
       else if (ev === 'player:update' && payload) {
         if (room.phase !== 'lobby') { if (ack) ack({ ok: false, error: '대기실에서만 바꿀 수 있어요' }); }
         else {

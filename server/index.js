@@ -481,6 +481,14 @@ io.on('connection', (socket) => {
     if (err) fail(err);
   });
 
+  // game:end — 호스트, 게임 중: 즉시 끝내고 모두 대기실로 (결과 화면 없음)
+  on('game:end', () => {
+    const room = currentRoom();
+    if (!room) return fail('방에 참가하지 않았습니다.');
+    const err = room.abort(pid());
+    if (err) fail(err);
+  });
+
   // game:start — 호스트, lobby, 2명 이상
   on('game:start', () => {
     const room = currentRoom();
