@@ -13,7 +13,12 @@
      getSession(), getUser(), getProfile(), getToken()
      signIn('google'|'kakao'): Promise   OAuth 리다이렉트 시작 (redirectTo = origin + pathname)
      signOut(): Promise
-     updateProfile({ nickname?, avatar_emoji?, avatar_color? }): Promise<profile>
+     updateProfile({ nickname?, avatar_emoji?, avatar_color?, avatar_mode?: 'photo'|'emoji', avatar_url?: string|null }): Promise<profile>
+                                         avatar_url 이 바뀌면 이전에 올린 사진(본인 폴더 avatars/<uid>/… 만)은 지운다(best-effort)
+     uploadAvatar(file|blob): Promise<publicUrl>
+                                         가운데 정사각형으로 잘라 256×256 · image/webp(안 되면 jpeg) · 1MB 이하로 만들어
+                                         Storage 'avatars' 버킷 <uid>/avatar-<timestamp>.webp 에 upsert 후 공개 URL 을 준다.
+                                         저장(updateProfile) 전에 다시 올리면 앞서 올린 사진은 지운다
      listWordSets(): Promise<[{ id, name, words[], updated_at, created_at }]>
      saveWordSet({ id?, name, words: string[]|string }): Promise<set>   id 있으면 수정, 없으면 생성
      deleteWordSet(id): Promise<true>
@@ -27,6 +32,9 @@
 
   var LIB_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
   var MAX_SETS = 20, MAX_WORDS = 500, MAX_NAME = 30, MAX_NICK = 12;
+  var AVATAR_BUCKET = 'avatars', AVATAR_SIZE = 256, AVATAR_MAX_BYTES = 1024 * 1024, AVATAR_MAX_INPUT = 25 * 1024 * 1024;
+  var uploaded = {};        // 이 세션에서 올린 사진 공개 URL → 저장소 경로
+  var pendingUpload = null; // 올렸지만 아직 프로필에 저장하지 않은 사진 URL
 
   var enabled = false;      // 클라이언트가 만들어져 실제로 쓸 수 있는 상태
   var client = null, session = null, user = null, profile = null;
@@ -99,7 +107,12 @@
       .then(function (row) {
         if (row) return row;
         var nick = String(u.name || '플레이어').trim().slice(0, MAX_NICK) || '플레이어';
-        return client.from('profiles').insert({ user_id: uid, nickname: nick, avatar_url: u.avatarUrl || null }).select().single().then(unwrap);
+        var pic = u.avatarUrl || null;
+        var row = { user_id: uid, nickname: nick, avatar_url: pic, social_avatar_url: pic, avatar_mode: pic ? 'photo' : 'emoji' };
+        return client.from('profiles').insert(row).select().single().then(unwrap).catch(function (e) {
+          if (!isMissingColumn(e)) throw e; // 0002 마이그레이션 전 DB → 기존 컬럼만으로
+          return client.from('profiles').insert({ user_id: uid, nickname: nick, avatar_url: pic }).select().single().then(unwrap);
+        });
       })
       .then(function (row) {
         if (user && user.id === uid) { profile = row || null; notify(); }
@@ -193,13 +206,125 @@
     }
     if (patch && 'avatar_emoji' in patch) p.avatar_emoji = patch.avatar_emoji ? String(patch.avatar_emoji).slice(0, 8) : null;
     if (patch && 'avatar_color' in patch) p.avatar_color = /^#[0-9a-fA-F]{6}$/.test(String(patch.avatar_color || '')) ? patch.avatar_color : null;
+    if (patch && 'avatar_mode' in patch) p.avatar_mode = patch.avatar_mode === 'emoji' ? 'emoji' : 'photo';
+    if (patch && 'avatar_url' in patch) p.avatar_url = validImgUrl(patch.avatar_url) ? patch.avatar_url : null;
     if (!Object.keys(p).length) return Promise.resolve(profile);
     var uid = user.id;
+    var oldUrl = null;
     return Promise.resolve(profileLoading).then(function () {
-      return client.from('profiles').update(p).eq('user_id', uid).select().single();
-    }).then(unwrap).then(function (row) {
+      oldUrl = profile && profile.user_id === uid ? profile.avatar_url || null : null;
+      return client.from('profiles').update(p).eq('user_id', uid).select().single().then(unwrap).catch(function (e) {
+        // 0002 마이그레이션 전 DB(avatar_mode 컬럼 없음) → 그 컬럼만 빼고 다시
+        if (!('avatar_mode' in p) || !isMissingColumn(e)) throw e;
+        var q = Object.assign({}, p); delete q.avatar_mode;
+        if (!Object.keys(q).length) return profile;
+        return client.from('profiles').update(q).eq('user_id', uid).select().single().then(unwrap);
+      });
+    }).then(function (row) {
       if (user && user.id === uid) { profile = row || Object.assign({}, profile || {}, p, { user_id: uid }); notify(); }
+      if ('avatar_url' in p) {
+        // 바꾼 뒤에는 쓰지 않는 사진(이전 프로필 사진 · 올리고 저장하지 않은 사진)을 지운다 — 본인 폴더의 파일만
+        if (oldUrl && oldUrl !== p.avatar_url) removeOwnAvatar(oldUrl, uid);
+        if (pendingUpload && pendingUpload !== p.avatar_url) removeOwnAvatar(pendingUpload, uid);
+        pendingUpload = null;
+      }
       return profile;
+    });
+  }
+
+  // ── 프로필 사진 ─────────────────────────────────────────────
+  function isMissingColumn(e) {
+    var m = errMsg(e, '');
+    return /avatar_mode|social_avatar_url/.test(m) && /column|schema/i.test(m);
+  }
+  /** 프로필에 저장할 수 있는 사진 주소: http(s) · (개발 모크용) data:image/ · blob: */
+  function validImgUrl(u) {
+    return typeof u === 'string' && u.length > 0 && u.length <= 2048 && /^(https?:\/\/|data:image\/|blob:)/i.test(u);
+  }
+  /** 우리 버킷의 본인 폴더(<uid>/…) 파일이면 저장소 경로, 아니면 null (소셜 사진 등은 절대 건드리지 않는다) */
+  function ownAvatarPath(url, uid) {
+    if (!url || !uid) return null;
+    var p = uploaded[url] || null;
+    if (!p) {
+      var c = config(), marker = '/storage/v1/object/public/' + AVATAR_BUCKET + '/';
+      var base = c ? String(c.supabaseUrl).replace(/\/+$/, '') : '';
+      if (!base || String(url).indexOf(base + marker) !== 0) return null;
+      p = String(url).slice((base + marker).length).split(/[?#]/)[0];
+      try { p = decodeURIComponent(p); } catch (e) { return null; }
+    }
+    if (p.indexOf(uid + '/') !== 0 || p.indexOf('..') !== -1) return null;
+    return p;
+  }
+  function removeOwnAvatar(url, uid) {
+    var path = ownAvatarPath(url, uid);
+    if (!path || !client || !client.storage) return;
+    Promise.resolve().then(function () { return client.storage.from(AVATAR_BUCKET).remove([path]); })
+      .then(function (res) {
+        if (res && res.error) console.warn('[account] avatar remove:', errMsg(res.error, res.error));
+        else delete uploaded[url];
+      })
+      .catch(function (e) { console.warn('[account] avatar remove failed:', errMsg(e, e)); });
+  }
+  function loadImage(blob) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(blob), img = new Image();
+      img.onload = function () { resolve({ img: img, url: url }); };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('이미지를 읽지 못했어요')); };
+      img.src = url;
+    });
+  }
+  function canvasBlob(canvas, type, quality) {
+    return new Promise(function (resolve) {
+      try { canvas.toBlob(function (b) { resolve(b); }, type, quality); } catch (e) { resolve(null); }
+    });
+  }
+  /** 가운데 정사각형으로 잘라 256×256 으로 줄이고 webp(지원 안 하면 jpeg)로, 1MB 이하가 될 때까지 품질을 낮춘다 */
+  function prepareAvatar(file) {
+    if (!file || typeof file.size !== 'number') return fail('사진 파일을 골라주세요');
+    if (file.type && !/^image\//.test(file.type)) return fail('이미지 파일만 올릴 수 있어요');
+    if (file.size > AVATAR_MAX_INPUT) return fail('사진이 너무 커요 (25MB 이하)');
+    return loadImage(file).then(function (r) {
+      var img = r.img, w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+      if (!w || !h) { URL.revokeObjectURL(r.url); throw new Error('이미지를 읽지 못했어요'); }
+      var s = Math.min(w, h), c = document.createElement('canvas');
+      c.width = c.height = AVATAR_SIZE;
+      var g = c.getContext('2d');
+      g.fillStyle = '#ffffff'; g.fillRect(0, 0, AVATAR_SIZE, AVATAR_SIZE); // 투명 PNG → jpeg 대비
+      g.imageSmoothingEnabled = true; try { g.imageSmoothingQuality = 'high'; } catch (e) { /* ignore */ }
+      g.drawImage(img, (w - s) / 2, (h - s) / 2, s, s, 0, 0, AVATAR_SIZE, AVATAR_SIZE);
+      URL.revokeObjectURL(r.url);
+      var tries = [['image/webp', 0.86], ['image/webp', 0.7], ['image/jpeg', 0.88], ['image/jpeg', 0.7], ['image/jpeg', 0.5]], i = 0;
+      function next() {
+        if (i >= tries.length) return Promise.reject(new Error('사진을 1MB 이하로 줄이지 못했어요'));
+        var t = tries[i++];
+        return canvasBlob(c, t[0], t[1]).then(function (b) {
+          // 브라우저가 webp 를 못 만들면 png 를 돌려주므로 타입까지 확인한다
+          return b && b.type === t[0] && b.size <= AVATAR_MAX_BYTES ? b : next();
+        });
+      }
+      return next();
+    });
+  }
+  function uploadAvatar(file) {
+    var err = requireLogin(); if (err) return err;
+    if (!client.storage || typeof client.storage.from !== 'function') return fail('사진 저장소를 쓸 수 없어요');
+    var uid = user.id;
+    return prepareAvatar(file).then(function (blob) {
+      if (!user || user.id !== uid) throw new Error('로그인이 필요해요');
+      var path = uid + '/avatar-' + Date.now() + (blob.type === 'image/webp' ? '.webp' : '.jpg');
+      var bucket = client.storage.from(AVATAR_BUCKET);
+      return Promise.resolve(bucket.upload(path, blob, { upsert: true, contentType: blob.type, cacheControl: '31536000' }))
+        .then(unwrap)
+        .then(function () {
+          var res = bucket.getPublicUrl(path);
+          var url = res && res.data ? res.data.publicUrl : null;
+          if (!url) throw new Error('사진 주소를 받지 못했어요');
+          uploaded[url] = path;
+          // 저장하기 전에 또 올렸다면, 앞서 올리고 저장하지 않은 사진은 지운다(프로필에 저장된 사진은 남긴다)
+          if (pendingUpload && pendingUpload !== url && (!profile || profile.avatar_url !== pendingUpload)) removeOwnAvatar(pendingUpload, uid);
+          pendingUpload = url;
+          return url;
+        });
     });
   }
 
@@ -270,6 +395,7 @@
     signIn: signIn,
     signOut: signOut,
     updateProfile: updateProfile,
+    uploadAvatar: uploadAvatar,
     listWordSets: listWordSets,
     saveWordSet: saveWordSet,
     deleteWordSet: deleteWordSet,

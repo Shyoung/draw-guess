@@ -50,8 +50,9 @@ async function joinAs(context, nick, code) {
   page.on('pageerror', (e) => { console.log(`[${nick}] pageerror: ${e.message}`); failures++; });
   page.on('console', (m) => { if (m.type() === 'error') console.log(`[${nick}] console.error: ${m.text()}`); });
   await page.goto(code ? `${URL}/?room=${code}` : URL + '/');
-  // 랜딩 1단계(프로필) → "다음" → 2단계(방)
+  // 랜딩: 로그인 꺼짐(Supabase 미설정)이라 시작 단계를 건너뛰고 프로필 설정 → "다음" → 방
   await page.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 });
+  check(await page.locator('#landing-step-start').isHidden() && await page.locator('#avatar-mode').isHidden(), `${nick}: 로그인 꺼짐 → 시작 단계 없이 프로필 설정(사진 탭 없음)`);
   await page.fill('#nick', nick);
   await page.click('#btn-profile-next');
   await page.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
@@ -63,6 +64,8 @@ async function joinAs(context, nick, code) {
     await page.click('#btn-create');
   }
   await page.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
+  await page.waitForFunction(() => document.querySelectorAll('#player-list li.me').length === 1, null, { timeout: 5000 }).catch(() => {});
+  check((await page.locator('#player-list .avatar img').count()) === 0, `${nick}: 게스트 아바타는 이모지(사진 없음)`);
   return page;
 }
 

@@ -89,9 +89,21 @@ ul, ol { padding: 0; list-style: none; }
 
 /* ---------- Landing ---------- */
 .landing {
-  position: relative; min-height: 100vh;
-  display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 32px 16px; overflow: hidden;
+  position: relative; min-height: 100vh; min-height: 100dvh;
+  display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr auto; place-items: center;
+  padding: 32px 16px 0; overflow: hidden;
+  overflow: clip; /* 스크롤 컨테이너가 아니게: 넘친 배경 blob 때문에 포커스/클릭으로 카드가 밀려 보이지 않도록 */
 }
+/* 개인정보 처리방침: 카드 밖, 페이지 맨 아래 가운데. 약하게(작게 · 흐리게 · 밑줄은 hover 때만) */
+.landing-foot {
+  position: relative; width: 100%; display: flex; justify-content: center;
+  padding: 18px 0 max(14px, env(safe-area-inset-bottom));
+}
+.privacy-link {
+  font-size: 12px; font-weight: 500; color: var(--muted); opacity: .8; text-decoration: none;
+  padding: 4px 6px; border-radius: 6px;
+}
+.privacy-link:hover, .privacy-link:focus-visible { text-decoration: underline; text-underline-offset: 2px; opacity: 1; }
 .blob {
   position: absolute; border-radius: 50%; filter: blur(30px); opacity: .55; pointer-events: none;
   animation: float 9s ease-in-out infinite alternate;
@@ -114,7 +126,7 @@ ul, ol { padding: 0; list-style: none; }
 .logo-pencil { display: inline-block; font-size: 36px; animation: wiggle 2.4s ease-in-out infinite; transform-origin: 70% 70%; }
 @keyframes wiggle { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(10deg); } }
 .logo-text em { font-style: normal; color: var(--primary); }
-.tagline { text-align: center; color: var(--muted); margin-top: -10px; font-size: 15px; }
+
 
 .profile { display: flex; align-items: center; gap: 14px; }
 .avatar-preview {
@@ -902,8 +914,7 @@ body.sheet-open { overflow: hidden; }
    계정 — 로그인(랜딩) · 계정 칩 · 내 정보(모달/시트) · 단어 세트
    로그인 기능이 꺼져 있으면 관련 노드는 모두 hidden 이라 아무것도 그려지지 않는다.
    ===================================================================== */
-.auth-area { display: flex; flex-direction: column; gap: 10px; }
-.auth-buttons { display: flex; flex-direction: column; gap: 8px; }
+.auth-buttons { display: flex; flex-direction: column; gap: 10px; }
 .btn-google { background: #fff; color: #1f1f1f; box-shadow: inset 0 0 0 1px #dadce0, var(--shadow-sm); }
 .btn-google:hover:not(:disabled) { background: #f8f9fa; }
 .g-glyph {
@@ -915,21 +926,8 @@ body.sheet-open { overflow: hidden; }
 .btn-kakao { background: #FEE500; color: #000000; box-shadow: 0 6px 16px rgba(254, 229, 0, 0.35); }
 .btn-kakao:hover:not(:disabled) { background: #f4dc00; }
 .k-glyph { font-size: 16px; line-height: 1; }
-.auth-note { text-align: center; font-size: 12px; color: var(--muted); }
-.auth-note a { color: var(--secondary-dark); font-weight: 700; }
-.auth-logged-out { display: flex; flex-direction: column; gap: 12px; }
-.auth-title { font-size: 15px; font-weight: 800; text-align: center; letter-spacing: -0.01em; }
-.auth-logged-out .divider { margin-top: 6px; }
-/* 1단계(로그인 상태): 계정 칩 — 아바타 · 닉네임 · 제공자 */
-.account-chip { display: flex; align-items: center; gap: 12px; background: #f8f6fc; border-radius: 18px; padding: 10px 14px 10px 10px; }
-.chip-avatar {
-  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-size: 22px;
-  background: var(--av, #d6d6d6); overflow: hidden; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.08);
-}
-.chip-avatar img, .acct-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.chip-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.chip-name { min-width: 0; font-weight: 800; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chip-provider { font-size: 12px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 프로필 사진: 아바타 칸(.avatar · .me-avatar · .avatar-preview · .photo-preview · .acct-avatar)을 꽉 채우는 원 */
+img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; background: #fff; }
 /* 대기실 설정: 내 세트 도구 */
 .wordset-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: -4px; }
 .wordset-tools select { width: auto; flex: 1 1 200px; min-width: 0; padding: 8px 10px; font-size: 13px; font-weight: 600; }
@@ -979,6 +977,39 @@ body.sheet-open { overflow: hidden; }
    랜딩 2단계 — 1) 프로필(#landing-step-profile) → 2) 방(#landing-step-room)
    ===================================================================== */
 .landing-step { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+/* 세션 복원 중: 로고 아래 작은 스피너만 */
+.landing-loading { display: grid; place-items: center; min-height: 120px; }
+.spinner {
+  width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--secondary);
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* 1단계: 시작 — 버튼만 */
+.step-start { gap: 14px; padding-top: 4px; }
+.step-start .divider { margin: 2px 0; }
+
+/* 2단계(로그인): 사진 | 이모지 */
+.seg {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px;
+  background: #f3f0f8; border-radius: 999px;
+}
+.seg-btn {
+  border: 0; background: transparent; border-radius: 999px; padding: 9px 0;
+  font-size: 14px; font-weight: 800; color: var(--muted); transition: background .15s, color .15s, box-shadow .15s;
+}
+.seg-btn:hover { color: var(--text); }
+.seg-btn[aria-checked="true"] { background: #fff; color: var(--text); box-shadow: 0 2px 8px rgba(43, 45, 66, 0.10); }
+.photo-panel { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.photo-preview {
+  width: 112px; height: 112px; border-radius: 50%; display: grid; place-items: center; font-size: 56px;
+  background: var(--av, #bae1ff); box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.08), var(--shadow-sm);
+}
+.photo-preview.has-img { box-shadow: 0 0 0 4px #fff, 0 0 0 6px var(--line), var(--shadow-sm); }
+.photo-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.photo-hint { font-size: 12px; color: var(--muted); text-align: center; margin-top: -4px; }
+.landing-step.is-photo .avatar-preview { display: none; }
+.emoji-pickers { display: flex; flex-direction: column; gap: 18px; }
 .landing-step.step-fwd { animation: step-in-fwd .24s cubic-bezier(.2, .8, .3, 1); }
 .landing-step.step-back { animation: step-in-back .24s cubic-bezier(.2, .8, .3, 1); }
 @keyframes step-in-fwd { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
@@ -1011,7 +1042,10 @@ body.sheet-open { overflow: hidden; }
 .invite-dismiss { align-self: center; margin-top: -8px; }
 
 @media (max-width: 767px) {
-  .landing { padding: 16px 12px; }
+  .landing { padding: 16px 12px 0; }
+  .emoji-pickers { gap: 16px; }
+  .seg-btn { padding: 10px 0; }
+  .photo-actions .btn-sm { min-height: 38px; padding: 8px 14px; }
   .landing-card { max-width: none; padding: 24px 18px 20px; border-radius: 24px; gap: 16px; }
   .landing-step { gap: 16px; }
   .emoji-btn { padding: 9px 0; }

@@ -56,7 +56,7 @@ $env:SUPABASE_URL="https://xxxx.supabase.co"; $env:SUPABASE_ANON_KEY="..."; $env
 
 ## 5. 확인
 - `https://…/healthz` 응답에 `"auth":true` 가 보이면 서버가 키를 읽은 것입니다.
-- 랜딩 화면에 "Google로 계속하기 / 카카오로 계속하기" 버튼이 나타납니다.
+- 랜딩 첫 화면에 "Google로 시작하기 / 카카오로 시작하기 / 게스트로 시작하기" 버튼이 나타납니다.
 - 로그인 후 새로고침해도 유지되고, 오른쪽 위 아바타 메뉴에서 **내 정보**(닉네임·단어 세트)를 열 수 있어야 합니다.
 
 ## 무료 한도 (2026 기준 Supabase Free)

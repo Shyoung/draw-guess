@@ -3,7 +3,10 @@
    labels: lobby, choosing, drawing, hint, guessed, turnEnd, drawer, mydraw, gameOver, backToLobby
    &stay=1        : 대기실(lobby)에서 자동 진행을 멈춘다(게임 시작을 누를 때까지). 설정/내 정보 UI 확인용
    &auth=1        : 가짜 window.supabase + window.APP_CONFIG 를 설치해 로그인 UI 를 켠다(네트워크 없음, 메모리 DB).
-                    기본은 로그인된 상태로 시작. &auth_state=out 이면 로그아웃 상태로 시작. window.__mockAuth 로 상태 확인 */
+                    기본은 로그인된 상태로 시작. &auth_state=out 이면 로그아웃 상태로 시작. window.__mockAuth 로 상태 확인
+                    모크 사용자는 소셜 사진(인라인 SVG data URL)을 가진다. &auth_photo=0 이면 사진 없음.
+                    storage.from('avatars').upload/getPublicUrl/remove 는 메모리에 blob 을 두고 blob: URL 을 공개 URL 로 준다
+                    (window.__mockAuth.storage.avatars[path]). 실제 서버라면 허용 호스트가 아니라 img 를 버리겠지만 모크 소켓은 서버를 거치지 않는다 */
 (function () {
   var handlers = {}, ME = 'me', chosen = null;
   var qs = new URLSearchParams(location.search);
@@ -15,13 +18,50 @@
   if (authMock) {
     window.APP_CONFIG = { supabaseUrl: 'https://mock.supabase.local', supabaseAnonKey: 'mock-anon-key' };
     var authListeners = [];
-    var mockUser = { id: 'mock-user-1', email: 'mock@example.com', app_metadata: { provider: 'google' }, user_metadata: { name: '모크유저', avatar_url: '' } };
+    // 소셜 프로필 사진 대용: 하늘색 배경의 사람 실루엣 SVG
+    var SOCIAL_PHOTO = qs.get('auth_photo') === '0' ? null : 'data:image/svg+xml,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#6fb7ff"/>' +
+      '<circle cx="32" cy="25" r="12" fill="#fff"/><path d="M10 64c2-14 11-21 22-21s20 7 22 21z" fill="#fff"/></svg>');
+    var mockUser = { id: 'mock-user-1', email: 'mock@example.com', app_metadata: { provider: 'google' }, user_metadata: { name: '모크유저', avatar_url: SOCIAL_PHOTO || '' } };
     var makeSession = function () { return { access_token: 'mock-access-token-' + Date.now(), user: mockUser }; };
+    // 실제 supabase-js 처럼 세션이 있으면 localStorage 에 sb-…-auth-token 을 둔다(client.js 가 "세션 복원 중" 여부를 짐작하는 데 쓴다)
+    var SESSION_KEY = 'sb-mock-auth-token';
+    var markSession = function () { try { if (mockSession) localStorage.setItem(SESSION_KEY, '1'); else localStorage.removeItem(SESSION_KEY); } catch (e) { /* ignore */ } };
     if (qs.get('auth_state') !== 'out') mockSession = makeSession();
+    markSession();
     var nowIso = new Date().toISOString();
     var tables = {
-      profiles: [{ user_id: 'mock-user-1', nickname: '모크유저', avatar_url: null, avatar_emoji: null, avatar_color: null, created_at: nowIso, updated_at: nowIso }],
+      profiles: [{ user_id: 'mock-user-1', nickname: '모크유저', avatar_url: SOCIAL_PHOTO, social_avatar_url: SOCIAL_PHOTO, avatar_mode: SOCIAL_PHOTO ? 'photo' : 'emoji', avatar_emoji: null, avatar_color: null, created_at: nowIso, updated_at: nowIso }],
       word_sets: []
+    };
+    // 가짜 Storage: bucket → { path: { blob, type, size, url } }. RLS 흉내: 로그인 · 본인 폴더(<uid>/…) · 1MB · jpeg/png/webp
+    var storage = { avatars: {} };
+    var later10 = function (v) { return new Promise(function (r) { setTimeout(function () { r(v); }, 10); }); };
+    var storageBucket = function (name) {
+      var files = storage[name] || (storage[name] = {});
+      var denied = function (msg) { return later10({ data: null, error: { message: msg, statusCode: '403' } }); };
+      var ownPath = function (p) { return !!mockSession && String(p || '').split('/')[0] === mockSession.user.id; };
+      return {
+        upload: function (path, blob, opts) {
+          if (!ownPath(path)) return denied('new row violates row-level security policy');
+          var type = (opts && opts.contentType) || (blob && blob.type) || '';
+          if (!blob || typeof blob.size !== 'number') return denied('invalid file');
+          if (blob.size > 1048576) return denied('The object exceeded the maximum allowed size');
+          if (['image/jpeg', 'image/png', 'image/webp'].indexOf(type) === -1) return denied('mime type ' + type + ' is not supported');
+          if (files[path] && !(opts && opts.upsert)) return denied('The resource already exists');
+          files[path] = { blob: blob, type: type, size: blob.size, url: URL.createObjectURL(blob) };
+          return later10({ data: { path: path, fullPath: name + '/' + path }, error: null });
+        },
+        getPublicUrl: function (path) {
+          var f = files[path];
+          return { data: { publicUrl: f ? f.url : 'https://mock.supabase.local/storage/v1/object/public/' + name + '/' + path } };
+        },
+        remove: function (paths) {
+          var out = [];
+          (paths || []).forEach(function (p) { if (ownPath(p) && files[p]) { delete files[p]; out.push({ name: p }); } });
+          return later10({ data: out, error: null });
+        }
+      };
     };
     var seq = 1;
     var clone = function (r) { return JSON.parse(JSON.stringify(r)); };
@@ -86,16 +126,17 @@
             },
             signInWithOAuth: function (opts) {
               mockUser.app_metadata.provider = (opts && opts.provider) || 'google';
-              mockSession = makeSession(); emitAuth('SIGNED_IN');
+              mockSession = makeSession(); markSession(); emitAuth('SIGNED_IN');
               return ok({ provider: opts && opts.provider, url: null });
             },
-            signOut: function () { mockSession = null; emitAuth('SIGNED_OUT'); return ok(null); }
+            signOut: function () { mockSession = null; markSession(); emitAuth('SIGNED_OUT'); return ok(null); }
           },
-          from: builder
+          from: builder,
+          storage: { from: storageBucket }
         };
       }
     };
-    window.__mockAuth = { tables: tables, session: function () { return mockSession; } };
+    window.__mockAuth = { tables: tables, storage: storage, socialPhoto: SOCIAL_PHOTO, session: function () { return mockSession; } };
     console.log('[mock] fake supabase installed (auth=1)');
   }
   function fire(ev, payload) {
@@ -201,6 +242,7 @@
         if (payload && payload.name) players[0].name = payload.name; if (payload && payload.avatar) players[0].avatar = payload.avatar;
         if (ack) ack({ ok: true, roomCode: 'MOCK', playerId: ME });
         if (!started) { started = true; advance(); }
+        else setTimeout(function () { fire('room:state', st()); }, 0); // 나갔다가 다시 만들기/참가: 지금 상태를 다시 보낸다
       } else if (ev === 'room:settings' && payload && payload.settings) { Object.assign(room.settings, payload.settings); fire('room:state', st()); }
       else if (ev === 'word:choose') { chosen = payload && payload.word; resume('mydraw'); }
       else if (ev === 'chat:message' && payload) {

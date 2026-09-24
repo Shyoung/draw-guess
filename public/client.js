@@ -45,15 +45,48 @@
     var t = null;
     return function () { var a = arguments; clearTimeout(t); t = setTimeout(function () { fn.apply(null, a); }, ms); };
   }
+  // 프로필 사진(avatar.img): https(카카오 http 는 https 로) · 개발 모크용 data:image/ · blob: 만. 한 번 로드에 실패한 주소는 다시 시도하지 않는다
+  var badImgs = {};
+  function avatarImgUrl(u) {
+    if (typeof u !== 'string' || !u || u.length > 2048) return null;
+    if (/^http:\/\//i.test(u)) u = 'https://' + u.slice(7);
+    if (!/^(https:\/\/|data:image\/|blob:)/i.test(u) || badImgs[u]) return null;
+    return u;
+  }
   function safeAvatar(a) {
     var emoji = a && typeof a.emoji === 'string' && a.emoji ? a.emoji : '🙂';
     var color = a && isHex(a.color) ? a.color : '#d6d6d6';
-    return { emoji: emoji, color: color };
+    var img = a ? avatarImgUrl(a.img) : null;
+    return img ? { emoji: emoji, color: color, img: img } : { emoji: emoji, color: color };
+  }
+  /**
+   * node 안을 아바타로 채운다: img 가 있으면 둥근 사진(<img class="avatar-img">), 없거나 로드에 실패하면 emoji + 배경색(--av).
+   * node 의 다른 자식(배지·반응 팝업)은 이 함수를 부른 뒤에 붙인다. 같은 사진이면 다시 그리지 않는다(깜빡임 방지).
+   */
+  function paintAvatar(node, a) {
+    if (!node) return;
+    var av = safeAvatar(a);
+    node.style.setProperty('--av', av.color);
+    var cur = node.firstElementChild && node.firstElementChild.classList.contains('avatar-img') ? node.firstElementChild : null;
+    if (av.img && cur && cur.getAttribute('src') === av.img) return;
+    node.textContent = '';
+    node.classList.toggle('has-img', !!av.img);
+    if (!av.img) { node.textContent = av.emoji; return; }
+    var img = document.createElement('img');
+    img.className = 'avatar-img'; img.alt = ''; img.decoding = 'async'; img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer'; img.setAttribute('referrerpolicy', 'no-referrer'); // Google 프로필 사진은 referrer 가 있으면 403
+    img.onerror = function () {
+      badImgs[av.img] = 1;
+      if (img.parentNode !== node) return;
+      node.removeChild(img); node.classList.remove('has-img');
+      node.insertBefore(document.createTextNode(av.emoji), node.firstChild);
+    };
+    img.src = av.img;
+    node.appendChild(img);
   }
   function avatarNode(a, extraCls) {
-    var av = safeAvatar(a);
-    var n = el('span', 'avatar' + (extraCls ? ' ' + extraCls : ''), av.emoji);
-    n.style.setProperty('--av', av.color);
+    var n = el('span', 'avatar' + (extraCls ? ' ' + extraCls : ''));
+    paintAvatar(n, a);
     return n;
   }
 
@@ -116,6 +149,8 @@
   };
 
   var profile = { name: '', emoji: EMOJIS[0], color: AV_COLORS[4] };
+  // 로그인 사용자의 사진 설정(프로필 설정 단계). mode: 'photo' | 'emoji', url: 지금 사진, social: 소셜 로그인 기본 사진
+  var photo = { mode: 'emoji', url: null, social: null, uploading: false };
 
   function isHost() { return !!myId && state.hostId === myId; }
   function isDrawer() { return !!myId && state.drawerId === myId; }
@@ -1200,6 +1235,18 @@
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(profile)); } catch (e) { /* ignore */ }
   }
   function renderProfile() {
+    var logged = acctLoggedIn(), photoMode = logged && photo.mode === 'photo';
+    var sp = $('landing-step-profile'); if (sp) sp.classList.toggle('is-photo', photoMode);
+    var seg = $('avatar-mode'); if (seg) seg.hidden = !logged;
+    ['btn-mode-photo', 'btn-mode-emoji'].forEach(function (id) {
+      var b = $(id); if (b) b.setAttribute('aria-checked', b.getAttribute('data-mode') === (photoMode ? 'photo' : 'emoji') ? 'true' : 'false');
+    });
+    var pp = $('photo-panel'); if (pp) pp.hidden = !photoMode;
+    var ep = $('emoji-pickers'); if (ep) ep.hidden = photoMode;
+    paintAvatar($('photo-preview'), { emoji: profile.emoji, color: profile.color, img: photo.url });
+    var ph = $('photo-hint'); if (ph) ph.hidden = !!(photo.url && avatarImgUrl(photo.url));
+    var pr = $('btn-photo-reset'); if (pr) { pr.hidden = !(photo.social && photo.url !== photo.social); pr.disabled = photo.uploading; }
+    var pu = $('btn-photo-upload'); if (pu) { pu.disabled = photo.uploading; pu.textContent = photo.uploading ? '올리는 중…' : '사진 올리기'; }
     var pv = $('avatar-preview'), pe = $('avatar-preview-emoji');
     if (pv) pv.style.setProperty('--av', profile.color);
     if (pe) pe.textContent = profile.emoji;
@@ -1209,16 +1256,53 @@
     if (row) row.querySelectorAll('.color-btn').forEach(function (b) { b.setAttribute('aria-checked', b.getAttribute('data-color') === profile.color ? 'true' : 'false'); });
   }
   // ------------------------------------------------------------------
-  // 랜딩 2단계: 1) 프로필(로그인 또는 게스트 닉네임·아바타) → 2) 방(만들기 / 코드로 참가 / 초대받은 방)
-  //   첫 화면: 저장된 닉네임이 있으면 2단계, 없으면 1단계. 로그인(세션 복원·OAuth 복귀 포함)되어 프로필이 오면 2단계로.
-  //   history: 2단계로 갈 때 { landing:'room' } 항목을 하나 넣는다(바로 아래 항목은 { landing:'profile' }).
-  //   기기 뒤로가기로 그 항목에서 내려오면 1단계. "프로필 수정"·로그아웃은 우리가 넣은 항목을 history.back() 으로 걷어낸다.
+  // 랜딩 3단계: 1) 시작(Google/카카오/게스트) → 2) 프로필 설정 → 3) 방(만들기 / 코드로 참가 / 초대받은 방)
+  //   단계 구성(stepOrder): 로그인 기능이 켜져 있고 로그아웃 상태면 [start, profile, room], 아니면 [profile, room]
+  //   (로그인 꺼짐 = 시작 단계를 건너뜀, 로그인 상태 = 이미 시작을 지남).
+  //   첫 화면(initialStep): 로그인 + 이 브라우저에서 프로필을 확정("다음")한 적 있음 → 방 / 로그인 + 처음 → 프로필 설정(소셜 닉네임·사진 프리필)
+  //                        게스트 + 저장된 닉네임 → 방 / 그 외 → 첫 단계(시작, 로그인 꺼짐이면 프로필 설정)
+  //   세션을 복원하는 중(localStorage 에 sb-…-auth-token 이 있거나 OAuth 복귀 URL)이면 결과가 나올 때까지 단계를 그리지 않는다(깜빡임 방지).
+  //   history: 단계마다 { landing: step, d: 깊이 } 항목을 쌓는다(바닥 d=0 = 첫 단계). 기기 뒤로가기 = 이전 단계.
+  //   앞 단계로 갈 때는 쌓은 항목을 history.go(-n) 으로 걷어내고, 로그인/로그아웃으로 구성이 바뀌면 바닥까지 내려가 다시 쌓는다.
   // ------------------------------------------------------------------
-  var landing = { step: 'profile', invite: null, autoAdvance: false };
+  var STEPS = ['start', 'profile', 'room'];
+  var CONFIRMED_KEY = 'drawguess.profileConfirmed'; // { [userId]: ts } — 이 브라우저에서 프로필 설정을 마친 로그인 사용자
+  var landing = { step: null, invite: null, ready: false, authReady: false, readyTimer: null, nickEdited: false }; // nickEdited: 로그인 후 사용자가 닉네임을 직접 고쳤는가
   function cleanCode(v) { return String(v || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); }
   function nickValue() { var n = $('nick'); return (n ? n.value : profile.name).trim().slice(0, 12); }
-  function updateNextBtn() { var b = $('btn-profile-next'); if (b) b.disabled = !nickValue(); }
+  function updateNextBtn() { var b = $('btn-profile-next'); if (b) b.disabled = !nickValue() || photo.uploading; }
   function focusNode(n) { if (n) { try { n.focus({ preventScroll: true }); } catch (e) { /* ignore */ } } }
+  function authConfigured() {
+    var c = window.APP_CONFIG;
+    return !!(c && typeof c.supabaseUrl === 'string' && c.supabaseUrl && typeof c.supabaseAnonKey === 'string' && c.supabaseAnonKey);
+  }
+  /** 로그인 기능을 쓸 수 있는가(초기화 결과가 나오기 전에는 설정 유무로 짐작) */
+  function loginAvailable() { return landing.authReady ? acct.on : authConfigured(); }
+  function stepOrder() { return loginAvailable() && !acctLoggedIn() ? ['start', 'profile', 'room'] : ['profile', 'room']; }
+  /** 로그인 세션을 복원하는 중일 수 있는가: supabase-js 가 남긴 세션 키 또는 OAuth 복귀 파라미터 */
+  function maybeRestoringSession() {
+    if (!authConfigured()) return false;
+    try {
+      if (/(^#|&)(access_token|error)=/.test(location.hash || '') || new URLSearchParams(location.search).has('code')) return true;
+      for (var i = 0; i < localStorage.length; i++) if (/^sb-.+-auth-token$/.test(localStorage.key(i) || '')) return true;
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+  function confirmedMap() {
+    try { var m = JSON.parse(localStorage.getItem(CONFIRMED_KEY) || '{}'); return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; } catch (e) { return {}; }
+  }
+  function isConfirmed(uid) { return !!(uid && confirmedMap()[uid]); }
+  function setConfirmed(uid) {
+    if (!uid) return;
+    var m = confirmedMap(); m[uid] = Date.now();
+    try { localStorage.setItem(CONFIRMED_KEY, JSON.stringify(m)); } catch (e) { /* ignore */ }
+  }
+  /** 지금 방에 들고 갈 아바타: { emoji, color, img? } — img 는 로그인 + 사진 모드 + 사진이 있을 때만 */
+  function myAvatar() {
+    var a = { emoji: profile.emoji, color: profile.color };
+    if (acctLoggedIn() && photo.mode === 'photo' && avatarImgUrl(photo.url)) a.img = photo.url;
+    return a;
+  }
   /** parent 의 자식 순서를 nodes 순서로 맞춘다(이미 그 자리면 건드리지 않아 포커스 유지) */
   function orderChildren(parent, nodes) {
     if (!parent) return;
@@ -1230,15 +1314,15 @@
   }
   function renderLanding() {
     if (inRoom) return;
-    var sp = $('landing-step-profile'), sr = $('landing-step-room');
-    if (sp) sp.hidden = landing.step !== 'profile';
-    if (sr) sr.hidden = landing.step !== 'room';
+    STEPS.forEach(function (s) { var n = $('landing-step-' + s); if (n) n.hidden = landing.step !== s; });
+    var ld = $('landing-loading'); if (ld) ld.hidden = !!landing.step;
     updateNextBtn();
     var logged = acctLoggedIn();
-    var av = $('me-avatar'); if (av) { av.textContent = profile.emoji; av.style.setProperty('--av', profile.color); }
+    var sr = $('landing-step-room');
+    paintAvatar($('me-avatar'), myAvatar());
     var nm = $('me-name'); if (nm) nm.textContent = nickValue() || '플레이어';
     var stt = $('me-status'); if (stt) stt.textContent = logged ? providerLabel(acct.user && acct.user.provider) + ' 계정' : '게스트';
-    var ml = $('btn-me-login'); if (ml) ml.hidden = !(acct.on && !logged);
+    var ml = $('btn-me-login'); if (ml) ml.hidden = !(loginAvailable() && !logged);
     var ma = $('me-account'); if (ma) ma.hidden = !logged;
     // 초대받은 방: 코드 카드 안에 #btn-join(주 버튼)을 두고, "새 방 만들기"는 보조로 아래에
     var inv = landing.invite;
@@ -1256,38 +1340,65 @@
   }
   function showLandingStep(step, animate) {
     var prev = landing.step; landing.step = step;
+    renderProfile();
     renderLanding();
-    var node = $(step === 'room' ? 'landing-step-room' : 'landing-step-profile');
-    if (animate && prev !== step && node) {
+    var node = $('landing-step-' + step);
+    if (animate && prev && prev !== step && node) {
       node.classList.remove('step-fwd', 'step-back'); void node.offsetWidth;
-      node.classList.add(step === 'room' ? 'step-fwd' : 'step-back');
+      node.classList.add(STEPS.indexOf(step) > STEPS.indexOf(prev) ? 'step-fwd' : 'step-back');
     }
   }
-  /** 2단계로. history 에 { landing:'room' } 을 하나 넣는다(이미 그 항목이면 그대로) */
-  function goRoomStep(animate, focus) {
-    if (inRoom) return;
-    showLandingStep('room', animate);
+  /** history 스택을 [order[0] … step] 으로 맞춘다(걷어내는 중인 항목이 있으면 그 뒤에) */
+  function syncLandingHistory(step) {
     afterHistory(function () {
-      if (inRoom || landing.step !== 'room') return;
+      if (inRoom || landing.step !== step) return;
       try {
-        var st = history.state;
-        if (st && (st.landing === 'room' || st.sheet)) return;
-        if (!(st && st.landing === 'profile')) history.replaceState({ landing: 'profile' }, '');
-        history.pushState({ landing: 'room' }, '');
+        var order = stepOrder(), t = order.indexOf(step), st = history.state;
+        if (t < 0 || (st && st.sheet)) return;
+        var cur = st && st.landing ? order.indexOf(st.landing) : -1;
+        var d = st && st.landing && typeof st.d === 'number' ? st.d : 0;
+        if (cur >= 0 && cur === d) { // 스택이 지금 구성과 맞음
+          if (cur < t) { for (var i = cur + 1; i <= t; i++) history.pushState({ landing: order[i], d: i }, ''); }
+          else if (cur > t) histBack(cur - t);
+          return;
+        }
+        // 구성이 바뀌었거나(로그인/로그아웃) 처음 → 바닥까지 내려가 다시 쌓는다
+        var rebuild = function () {
+          if (inRoom || landing.step !== step) return;
+          try {
+            var o = stepOrder(), k = o.indexOf(step); if (k < 0) return;
+            history.replaceState({ landing: o[0], d: 0 }, '');
+            for (var j = 1; j <= k; j++) history.pushState({ landing: o[j], d: j }, '');
+          } catch (e) { /* ignore */ }
+        };
+        if (d > 0) { histBack(d); afterHistory(rebuild); } else rebuild();
       } catch (e) { /* file:// 등 */ }
     });
-    if (focus) focusNode(landing.invite ? $('btn-join') : $('btn-create')); // 사용자가 "다음"을 눌렀을 때만(키보드면 Enter 한 번 더로 진행)
   }
-  /** 1단계로. 우리가 넣은 { landing:'room' } 항목 위에 있으면 걷어낸다 */
-  function goProfileStep(animate) {
+  /** 랜딩 단계로 이동(+history). 지금 구성에 없는 단계면 가장 가까운 단계로. 실제로 보여 준 단계를 돌려준다 */
+  function goStep(step, animate) {
+    if (inRoom) return landing.step;
+    var order = stepOrder();
+    if (order.indexOf(step) < 0) step = order[0];
+    if (step === 'room' && !nickValue()) step = 'profile';
+    showLandingStep(step, animate);
+    syncLandingHistory(step);
+    if (animate && step === 'profile' && !mobileMq.matches) focusNode($('nick'));
+    return step;
+  }
+  function initialStep() {
+    if (acctLoggedIn()) return isConfirmed(acct.user.id) && nickValue() ? 'room' : 'profile';
+    if (nickValue()) return 'room';
+    return stepOrder()[0];
+  }
+  /** 첫 화면을 정한다(한 번만). 방에 먼저 들어갔으면(재접속) 나올 때 resetToLanding 이 단계를 정한다 */
+  function startLanding() {
+    if (landing.ready) return;
+    landing.ready = true;
+    clearTimeout(landing.readyTimer); landing.readyTimer = null;
     if (inRoom) return;
-    landing.autoAdvance = false;
-    showLandingStep('profile', animate);
-    afterHistory(function () {
-      if (inRoom || landing.step !== 'profile') return;
-      try { if (history.state && history.state.landing === 'room') histBack(); } catch (e) { /* ignore */ }
-    });
-    if (animate && !mobileMq.matches) focusNode($('nick'));
+    var step = goStep(initialStep(), false);
+    if (step === 'profile' && !mobileMq.matches) focusNode($('nick'));
   }
   /** 기기 뒤로가기/앞으로가기(시트와 무관한 popstate) */
   function onLandingPopstate() {
@@ -1299,23 +1410,28 @@
       } catch (e) { /* ignore */ }
       return;
     }
-    var st = history.state && history.state.landing;
-    if (st === 'room') {
-      if (landing.step !== 'room') {
-        if (nickValue()) showLandingStep('room', true);
-        else { try { history.replaceState({ landing: 'profile' }, ''); } catch (e) { /* ignore */ } }
-      }
-    } else if (landing.step === 'room') showLandingStep('profile', true);
+    var st = history.state;
+    if (!st || !st.landing || !landing.ready) return;
+    var order = stepOrder(), step = st.landing;
+    if (step === 'room' && !nickValue()) step = 'profile';
+    if (order.indexOf(step) < 0) step = order[0];
+    if (step !== st.landing) { try { history.replaceState({ landing: step, d: typeof st.d === 'number' ? st.d : 0 }, ''); } catch (e) { /* ignore */ } }
+    if (landing.step !== step) showLandingStep(step, true);
   }
-  /** 1단계 "다음": 닉네임 확정·저장(로그인 상태면 프로필에도) → 2단계 */
+  /** 프로필 설정 "다음": 닉네임·아바타 확정 → 저장(로그인 상태면 프로필에도, 이 브라우저에 확정 표시) → 방 단계 */
   function submitProfile() {
     var name = nickValue();
     if (!name) { toast('닉네임을 입력해주세요', 'error'); focusNode($('nick')); return; }
+    if (photo.uploading) return;
     var n = $('nick'); if (n) n.value = name;
     profile.name = name; saveProfile();
-    syncProfileOnEnter(currentProfile());
-    landing.autoAdvance = false;
-    goRoomStep(true, true);
+    if (acctLoggedIn()) {
+      if (photo.mode === 'photo' && !avatarImgUrl(photo.url)) photo.mode = 'emoji'; // 사진이 없으면 이모지로
+      syncAccountProfile(true);
+      setConfirmed(acct.user.id);
+    }
+    goStep('room', true);
+    focusNode(landing.invite ? $('btn-join') : $('btn-create')); // 키보드면 Enter 한 번 더로 진행
   }
   function dismissInvite() {
     landing.invite = null;
@@ -1326,32 +1442,67 @@
     renderLanding();
     var c = $('room-code-input'); if (c) { focusNode(c); try { c.select(); } catch (e) { /* ignore */ } }
   }
+  function setPhotoMode(mode) {
+    if (!acctLoggedIn()) return;
+    photo.mode = mode === 'photo' ? 'photo' : 'emoji';
+    renderProfile(); renderLanding();
+  }
+  /** "사진 올리기": 파일 → (account.js) 정사각형 256px webp 로 줄여 Storage 업로드 → 공개 URL 을 지금 사진으로 */
+  function onPhotoFile(e) {
+    var input = e.target, file = input && input.files && input.files[0];
+    if (input) input.value = ''; // 같은 파일을 다시 골라도 change 가 오게
+    if (!file || !acctLoggedIn() || !Account) return;
+    if (file.type && !/^image\//.test(file.type)) { toast('이미지 파일만 올릴 수 있어요', 'error'); return; }
+    var uid = acct.user.id;
+    photo.uploading = true; renderProfile(); updateNextBtn();
+    Account.uploadAvatar(file)
+      .then(function (url) {
+        if (!acct.user || acct.user.id !== uid) return;
+        photo.url = url; photo.mode = 'photo';
+        toast('사진을 올렸어요', 'ok');
+      })
+      .catch(function (err) { acctErr(err, '사진을 올리지 못했어요'); })
+      .then(function () { photo.uploading = false; renderProfile(); renderLanding(); });
+  }
+  function resetPhoto() {
+    if (!photo.social) return;
+    photo.url = photo.social; photo.mode = 'photo';
+    renderProfile(); renderLanding();
+  }
 
   function buildLanding() {
     var strip = $('emoji-strip');
     if (strip) EMOJIS.forEach(function (em) {
       var b = el('button', 'emoji-btn', em); b.type = 'button'; b.setAttribute('role', 'radio');
-      b.addEventListener('click', function () { profile.emoji = em; saveProfile(); renderProfile(); });
+      b.addEventListener('click', function () { profile.emoji = em; saveProfile(); renderProfile(); renderLanding(); });
       strip.appendChild(b);
     });
     var row = $('color-row');
     if (row) AV_COLORS.forEach(function (c) {
       var b = el('button', 'color-btn'); b.type = 'button'; b.setAttribute('role', 'radio'); b.setAttribute('data-color', c); b.style.background = c; b.title = c;
-      b.addEventListener('click', function () { profile.color = c; saveProfile(); renderProfile(); });
+      b.addEventListener('click', function () { profile.color = c; saveProfile(); renderProfile(); renderLanding(); });
       row.appendChild(b);
     });
     var nick = $('nick');
     if (nick) {
       nick.value = profile.name;
       // 닉네임은 "다음"(또는 방 만들기/참가) 때 확정·저장한다 → 저장된 닉네임 유무로 첫 화면을 고른다
-      nick.addEventListener('input', updateNextBtn);
+      nick.addEventListener('input', function () { landing.nickEdited = true; updateNextBtn(); });
       nick.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submitProfile(); } });
     }
     var bn = $('btn-profile-next'); if (bn) bn.addEventListener('click', submitProfile);
-    ['btn-profile-edit', 'btn-me-login'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', function () { goProfileStep(true); }); });
+    var bg = $('btn-start-guest'); if (bg) bg.addEventListener('click', function () { goStep('profile', true); });
+    var be = $('btn-profile-edit'); if (be) be.addEventListener('click', function () { goStep('profile', true); });
+    var bl = $('btn-me-login'); if (bl) bl.addEventListener('click', function () { goStep('start', true); });
+    ['btn-mode-photo', 'btn-mode-emoji'].forEach(function (id) {
+      var b = $(id); if (b) b.addEventListener('click', function () { setPhotoMode(b.getAttribute('data-mode')); });
+    });
+    var pf = $('photo-file'); if (pf) pf.addEventListener('change', onPhotoFile);
+    var pu = $('btn-photo-upload'); if (pu) pu.addEventListener('click', function () { if (pf && !photo.uploading) pf.click(); });
+    var pr = $('btn-photo-reset'); if (pr) pr.addEventListener('click', resetPhoto);
     var bd = $('btn-invite-dismiss'); if (bd) bd.addEventListener('click', dismissInvite);
-    ['landing-step-profile', 'landing-step-room'].forEach(function (id) {
-      var s = $(id); if (s) s.addEventListener('animationend', function () { s.classList.remove('step-fwd', 'step-back'); });
+    STEPS.forEach(function (s) {
+      var n = $('landing-step-' + s); if (n) n.addEventListener('animationend', function () { n.classList.remove('step-fwd', 'step-back'); });
     });
     var codeIn = $('room-code-input');
     if (codeIn) {
@@ -1377,22 +1528,21 @@
 
     // 첫 화면. 새로고침 전 남은 history.state(랜딩/시트)는 지금 문서의 항목이 아니므로 비운다
     try { if (history.state && (history.state.landing || history.state.sheet)) history.replaceState(null, ''); } catch (e) { /* ignore */ }
-    if (nickValue()) goRoomStep(false);
-    else {
-      showLandingStep('profile', false);
-      try { history.replaceState({ landing: 'profile' }, ''); } catch (e) { /* ignore */ }
-      if (!mobileMq.matches) focusNode(nick);
-    }
+    if (maybeRestoringSession()) {
+      // 로그인 세션 복원 결과(initAccount)를 기다린다. 라이브러리 로드가 멈춰도 4초 뒤에는 게스트 기준으로 보여 준다
+      renderLanding();
+      landing.readyTimer = setTimeout(startLanding, 4000);
+    } else startLanding();
   }
   function codeInput() { var n = $('room-code-input'); return n ? n.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4) : ''; }
   function currentProfile() {
     var nick = $('nick');
     var name = (nick ? nick.value : profile.name).trim().slice(0, 12);
-    return { name: name, avatar: { emoji: profile.emoji, color: profile.color } };
+    return { name: name, avatar: myAvatar() };
   }
   function validName() {
     var p = currentProfile();
-    if (!p.name) { toast('닉네임을 입력해주세요', 'error'); goProfileStep(true); focusNode($('nick')); return null; }
+    if (!p.name) { toast('닉네임을 입력해주세요', 'error'); goStep('profile', true); focusNode($('nick')); return null; }
     return p;
   }
   var busy = false;
@@ -1417,7 +1567,7 @@
   function createRoom() {
     var p = validName(); if (!p) return;
     profile.name = p.name; saveProfile();
-    syncProfileOnEnter(p);
+    syncAccountProfile(false);
     p.token = getToken();
     withAck('room:create', p, function (ack) { setToken(ack.token); enterRoom(ack.roomCode, ack.playerId); });
   }
@@ -1426,7 +1576,7 @@
     if (code.length !== 4) { toast('방 코드는 영문 4글자예요', 'error'); var c = $('room-code-input'); if (c) c.focus(); return; }
     var p = validName(); if (!p) return;
     profile.name = p.name; saveProfile();
-    syncProfileOnEnter(p);
+    syncAccountProfile(false);
     withAck('room:join', { roomCode: code, name: p.name, avatar: p.avatar, token: getToken() }, function (ack) { setToken(ack.token); enterRoom(ack.roomCode || code, ack.playerId); });
   }
 
@@ -1482,7 +1632,7 @@
       if (!inRoom || !state.roomCode) return;
       try {
         var qs = new URLSearchParams(location.search); qs.set('room', state.roomCode);
-        var st = history.state && history.state.landing ? { landing: history.state.landing } : null;
+        var hs = history.state, st = hs && hs.landing ? { landing: hs.landing, d: typeof hs.d === 'number' ? hs.d : 0 } : null;
         history.replaceState(st, '', location.pathname + '?' + qs.toString());
       } catch (e) { /* file:// 등 */ }
     });
@@ -1506,21 +1656,17 @@
     resetCanvasState(); clearChat();
     var vl = $('view-landing'), vr = $('view-room');
     if (vr) vr.hidden = true; if (vl) vl.hidden = false;
-    // 방에서 나오면 2단계(방 선택). 뒤로가기 → 1단계가 되도록 { landing:'room' } 항목 위에 선다
-    landing.invite = null; landing.autoAdvance = false;
-    var toRoomStep = !!nickValue();
-    showLandingStep(toRoomStep ? 'room' : 'profile', false);
+    // 방에서 나오면 방 단계. 주소에서 ?room= 을 빼고, 뒤로가기 → 프로필 설정 → (시작) 이 되도록 스택을 맞춘다
+    landing.invite = null; landing.ready = true;
     afterHistory(function () {
       if (inRoom) return;
       try {
         var qs = new URLSearchParams(location.search); qs.delete('room');
-        var q = qs.toString(), url = location.pathname + (q ? '?' + q : '');
-        var st = history.state;
-        if (!toRoomStep) history.replaceState({ landing: 'profile' }, '', url);
-        else if (st && st.landing === 'room') history.replaceState({ landing: 'room' }, '', url);
-        else { history.replaceState({ landing: 'profile' }, '', url); history.pushState({ landing: 'room' }, ''); }
+        var q = qs.toString();
+        history.replaceState(history.state, '', location.pathname + (q ? '?' + q : ''));
       } catch (e) { /* ignore */ }
     });
+    goStep(nickValue() ? 'room' : 'profile', false);
     renderAll();
   }
 
@@ -1697,12 +1843,13 @@
     var q = histQueue; histQueue = [];
     q.forEach(function (fn) { try { fn(); } catch (e) { console.error('[history]', e); } });
   }
-  /** 우리가 넣은 항목을 걷어낸다. 그 결과로 오는 popstate 는 무시한다 */
-  function histBack() {
+  /** 우리가 넣은 항목 n개(기본 1)를 걷어낸다. 그 결과로 오는 popstate(한 번)는 무시한다 */
+  function histBack(n) {
+    n = Math.max(1, n || 1);
     histGuard++;
     clearTimeout(histTimer);
     histTimer = setTimeout(function () { if (histGuard) { histGuard = 0; flushHistQueue(); } }, 800); // popstate 가 오지 않는 경우 대비
-    try { history.back(); } catch (e) { histGuard = Math.max(0, histGuard - 1); if (!histGuard) flushHistQueue(); }
+    try { if (n > 1) history.go(-n); else history.back(); } catch (e) { histGuard = Math.max(0, histGuard - 1); if (!histGuard) flushHistQueue(); }
   }
   /** 걷어내는 중인 항목이 있으면 그 popstate 뒤에, 없으면 바로 fn 을 실행한다 */
   function afterHistory(fn) { if (histGuard) histQueue.push(fn); else fn(); }
@@ -1976,6 +2123,9 @@
     Account.onChange(onAccountChange);
     Account.init().then(function (ok) {
       if (!ok && window.APP_CONFIG && window.APP_CONFIG.supabaseUrl) toast('로그인 기능을 불러오지 못했어요. 게스트로 계속할 수 있어요', 'error');
+      landing.authReady = true;
+      if (!landing.ready) startLanding();                                              // 세션 복원 결과로 첫 화면을 정한다
+      else if (!inRoom && landing.step === 'start' && !loginAvailable()) goStep('profile', false); // 로그인을 못 켰으면 시작 단계를 건너뛴다
       renderAccount();
     });
   }
@@ -1985,12 +2135,13 @@
     acct.profile = snap && snap.profile ? snap.profile : null;
     var uid = acct.user ? acct.user.id : null;
     var token = snap && snap.token ? snap.token : null;
+    var loginChanged = false;
     if (uid !== acct.lastUid) {
-      var hadUser = !!acct.lastUid;
       acct.lastUid = uid; acct.sets = []; acct.setsLoaded = false; acct.formOpen = false; acct.editing = null; acct.appliedKey = '';
+      photo.mode = 'emoji'; photo.url = null; photo.social = null; photo.uploading = false; landing.nickEdited = false;
       if (!uid && acct.open) closeAccount();
-      if (uid) { refreshWordSets(); landing.autoAdvance = true; } // 로그인(세션 복원·OAuth 복귀 포함) → 프로필이 오면 2단계로
-      else { landing.autoAdvance = false; if (hadUser && !inRoom) goProfileStep(true); } // 로그아웃 → 1단계
+      if (uid) refreshWordSets();
+      loginChanged = true;
     }
     if (token !== acct.lastToken) {
       acct.lastToken = token;
@@ -1999,63 +2150,71 @@
         if (socket.connected) emit('auth:token', { token: token });
       }
     }
-    if (acct.profile) applyProfileToLanding();
-    if (landing.autoAdvance && acct.profile && acct.profile.nickname) {
-      landing.autoAdvance = false;
-      if (!inRoom && landing.step === 'profile' && nickValue()) goRoomStep(true);
+    applyProfileToLanding();
+    // 로그인/로그아웃(첫 화면을 정한 뒤, 방 밖): 로그인 → 이 브라우저에서 확정한 적 있으면 방, 처음이면 프로필 설정 / 로그아웃 → 시작
+    if (loginChanged && landing.ready && !inRoom) {
+      if (uid) goStep(isConfirmed(uid) && nickValue() ? 'room' : 'profile', true);
+      else goStep('start', true);
     }
     renderAccount();
   }
-  /** 로그인 프로필(닉네임·아바타)을 랜딩 입력에 채운다. 사용자가 닉네임을 입력 중이면 그 값은 건드리지 않는다 */
+  /**
+   * 로그인 프로필(닉네임·아바타·사진)을 프로필 설정에 채운다. 사용자가 닉네임을 입력 중이면 그 값은 건드리지 않는다.
+   * 프로필 행이 아직 없으면 소셜 사진(user metadata)으로 먼저 채운다.
+   * 사진: 기본(소셜) = social_avatar_url → user metadata 사진 / 지금 사진 = avatar_url → 기본 사진 / 모드 = avatar_mode(사진이 없으면 emoji)
+   */
   function applyProfileToLanding() {
-    var pr = acct.profile; if (!pr) return;
-    var key = [pr.user_id, pr.nickname, pr.avatar_emoji || '', pr.avatar_color || ''].join(':');
-    if (acct.appliedKey === key) return;
+    if (!acctLoggedIn()) return;
+    var pr = acct.profile, u = acct.user;
+    var key = pr ? ['p', pr.user_id, pr.nickname, pr.avatar_emoji || '', pr.avatar_color || '', pr.avatar_mode || '', pr.avatar_url || '', pr.social_avatar_url || ''].join('|') : 'u|' + u.id;
+    if (acct.appliedKey === key || (!pr && acct.appliedKey)) return;
     acct.appliedKey = key;
-    var nick = $('nick');
-    if (pr.nickname) {
-      profile.name = String(pr.nickname).slice(0, 12);
-      if (nick && (document.activeElement !== nick || !nick.value.trim())) nick.value = profile.name;
+    photo.social = (pr && pr.social_avatar_url) || u.avatarUrl || null;
+    photo.url = (pr && pr.avatar_url) || photo.social;
+    photo.mode = pr && pr.avatar_mode === 'emoji' ? 'emoji' : (photo.url ? 'photo' : 'emoji');
+    if (pr) {
+      var nick = $('nick');
+      if (pr.nickname) {
+        profile.name = String(pr.nickname).slice(0, 12);
+        if (nick && !(landing.nickEdited && document.activeElement === nick && nick.value.trim())) nick.value = profile.name;
+      }
+      if (EMOJIS.indexOf(pr.avatar_emoji) !== -1) profile.emoji = pr.avatar_emoji;
+      if (AV_COLORS.indexOf(pr.avatar_color) !== -1) profile.color = pr.avatar_color;
+      saveProfile();
     }
-    if (EMOJIS.indexOf(pr.avatar_emoji) !== -1) profile.emoji = pr.avatar_emoji;
-    if (AV_COLORS.indexOf(pr.avatar_color) !== -1) profile.color = pr.avatar_color;
-    saveProfile(); renderProfile();
+    renderProfile();
   }
-  /** 방 만들기/참가 직전: 입력한 닉네임·아바타가 프로필과 다르면 프로필에 저장한다(실패해도 게임은 그대로 진행) */
-  function syncProfileOnEnter(p) {
-    if (!acctLoggedIn() || !acct.profile || !p) return;
+  /**
+   * 지금 프로필 설정(닉네임 · 사진/이모지 모드 · 사진 · 얼굴 · 색상)을 로그인 프로필에 저장한다. 바뀐 칸만 보낸다.
+   * 프로필 행을 아직 못 받았으면 보내지 않는다(모르는 값으로 덮어쓰지 않게). loud=true 면 실패를 토스트로 알린다.
+   */
+  function syncAccountProfile(loud) {
+    if (!acctLoggedIn() || !acct.profile || !Account) return;
+    var pr = acct.profile;
+    var want = {
+      nickname: profile.name,
+      avatar_mode: photo.mode === 'photo' && avatarImgUrl(photo.url) ? 'photo' : 'emoji',
+      avatar_url: photo.url || null,
+      avatar_emoji: profile.emoji,
+      avatar_color: profile.color
+    };
     var patch = {};
-    if (p.name && p.name !== acct.profile.nickname) patch.nickname = p.name;
-    if (p.avatar && p.avatar.emoji !== acct.profile.avatar_emoji) patch.avatar_emoji = p.avatar.emoji;
-    if (p.avatar && p.avatar.color !== acct.profile.avatar_color) patch.avatar_color = p.avatar.color;
+    Object.keys(want).forEach(function (k) {
+      if (k === 'nickname' && !want[k]) return;
+      if ((want[k] || null) !== (pr[k] || null)) patch[k] = want[k];
+    });
     if (!Object.keys(patch).length) return;
-    Account.updateProfile(patch).catch(function (e) { console.warn('[account] profile sync failed:', e && e.message); });
+    Account.updateProfile(patch).catch(function (e) {
+      console.warn('[account] profile sync failed:', e && e.message);
+      if (loud) acctErr(e, '프로필을 저장하지 못했어요');
+    });
   }
 
-  function renderAcctAvatar(node) {
-    if (!node) return;
-    node.innerHTML = '';
-    var url = (acct.profile && acct.profile.avatar_url) || (acct.user && acct.user.avatarUrl) || '';
-    var emoji = (acct.profile && acct.profile.avatar_emoji) || profile.emoji;
-    var color = (acct.profile && acct.profile.avatar_color) || profile.color;
-    node.style.setProperty('--av', isHex(color) ? color : '#d6d6d6');
-    if (/^https?:\/\//.test(url)) {
-      var img = document.createElement('img'); img.alt = ''; img.referrerPolicy = 'no-referrer'; img.src = url;
-      img.onerror = function () { if (img.parentNode) img.parentNode.removeChild(img); node.textContent = emoji; };
-      node.appendChild(img);
-    } else node.textContent = emoji;
-  }
+  function renderAcctAvatar(node) { paintAvatar(node, myAvatar()); }
 
   function renderAccount() {
-    var on = acct.on, logged = acctLoggedIn();
-    var area = $('auth-area'); if (area) area.hidden = !on;
-    var out = $('auth-logged-out'); if (out) out.hidden = !on || logged;
-    var chip = $('account-chip'); if (chip) chip.hidden = !logged;
-    if (logged) {
-      renderAcctAvatar($('chip-avatar'));
-      var nm = $('chip-name'); if (nm) nm.textContent = acctName();
-      var cp = $('chip-provider'); if (cp) cp.textContent = providerLabel(acct.user && acct.user.provider) + ' 계정으로 로그인됨';
-    }
+    var logged = acctLoggedIn();
+    renderProfile();
     renderLanding();
     var top = $('btn-account-top'); if (top) top.hidden = !logged;
     var slot = $('menu-slot-account'); if (slot) slot.hidden = !logged;
@@ -2259,5 +2418,5 @@
   else boot();
 
   // 디버깅용 (콘솔에서 상태 확인)
-  window.__dg = { state: state, ui: ui, acct: acct, ops: function () { return ops; }, redrawAll: redrawAll, myId: function () { return myId; } };
+  window.__dg = { state: state, ui: ui, acct: acct, photo: photo, landing: landing, ops: function () { return ops; }, redrawAll: redrawAll, myId: function () { return myId; } };
 })();

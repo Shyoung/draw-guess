@@ -89,7 +89,11 @@ async function mainRun() {
       const mm = await metrics(m);
       check(mm.sw <= VW, '랜딩(1단계): 가로 스크롤 없음', mm.sw);
       check(parseFloat(await m.locator('#nick').evaluate((e) => getComputedStyle(e).fontSize)) >= 16, '랜딩: 닉네임 입력 font-size ≥ 16px');
-      check(await m.locator('#landing-step-profile').isVisible() && await m.locator('#landing-step-room').isHidden(), '랜딩: 첫 방문은 1단계(프로필)');
+      check(await m.locator('#landing-step-profile').isVisible() && await m.locator('#landing-step-room').isHidden(), '랜딩: 첫 방문은 프로필 설정');
+      check(await m.locator('#landing-step-start').isHidden() && await m.locator('#avatar-mode').isHidden(), '랜딩(로그인 꺼짐): 시작 단계 · 사진 탭 없음');
+      check((await m.locator('.landing-card a[href="/privacy"]').count()) === 0 && (await m.locator('.landing-foot .privacy-link').count()) === 1, '랜딩: 개인정보 처리방침 링크는 카드 밖(페이지 맨 아래)');
+      const pv = await box(m, '.landing-foot .privacy-link');
+      check(pv && Math.abs(pv.x + pv.width / 2 - VW / 2) <= 2, '랜딩: 처리방침 링크 가로 가운데', fmt(pv));
       const card = await box(m, '.landing-card');
       check(card && card.x <= 16.5 && card.x + card.width >= VW - 16.5, '랜딩: 카드가 거의 전체 폭(좌우 여백 ≤ 16px)', fmt(card));
       const cb = await box(m, '#color-row .color-btn'), eb = await box(m, '#emoji-strip .emoji-btn'), nb = await box(m, '#btn-profile-next');
@@ -106,6 +110,8 @@ async function mainRun() {
         check(inside(b) && b.height >= 38, `랜딩(2단계): ${sel} 화면 안 · 높이 ≥ 38px`, fmt(b));
       }
       check(parseFloat(await m.locator('#room-code-input').evaluate((e) => getComputedStyle(e).fontSize)) >= 16, '랜딩(2단계): 방 코드 입력 font-size ≥ 16px');
+      const card2 = await box(m, '.landing-card'), pv2 = await box(m, '.landing-foot .privacy-link');
+      check(card2 && pv2 && pv2.y >= card2.y + card2.height, '랜딩(2단계): 처리방침 링크는 카드 아래', `${fmt(card2)} / ${fmt(pv2)}`);
     }
     if (stage === 'lobby-mode') {
       const mm = await metrics(m);

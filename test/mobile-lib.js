@@ -3,7 +3,7 @@
  *   - 서버(server/index.js) 를 3988 포트로 띄우고
  *   - iPhone 13 에뮬레이션(모바일, 호스트) + 데스크톱 1280x860 두 브라우저 컨텍스트로 1라운드 게임을 끝까지 돌린다.
  *   - 각 단계마다 hook(stage, ctx) 를 호출한다. stage:
- *       landing(1단계 프로필), landing-room(2단계 방), lobby-mode, lobby-settings, choosing-drawer, drawing-drawer, turnend,
+ *       landing(프로필 설정 — 서버에 Supabase 설정이 없어 로그인이 꺼져 있으므로 시작 단계는 건너뛴다), landing-room(방), lobby-mode, lobby-settings, choosing-drawer, drawing-drawer, turnend,
  *       drawing-guesser, drawing-guesser-chat, gameover, gallery
  */
 const { spawn } = require('child_process');
@@ -67,7 +67,7 @@ async function runMobileFlow(hook, opts) {
     }
     const ctx = { mobile, desktop, browser, word: null };
 
-    // 1. 랜딩 1단계(프로필) → "다음" → 2단계(방)
+    // 1. 랜딩: (로그인 꺼짐 → 시작 단계 없음) 프로필 설정 → "다음" → 방
     await mobile.goto(URL + '/');
     await mobile.waitForSelector('#landing-step-profile:not([hidden])');
     await sleep(200);

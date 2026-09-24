@@ -3,11 +3,13 @@
  * fullPage 가 아니라 "사용자가 실제로 보는 화면"(뷰포트)만 찍는다.
  *   node test/mobile-shots.js
  *
- * 1회차(기본 단계): 01 랜딩 1단계(프로필) · 01b 랜딩 2단계(방) · 02~10 기본 단계 + 11 메뉴 시트 · 12 플레이어 시트 · 13 채팅 시트(출제자) · 14 키보드 컴팩트(390x360)
+ * 1회차(기본 단계): 01 랜딩 프로필 설정(로그인 꺼짐) · 01b 랜딩 방 · 02~10 기본 단계 + 11 메뉴 시트 · 12 플레이어 시트 · 13 채팅 시트(출제자) · 14 키보드 컴팩트(390x360)
+ *   + 가짜 Supabase(?mock=1&auth=1): 00 시작 단계(로그아웃) · 01c 로그인 프로필 설정(사진 모드) · 01d 로그인 프로필 설정(이모지 모드) · 01e 방 단계(로그인, 사진)
  * 2회차(긴 사용자 단어): 15 관전자 마스크 · 16 출제자 단어
  */
 const path = require('path');
 const fs = require('fs');
+const { devices } = require('playwright');
 const { runMobileFlow, say, sleep } = require('./mobile-lib');
 
 const SHOTS = path.join(__dirname, 'shots', 'mobile');
@@ -26,7 +28,8 @@ const FILES = {
   'gameover': '09-gameover.png',
   'gallery': '10-gallery.png',
 };
-const EXTRA = ['11-menu-sheet.png', '12-players-sheet.png', '13-chat-sheet.png', '14-keyboard-compact.png', '15-long-word.png', '16-long-word-drawer.png'];
+const EXTRA = ['00-start.png', '01c-profile-photo.png', '01d-profile-emoji.png', '01e-landing-room-login.png',
+  '11-menu-sheet.png', '12-players-sheet.png', '13-chat-sheet.png', '14-keyboard-compact.png', '15-long-word.png', '16-long-word-drawer.png'];
 let taken = 0;
 
 async function shot(page, file) {
@@ -51,6 +54,29 @@ async function closeSheet(page, sheetId) {
       const m = ctx.mobile;
       const file = FILES[stage];
       if (file) await shot(m, file);
+      if (stage === 'landing') {
+        // 로그인 랜딩(가짜 Supabase): 같은 서버에서 별도 iPhone 컨텍스트로
+        const origin = new URL(m.url()).origin;
+        const actx = await ctx.browser.newContext({ ...devices['iPhone 13'] });
+        const a = await actx.newPage();
+        await a.goto(`${origin}/?mock=1&auth=1&stay=1&auth_state=out`);
+        await a.waitForSelector('#landing-step-start:not([hidden])', { timeout: 5000 });
+        await sleep(300);
+        await shot(a, '00-start.png');
+        await a.click('#btn-login-google');
+        await a.waitForSelector('#avatar-mode:not([hidden])', { timeout: 5000 });
+        await sleep(350);
+        await shot(a, '01c-profile-photo.png');
+        await a.click('#btn-mode-emoji');
+        await sleep(200);
+        await shot(a, '01d-profile-emoji.png');
+        await a.click('#btn-mode-photo');
+        await a.click('#btn-profile-next');
+        await a.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
+        await sleep(350);
+        await shot(a, '01e-landing-room-login.png');
+        await actx.close();
+      }
       if (stage === 'drawing-drawer') {
         await openSheet(m, '#drawer-chat', 'sheet-chat');
         await shot(m, '13-chat-sheet.png');
