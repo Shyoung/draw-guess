@@ -941,6 +941,26 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(sh2.length === 1 && /사과.*\.webp:image\/webp$/.test(sh2[0]) && (await txt(ms, '#btn-drawings-all')) === '모두 저장', '모바일 내 정보: 두 번째 탭에 공유 시트(webp 1장)', sh2);
     await ms.context().close();
 
+    // ---------- 2-i. 새 버전 배포: 게임 중이면 대기실로 돌아올 때 새로고침 ----------
+    console.log('\n== 새 버전 새로고침 미루기 (가짜 소켓) ==');
+    const upG = await newPage(browser, '새버전');
+    await upG.goto(`${URL}/?mock=1&scene=drawing`);
+    await upG.waitForFunction(() => window.__dg && window.__dg.state.phase === 'drawing', null, { timeout: 8000 });
+    await upG.evaluate(() => { window.__notReloaded = 1; window.__mockFire('server:version', { version: 'new-version-xyz' }); });
+    await sleep(1800);
+    check(await upG.evaluate(() => window.__notReloaded === 1) && (await upG.locator('#toasts .toast').filter({ hasText: '게임이 끝나면' }).count()) >= 1, '새 버전(게임 중): 바로 새로고침하지 않고 안내');
+    const navP = upG.waitForNavigation({ timeout: 6000 }).then(() => true).catch(() => false);
+    await upG.evaluate(() => window.__mockFire('room:state', Object.assign({}, window.__dg.state, { phase: 'lobby', drawerId: null })));
+    check(await navP, '새 버전: 대기실로 돌아오면 새로고침');
+    await upG.context().close();
+    const upL = await newPage(browser, '새버전-대기실');
+    await upL.goto(`${URL}/?mock=1&stay=1`);
+    await upL.waitForSelector('#landing-step-profile:not([hidden]), #view-room:not([hidden])', { timeout: 8000 });
+    const nav2 = upL.waitForNavigation({ timeout: 6000 }).then(() => true).catch(() => false);
+    await upL.evaluate(() => window.__mockFire('server:version', { version: 'new-version-xyz' }));
+    check(await nav2, '새 버전(방 밖/대기실): 바로 새로고침');
+    await upL.context().close();
+
     // ---------- 2-e. OAuth 복귀 뒤 뒤로가기 ----------
     console.log('\n== OAuth 복귀 뒤 뒤로가기 (가짜 Supabase) ==');
     const o = await newPage(browser, 'OAuth복귀');

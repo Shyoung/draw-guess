@@ -44,6 +44,8 @@ const DEVICES = [
   { tag: 'ipad-pro13-portrait', w: 1024, h: 1366, touch: true, mobile: true },
   { tag: 'ipad-air-landscape', w: 1180, h: 820, touch: true, mobile: false },
   { tag: 'ipad-pro13-landscape', w: 1366, h: 1024, touch: true, mobile: false },
+  { tag: 'phone-landscape', w: 844, h: 390, touch: true, mobile: false },   // 폰 가로: 가로 게임 셸
+  { tag: 'phone-se-landscape', w: 667, h: 375, touch: true, mobile: false },
   { tag: 'desktop-narrow-portrait', w: 900, h: 1100, touch: false, mobile: false }, // 마우스: 기존 중간 화면 유지
 ];
 
@@ -97,7 +99,7 @@ const inside = (b, m) => !!b && b.vis && b.t >= -0.5 && b.l >= -0.5 && b.b <= m.
       // 대기실
       await enterRoom(p, `${URL}/?mock=1&stay=1`);
       await sleep(600);
-      const isMobile = await p.evaluate(() => window.matchMedia('(max-width: 767px), (max-width: 1099px) and (orientation: portrait) and (pointer: coarse)').matches);
+      const isMobile = await p.evaluate((q) => window.matchMedia(q).matches, '(max-width: 639px), (max-width: 767px) and (orientation: portrait), (max-width: 767px) and (pointer: fine), (max-width: 1099px) and (orientation: portrait) and (pointer: coarse)');
       check(isMobile === d.mobile, `${d.tag}: ${d.mobile ? '모바일 UI' : '데스크톱/중간 UI'}`, isMobile);
       let m = await measure(p);
       check(m.sw <= m.vw, `${d.tag} 대기실: 가로 스크롤 없음`, `${m.sw} > ${m.vw}`);
@@ -124,7 +126,7 @@ const inside = (b, m) => !!b && b.vis && b.t >= -0.5 && b.l >= -0.5 && b.b <= m.
       await p.screenshot({ path: path.join(OUT, `${d.tag}-drawing.png`) });
       // 키보드 흉내: 아이패드 사파리처럼 레이아웃(방향·innerHeight)은 그대로 두고 visualViewport 높이만 줄인다(키보드 ≈ 세로 400px · 가로 390px)
       if (d.touch) {
-        const kb = d.h > d.w ? 400 : 390, before = m.canvas;
+        const kb = d.h > d.w ? 400 : d.h < 600 ? Math.round(d.h * 0.5) : 390, before = m.canvas; // 폰 가로 키보드 ≈ 화면 절반
         const setVV = (H) => p.evaluate((H) => { const vv = window.visualViewport; Object.defineProperty(vv, 'height', { configurable: true, get: () => (H == null ? window.innerHeight : H) }); vv.dispatchEvent(new Event('resize')); }, H);
         await p.click('#chat-input');
         await setVV(d.h - kb);

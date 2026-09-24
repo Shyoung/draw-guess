@@ -515,6 +515,24 @@
   }
   var connectErrorToasted = false;
 
+  var update = { pending: false, reloading: false };
+  /** 지금 새로고침해도 되는가: 방 밖이거나, 대기실이고 결과 화면 · 설정 창을 닫았고 채팅을 쓰는 중이 아닐 때 */
+  function canReloadNow() {
+    if (!inRoom) return true;
+    if (state.phase !== 'lobby') return false;
+    var og = $('overlay-gameover'); if (og && !og.hidden) return false;
+    if (roomProfile.open) return false;
+    var ci = $('chat-input'); if (ci && document.activeElement === ci && ci.value) return false;
+    return true;
+  }
+  function reloadForUpdate() {
+    if (update.reloading) return;
+    update.reloading = true; update.pending = false;
+    toast('새 버전으로 새로고침합니다');
+    if (inRoom && state.roomCode) saveLastRoom(state.roomCode); // 새로고침 뒤 같은 방으로 자동 복귀
+    setTimeout(function () { location.reload(); }, 1200);
+  }
+  function maybeReloadForUpdate() { if (update.pending && !update.reloading && canReloadNow()) reloadForUpdate(); }
   function connect() {
     if (typeof io !== 'function') { toast('서버에 연결할 수 없어요 (socket.io 로드 실패)', 'error'); return; }
     try { socket = io({ auth: { token: acctToken() || undefined } }); } catch (e) { toast('서버 연결에 실패했어요', 'error'); return; }
@@ -541,13 +559,15 @@
     });
 
     // 배포 후 재접속 시 서버 버전이 이 페이지의 버전과 다르면 새 코드를 받기 위해 새로고침한다.
+    // 게임 중(대기실이 아님 · 결과 화면을 보는 중 · 프로필 수정 중)이면 미뤘다가 대기실로 돌아오면 새로고침한다
+    // → 그리는 사람이 새로고침으로 끊겨 차례가 넘어가거나, 방장이 바뀌는 일을 막는다
     on('server:version', function (p) {
       var meta = document.querySelector('meta[name="asset-version"]');
       var pageVersion = meta ? meta.getAttribute('content') : null;
       if (!pageVersion || !p || typeof p.version !== 'string' || p.version === pageVersion) return;
-      toast('새 버전이 배포되어 새로고침합니다');
-      if (inRoom && state.roomCode) saveLastRoom(state.roomCode); // 새로고침 뒤 같은 방으로 자동 복귀
-      setTimeout(function () { location.reload(); }, 1200);
+      if (canReloadNow()) { reloadForUpdate(); return; }
+      if (!update.pending) toast('새 버전이 나왔어요. 이번 게임이 끝나면 새로고침돼요');
+      update.pending = true;
     });
     on('room:state', onRoomState);
     on('game:choosing', onChoosing);
@@ -1197,6 +1217,7 @@
     placeMobileChrome();
     if (roomProfile.open && !roomProfile.formless && (!inRoom || state.phase !== 'lobby')) { closeRoomProfile(); if (inRoom) toast('게임이 시작돼 프로필 수정을 닫았어요'); }
     renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderResultsSave(); renderChatPeek(); renderAccount();
+    maybeReloadForUpdate();
   }
 
   function canEndGame() { return inRoom && isHost() && (state.phase === 'choosing' || state.phase === 'drawing' || state.phase === 'turnEnd'); }
@@ -2404,8 +2425,9 @@
   // Mobile chrome (≤767px · 세로 터치 태블릿) — 바텀 시트 · 노드 재배치 · visualViewport 추적 · 채팅 티커/말풍선
   //   데스크톱/태블릿에서는 아무 노드도 옮기지 않고 시트도 열리지 않는다(CSS 가 모바일 전용 요소를 display:none 처리).
   // ------------------------------------------------------------------
-  // style.css 의 모바일 미디어 블록과 같은 조건: 폰(≤767px) 또는 세로로 든 터치 태블릿(≤1099px, 아이패드 세로)
-  var MOBILE_MQ = '(max-width: 767px), (max-width: 1099px) and (orientation: portrait) and (pointer: coarse)';
+  // style.css 의 모바일 미디어 블록과 같은 조건: 폰 세로(≤767px) · 좁은 마우스 창 · 세로로 든 터치 태블릿(≤1099px, 아이패드 세로).
+  // 가로로 든 터치 기기(≥640px)는 모바일 셸 대신 가로 게임 셸(tablet-shell)
+  var MOBILE_MQ = '(max-width: 639px), (max-width: 767px) and (orientation: portrait), (max-width: 767px) and (pointer: fine), (max-width: 1099px) and (orientation: portrait) and (pointer: coarse)';
   var mobileMq = window.matchMedia ? window.matchMedia(MOBILE_MQ) : { matches: false, addEventListener: null, addListener: null };
   /** 넓은 화면 + 마우스일 때만 채팅 입력창에 자동 포커스(터치 기기는 가상 키보드가 튀어나온다) */
   function canAutoFocusChat() {
@@ -2419,7 +2441,7 @@
   var TABLET_MIN_W = 700; // 모바일 UI 중 이 폭 이상 = 태블릿 세로(출제자 배치가 다르다)
   function isTabletPortrait() { return mobileMq.matches && window.innerWidth >= TABLET_MIN_W; }
   // 가로 태블릿(아이패드 가로) 게임 셸 — style.css 의 같은 미디어 조건과 맞춘다
-  var TABLET_LAND_MQ = '(min-width: 1100px) and (orientation: landscape) and (pointer: coarse)';
+  var TABLET_LAND_MQ = '(min-width: 640px) and (orientation: landscape) and (pointer: coarse)';
   var tabletLandMq = window.matchMedia ? window.matchMedia(TABLET_LAND_MQ) : { matches: false, addEventListener: null, addListener: null };
   var openSheetId = null, sheetTimer = null, tickerTimer = null, lastCompact = false;
 
