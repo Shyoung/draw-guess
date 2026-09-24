@@ -51,6 +51,24 @@
                autocapitalize="characters" autocomplete="off" spellcheck="false" aria-label="방 코드 4글자">
         <button id="btn-join" class="btn btn-secondary btn-lg" type="button">참가하기</button>
       </div>
+
+      <!-- 로그인(선택, Supabase). /config.js 에 설정이 없으면 client.js 가 전부 hidden 으로 둔다(게스트 전용) -->
+      <div id="auth-area" class="auth-area" hidden>
+        <div id="auth-logged-out" hidden>
+          <div class="divider"><span>로그인하고 단어 세트 저장</span></div>
+          <div class="auth-buttons">
+            <button id="btn-login-google" class="btn btn-lg btn-block btn-google" type="button"><span class="g-glyph" aria-hidden="true">G</span> Google로 계속하기</button>
+            <button id="btn-login-kakao" class="btn btn-lg btn-block btn-kakao" type="button"><span class="k-glyph" aria-hidden="true">💬</span> 카카오로 계속하기</button>
+          </div>
+          <p class="auth-note">로그인하면 단어 세트가 계정에 저장돼요 · <a href="/privacy" target="_blank" rel="noopener">개인정보 처리방침</a></p>
+        </div>
+        <div id="account-chip" class="account-chip" hidden>
+          <span id="chip-avatar" class="chip-avatar" aria-hidden="true"></span>
+          <span id="chip-name" class="chip-name"></span>
+          <button id="btn-account-open" class="btn btn-ghost btn-sm" type="button">내 정보</button>
+          <button id="btn-logout" class="btn btn-ghost btn-sm" type="button">로그아웃</button>
+        </div>
+      </div>
     </section>
   </main>
 
@@ -72,6 +90,7 @@
 
       <div class="topbar-right">
         <div id="timer" class="timer" aria-label="남은 시간">–</div>
+        <button id="btn-account-top" class="btn btn-ghost btn-sm" type="button" hidden>내 정보</button>
         <button id="btn-sound" class="btn btn-ghost btn-sm btn-icon" type="button" aria-pressed="false" title="효과음 끄기">🔊</button>
         <button id="btn-leave" class="btn btn-ghost btn-sm" type="button">나가기</button>
         <!-- 모바일 전용: 방 코드·초대·효과음·나가기를 담는 메뉴 시트를 연다 (CSS 로 데스크톱에서는 숨김) -->
@@ -157,6 +176,10 @@
             <span>사용자 단어 <small>(쉼표로 구분, 각 1~20자)</small></span>
             <textarea id="set-customWords" rows="3" placeholder="예) 사과, 자전거, 무지개"></textarea>
           </label>
+          <div id="wordset-tools" class="wordset-tools" hidden>
+            <select id="wordset-load" aria-label="내 세트 불러오기" hidden></select>
+            <button id="btn-wordset-save" class="btn btn-ghost btn-sm" type="button">💾 현재 단어를 세트로 저장</button>
+          </div>
           <label class="check">
             <input id="set-customWordsOnly" type="checkbox">
             <span>사용자 단어만 사용</span>
@@ -298,6 +321,7 @@
         <div class="menu-row" id="menu-slot-code"></div>
         <div class="menu-row" id="menu-slot-copy"></div>
         <div class="menu-row menu-row-split"><span class="menu-label">효과음</span><span id="menu-slot-sound"></span></div>
+        <div class="menu-row" id="menu-slot-account" hidden></div>
         <div class="menu-row menu-row-danger" id="menu-slot-leave"></div>
       </div>
     </div>
@@ -329,16 +353,86 @@
     </div>
   </div>
 
+  <!-- ================= 내 정보 (로그인 사용자) =================
+       데스크톱: 갤러리와 같은 .modal / 모바일: .sheet. 본문 #account-body 는 열릴 때 client.js 가 해당 컨테이너로 옮긴다. -->
+  <div id="overlay-account" class="modal modal-account" hidden>
+    <div class="modal-card modal-card-account" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
+      <header class="modal-head">
+        <h3 id="account-modal-title" class="card-title">👤 내 정보</h3>
+        <div class="modal-actions">
+          <button id="btn-account-close" class="btn btn-ghost btn-sm" type="button">닫기</button>
+        </div>
+      </header>
+      <div id="account-modal-body" class="account-modal-body">
+        <div id="account-body" class="account-body">
+          <section class="acct-section" aria-labelledby="acct-profile-title">
+            <h4 id="acct-profile-title" class="acct-title">프로필</h4>
+            <div class="acct-profile">
+              <span id="acct-avatar" class="avatar acct-avatar" aria-hidden="true"></span>
+              <div class="acct-fields">
+                <label class="field">
+                  <span class="field-label">닉네임 <small>(1~12자)</small></span>
+                  <span class="acct-nick-row">
+                    <input id="acct-nick" type="text" maxlength="12" autocomplete="off" spellcheck="false">
+                    <button id="btn-acct-nick-save" class="btn btn-secondary btn-sm" type="button">저장</button>
+                  </span>
+                </label>
+                <div class="acct-meta">
+                  <span id="acct-provider" class="acct-provider"></span>
+                  <button id="btn-acct-logout" class="btn btn-ghost btn-sm" type="button">로그아웃</button>
+                </div>
+              </div>
+            </div>
+          </section>
+          <section class="acct-section" aria-labelledby="acct-sets-title">
+            <h4 id="acct-sets-title" class="acct-title">내 단어 세트 <span id="wordset-count" class="panel-sub"></span></h4>
+            <p id="wordset-loading" class="card-note">불러오는 중…</p>
+            <p id="wordset-empty" class="card-note" hidden>아직 단어 세트가 없어요. 새 세트를 만들어보세요!</p>
+            <ul id="wordset-list" class="wordset-list"></ul>
+            <p id="wordset-apply-hint" class="wordset-apply-hint" hidden>"이 세트로 방 설정"은 호스트로 대기실에 있을 때 쓸 수 있어요.</p>
+            <button id="btn-wordset-new" class="btn btn-primary btn-sm" type="button">+ 새 세트</button>
+            <form id="wordset-form" class="wordset-form" autocomplete="off" hidden>
+              <span id="ws-form-title" class="ws-form-title">새 세트</span>
+              <input id="ws-name" type="text" maxlength="30" placeholder="세트 이름 (1~30자)" aria-label="세트 이름">
+              <textarea id="ws-words" rows="4" placeholder="쉼표로 구분, 각 1~20자 · 최대 500개&#10;예) 사과, 자전거, 무지개" aria-label="단어 목록"></textarea>
+              <div class="ws-form-foot">
+                <span id="ws-count" class="ws-count">0개</span>
+                <span id="ws-error" class="ws-error" role="alert"></span>
+                <button id="btn-ws-cancel" class="btn btn-ghost btn-sm" type="button">취소</button>
+                <button id="btn-ws-submit" class="btn btn-primary btn-sm" type="submit">저장</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="sheet-account" class="sheet" hidden>
+    <div class="sheet-backdrop" data-sheet-close></div>
+    <div class="sheet-panel sheet-panel-account" role="dialog" aria-modal="true" aria-labelledby="sheet-account-title">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <header class="sheet-head">
+        <h3 id="sheet-account-title" class="sheet-title">👤 내 정보</h3>
+        <button class="sheet-close" type="button" aria-label="닫기" data-sheet-close>✕</button>
+      </header>
+      <div class="sheet-body" id="sheet-account-body"></div>
+    </div>
+  </div>
+
   <div id="toasts" class="toasts" aria-live="assertive"></div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <!-- 공개 설정(window.APP_CONFIG): 로그인이 켜져 있으면 { supabaseUrl, supabaseAnonKey }, 아니면 {} -->
+  <script src="/config.js"></script>
   <script>
-    // 개발용 목(mock) 모드: ?mock=1 이면 가짜 io()를 client.js 보다 먼저 로드한다.
+    // 개발용 목(mock) 모드: ?mock=1 이면 가짜 io()를 client.js 보다 먼저 로드한다. (&auth=1 이면 가짜 supabase 도 설치)
     if (location.search.indexOf('mock=1') !== -1) {
       document.write('<script src="dev-mock.js"><\/script>');
     }
   </script>
   <script src="sound.js"></script>
+  <script src="account.js"></script>
   <script src="client.js"></script>
 </body>
 </html>

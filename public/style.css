@@ -889,3 +889,82 @@ body.sheet-open { overflow: hidden; }
   .gallery-by { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .gallery-sub .btn { align-self: flex-end; }
 }
+
+/* =====================================================================
+   계정 — 로그인(랜딩) · 계정 칩 · 내 정보(모달/시트) · 단어 세트 · 로그인 배지
+   로그인 기능이 꺼져 있으면 관련 노드는 모두 hidden 이라 아무것도 그려지지 않는다.
+   ===================================================================== */
+.auth-area { display: flex; flex-direction: column; gap: 10px; }
+.auth-buttons { display: flex; flex-direction: column; gap: 8px; }
+.btn-google { background: #fff; color: #1f1f1f; box-shadow: inset 0 0 0 1px #dadce0, var(--shadow-sm); }
+.btn-google:hover:not(:disabled) { background: #f8f9fa; }
+.g-glyph {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  font-weight: 900; font-size: 15px; line-height: 1; color: #4285f4; background: #fff; box-shadow: inset 0 0 0 1px #dadce0;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+}
+/* 카카오 브랜드 규정: 배경 #FEE500, 글자 검정 */
+.btn-kakao { background: #FEE500; color: #000000; box-shadow: 0 6px 16px rgba(254, 229, 0, 0.35); }
+.btn-kakao:hover:not(:disabled) { background: #f4dc00; }
+.k-glyph { font-size: 16px; line-height: 1; }
+.auth-note { text-align: center; font-size: 12px; color: var(--muted); }
+.auth-note a { color: var(--secondary-dark); font-weight: 700; }
+.account-chip { display: flex; align-items: center; gap: 8px; background: #f8f6fc; border-radius: 999px; padding: 6px 8px 6px 6px; }
+.chip-avatar {
+  flex: 0 0 auto; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: 19px;
+  background: var(--av, #d6d6d6); overflow: hidden; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.08);
+}
+.chip-avatar img, .acct-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chip-name { flex: 1 1 auto; min-width: 0; font-weight: 800; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.account-chip .btn { flex: 0 0 auto; }
+/* 플레이어 목록: 로그인 사용자 ✔ (은은하게) */
+.login-badge {
+  display: inline-grid; place-items: center; width: 13px; height: 13px; border-radius: 50%; margin-left: 1px;
+  background: var(--green); color: #fff; font-size: 8px; font-weight: 900; line-height: 1; vertical-align: 1px; opacity: .85;
+}
+/* 대기실 설정: 내 세트 도구 */
+.wordset-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: -4px; }
+.wordset-tools select { width: auto; flex: 1 1 200px; min-width: 0; padding: 8px 10px; font-size: 13px; font-weight: 600; }
+.wordset-tools .btn { flex: 0 0 auto; }
+/* 내 정보 모달(데스크톱) */
+.modal-account { z-index: 55; }
+.modal-card-account { width: min(640px, 100%); }
+.account-modal-body { overflow: auto; min-height: 0; padding: 2px; }
+.account-body { display: flex; flex-direction: column; gap: 20px; }
+.acct-section { display: flex; flex-direction: column; gap: 10px; }
+.acct-title { font-size: 13px; font-weight: 800; color: var(--muted); letter-spacing: .02em; display: flex; align-items: baseline; gap: 6px; }
+.acct-profile { display: flex; align-items: center; gap: 14px; }
+.acct-avatar { width: 56px; height: 56px; font-size: 30px; overflow: hidden; flex: 0 0 auto; }
+.acct-fields { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.acct-fields .field-label small { font-weight: 500; }
+.acct-nick-row { display: flex; gap: 8px; align-items: center; }
+.acct-nick-row input { flex: 1 1 auto; min-width: 0; }
+.acct-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.acct-provider { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 단어 세트 목록/폼 */
+.wordset-list { display: flex; flex-direction: column; gap: 8px; }
+.wordset-list:empty { display: none; }
+.wordset-item { background: #f8f6fc; border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.ws-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ws-name { font-size: 15px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-meta { font-size: 12px; color: var(--muted); white-space: nowrap; flex: 0 0 auto; }
+.ws-preview { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.ws-actions .btn { padding: 6px 11px; font-size: 12px; }
+.wordset-apply-hint { font-size: 12px; color: var(--muted); }
+#btn-wordset-new { align-self: flex-start; }
+.wordset-form { display: flex; flex-direction: column; gap: 8px; background: #fbfaff; border: 2px dashed var(--line); border-radius: 14px; padding: 12px; }
+.ws-form-title { font-weight: 800; font-size: 14px; }
+.ws-form-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ws-count { font-size: 12px; font-weight: 700; color: var(--muted); }
+.ws-count.over { color: var(--red); }
+.ws-error { flex: 1 1 auto; min-width: 0; font-size: 12px; color: var(--red); font-weight: 700; }
+.ws-error:empty { display: none; }
+.ws-form-foot .btn:last-child { margin-left: auto; }
+@media (max-width: 767px) {
+  .sheet-panel-account { max-height: 92%; }
+  .sheet-panel-account .account-body { padding: 2px 0 8px; gap: 16px; }
+  .account-chip { padding: 5px 6px 5px 5px; gap: 6px; }
+  .account-chip .btn-sm { padding: 6px 9px; font-size: 12px; }
+  .wordset-tools select { flex-basis: 100%; }
+}

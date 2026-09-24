@@ -456,10 +456,11 @@
 
   function connect() {
     if (typeof io !== 'function') { toast('서버에 연결할 수 없어요 (socket.io 로드 실패)', 'error'); return; }
-    try { socket = io(); } catch (e) { toast('서버 연결에 실패했어요', 'error'); return; }
+    try { socket = io({ auth: { token: acctToken() || undefined } }); } catch (e) { toast('서버 연결에 실패했어요', 'error'); return; }
 
     on('connect', function () {
       connectErrorToasted = false;
+      if (acct.lastToken) emit('auth:token', { token: acct.lastToken });
       var target = rejoinTarget || (!inRoom ? loadLastRoom() : null);
       if (target) { tryRejoin(target); return; }
       if (!inRoom) myId = socket.id || myId;
@@ -524,7 +525,7 @@
     if (s.settings && typeof s.settings === 'object') state.settings = Object.assign({}, DEFAULT_SETTINGS, s.settings);
     if (Array.isArray(s.players)) {
       state.players = s.players.filter(function (p) { return p && typeof p === 'object' && p.id != null; }).map(function (p) {
-        return { id: p.id, name: String(p.name || '?'), avatar: safeAvatar(p.avatar), score: num(p.score, 0), isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed, connected: p.connected !== false, atResults: !!p.atResults };
+        return { id: p.id, name: String(p.name || '?'), avatar: safeAvatar(p.avatar), score: num(p.score, 0), isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed, connected: p.connected !== false, atResults: !!p.atResults, loggedIn: !!p.loggedIn };
       });
     }
     if (inRoom && myId && state.players.length && !findPlayer(myId)) {
@@ -792,7 +793,7 @@
     var vr = $('view-room');
     if (vr) { vr.setAttribute('data-phase', state.phase); vr.setAttribute('data-role', isDrawer() ? 'drawer' : 'guesser'); }
     placeMobileChrome();
-    renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderChatPeek();
+    renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderChatPeek(); renderAccount();
   }
 
   function renderTopbar() {
@@ -890,6 +891,7 @@
       name.appendChild(document.createTextNode(p.name));
       if (isMe) { name.appendChild(document.createTextNode(' ')); name.appendChild(el('span', 'me-tag', '(나)')); }
       if (p.id === state.hostId) { name.appendChild(document.createTextNode(' ')); var crown = el('span', 'host-tag', '👑'); crown.title = '호스트'; name.appendChild(crown); }
+      if (p.loggedIn) { name.appendChild(document.createTextNode(' ')); var lb = el('span', 'login-badge', '✔'); lb.title = '로그인 사용자'; lb.setAttribute('aria-label', '로그인 사용자'); name.appendChild(lb); }
       if (isNext) { name.appendChild(document.createTextNode(' ')); var nt = el('span', 'next-tag', '다음 차례'); nt.title = '다음 턴에 그릴 차례예요'; name.appendChild(nt); }
       if (p.connected === false) { name.appendChild(document.createTextNode(' ')); var ot = el('span', 'offline-tag', '연결 끊김'); ot.title = '잠시 후 돌아올 수 있어요'; name.appendChild(ot); }
       info.appendChild(name);
@@ -1243,6 +1245,10 @@
       var rc = (qs.get('room') || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
       if (rc && codeIn) { codeIn.value = rc; if (nick) nick.focus(); }
     } catch (e) { /* ignore */ }
+    try {
+      var pendingRoom = sessionStorage.getItem(PENDING_ROOM_KEY);
+      if (pendingRoom) { sessionStorage.removeItem(PENDING_ROOM_KEY); if (codeIn && !codeIn.value) codeIn.value = pendingRoom.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); }
+    } catch (e) { /* ignore */ }
     renderProfile();
   }
   function codeInput() { var n = $('room-code-input'); return n ? n.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4) : ''; }
@@ -1278,6 +1284,7 @@
   function createRoom() {
     var p = validName(); if (!p) return;
     profile.name = p.name; saveProfile();
+    syncProfileOnEnter(p);
     p.token = getToken();
     withAck('room:create', p, function (ack) { setToken(ack.token); enterRoom(ack.roomCode, ack.playerId); });
   }
@@ -1286,6 +1293,7 @@
     if (code.length !== 4) { toast('방 코드는 영문 4글자예요', 'error'); var c = $('room-code-input'); if (c) c.focus(); return; }
     var p = validName(); if (!p) return;
     profile.name = p.name; saveProfile();
+    syncProfileOnEnter(p);
     withAck('room:join', { roomCode: code, name: p.name, avatar: p.avatar, token: getToken() }, function (ack) { setToken(ack.token); enterRoom(ack.roomCode || code, ack.playerId); });
   }
 
@@ -1466,6 +1474,7 @@
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
       if (openSheetId) { closeSheet(false); return; }
+      if (acct.open) { closeAccount(); return; }
       if (ui.galleryOpen) closeGallery();
     });
     buildMobileChrome();
@@ -1515,6 +1524,9 @@
     else { placeNode(chip, left, copy && copy.parentNode === left ? copy : null); placeNode(copy, left); }
     if (mobile) { placeNode(sound, $('menu-slot-sound')); placeNode(leave, $('menu-slot-leave')); }
     else { placeNode(sound, right, leave && leave.parentNode === right ? leave : menu); placeNode(leave, right, menu); }
+    var acctBtn = $('btn-account-top');
+    if (mobile) placeNode(acctBtn, $('menu-slot-account'));
+    else placeNode(acctBtn, right, sound && sound.parentNode === right ? sound : (leave && leave.parentNode === right ? leave : menu));
     var expand = $('btn-chat-expand');
     if (mobile && game && !isDrawer()) placeNode(expand, $('draw-status')); else placeNode(expand, $('chat-bar'));
     if (!mobile && openSheetId) closeSheet(true);
@@ -1567,6 +1579,7 @@
   function closeSheet(immediate, fromHistory) {
     var id = openSheetId; if (!id) return;
     var s = $(id); openSheetId = null;
+    if (id === 'sheet-account') acct.open = false;
     document.body.classList.remove('sheet-open');
     if (!fromHistory) sheetHistoryPop();
     if (!s) return;
@@ -1764,19 +1777,312 @@
   }
 
   // ------------------------------------------------------------------
+  // 계정 — 로그인 · 내 정보(프로필 / 단어 세트) UI. 세션·DB 호출은 account.js(window.Account)가 맡는다.
+  //   로그인 기능이 꺼져 있으면(APP_CONFIG 비어 있음) 관련 DOM 은 전부 hidden 으로 남고 아무 것도 하지 않는다.
+  //   토큰 계약: 접속 시 io({ auth: { token } }), 로그인/로그아웃/토큰 갱신 시 'auth:token' { token | null }.
+  // ------------------------------------------------------------------
+  var Account = window.Account || null;
+  var ACCT_MAX_SETS = (Account && Account.MAX_SETS) || 20, ACCT_MAX_WORDS = (Account && Account.MAX_WORDS) || 500;
+  var PENDING_ROOM_KEY = 'drawguess.pendingRoom'; // OAuth 리다이렉트 전에 입력해 둔 방 코드(돌아오면 다시 채운다)
+  var acct = {
+    on: false, user: null, profile: null, sets: [], setsLoaded: false, loadingSets: false,
+    open: false, formOpen: false, editing: null,
+    lastToken: null, lastUid: null, appliedKey: ''
+  };
+  function acctLoggedIn() { return !!(acct.on && acct.user); }
+  function acctToken() { return Account && typeof Account.getToken === 'function' ? Account.getToken() : null; }
+  function acctName() { return (acct.profile && acct.profile.nickname) || (acct.user && acct.user.name) || '플레이어'; }
+  function providerLabel(p) { return p === 'google' ? 'Google' : p === 'kakao' ? '카카오' : (p ? String(p) : '소셜'); }
+  function acctErr(e, fallback) { toast(e && e.message ? e.message : fallback, 'error'); }
+  function canApplySet() { return inRoom && isHost() && state.phase === 'lobby'; }
+  function parseWords(text) {
+    if (Account && typeof Account.parseWords === 'function') return Account.parseWords(text);
+    var words = String(text || '').split(',').map(function (w) { return w.trim().replace(/\s+/g, ' '); }).filter(Boolean);
+    return { words: words, invalid: [] };
+  }
+  function fmtDate(iso) {
+    var d = iso ? new Date(iso) : null;
+    if (!d || isNaN(d.getTime())) return '';
+    var md = (d.getMonth() + 1) + '/' + d.getDate();
+    return d.getFullYear() === new Date().getFullYear() ? md : d.getFullYear() + '.' + md;
+  }
+
+  function initAccount() {
+    if (!Account || typeof Account.init !== 'function') return;
+    Account.onChange(onAccountChange);
+    Account.init().then(function (ok) {
+      if (!ok && window.APP_CONFIG && window.APP_CONFIG.supabaseUrl) toast('로그인 기능을 불러오지 못했어요. 게스트로 계속할 수 있어요', 'error');
+      renderAccount();
+    });
+  }
+  function onAccountChange(snap) {
+    acct.on = !!(snap && snap.enabled);
+    acct.user = snap && snap.user ? snap.user : null;
+    acct.profile = snap && snap.profile ? snap.profile : null;
+    var uid = acct.user ? acct.user.id : null;
+    var token = snap && snap.token ? snap.token : null;
+    if (uid !== acct.lastUid) {
+      acct.lastUid = uid; acct.sets = []; acct.setsLoaded = false; acct.formOpen = false; acct.editing = null; acct.appliedKey = '';
+      if (!uid && acct.open) closeAccount();
+      if (uid) refreshWordSets();
+    }
+    if (token !== acct.lastToken) {
+      acct.lastToken = token;
+      if (socket) {
+        try { socket.auth = { token: token || undefined }; } catch (e) { /* ignore */ } // 재접속 핸드셰이크에도 실린다
+        if (socket.connected) emit('auth:token', { token: token });
+      }
+    }
+    if (acct.profile) applyProfileToLanding();
+    renderAccount();
+  }
+  /** 로그인 프로필(닉네임·아바타)을 랜딩 입력에 채운다. 사용자가 닉네임을 입력 중이면 그 값은 건드리지 않는다 */
+  function applyProfileToLanding() {
+    var pr = acct.profile; if (!pr) return;
+    var key = [pr.user_id, pr.nickname, pr.avatar_emoji || '', pr.avatar_color || ''].join(':');
+    if (acct.appliedKey === key) return;
+    acct.appliedKey = key;
+    var nick = $('nick');
+    if (pr.nickname) {
+      profile.name = String(pr.nickname).slice(0, 12);
+      if (nick && document.activeElement !== nick) nick.value = profile.name;
+    }
+    if (EMOJIS.indexOf(pr.avatar_emoji) !== -1) profile.emoji = pr.avatar_emoji;
+    if (AV_COLORS.indexOf(pr.avatar_color) !== -1) profile.color = pr.avatar_color;
+    saveProfile(); renderProfile();
+  }
+  /** 방 만들기/참가 직전: 입력한 닉네임·아바타가 프로필과 다르면 프로필에 저장한다(실패해도 게임은 그대로 진행) */
+  function syncProfileOnEnter(p) {
+    if (!acctLoggedIn() || !acct.profile || !p) return;
+    var patch = {};
+    if (p.name && p.name !== acct.profile.nickname) patch.nickname = p.name;
+    if (p.avatar && p.avatar.emoji !== acct.profile.avatar_emoji) patch.avatar_emoji = p.avatar.emoji;
+    if (p.avatar && p.avatar.color !== acct.profile.avatar_color) patch.avatar_color = p.avatar.color;
+    if (!Object.keys(patch).length) return;
+    Account.updateProfile(patch).catch(function (e) { console.warn('[account] profile sync failed:', e && e.message); });
+  }
+
+  function renderAcctAvatar(node) {
+    if (!node) return;
+    node.innerHTML = '';
+    var url = (acct.profile && acct.profile.avatar_url) || (acct.user && acct.user.avatarUrl) || '';
+    var emoji = (acct.profile && acct.profile.avatar_emoji) || profile.emoji;
+    var color = (acct.profile && acct.profile.avatar_color) || profile.color;
+    node.style.setProperty('--av', isHex(color) ? color : '#d6d6d6');
+    if (/^https?:\/\//.test(url)) {
+      var img = document.createElement('img'); img.alt = ''; img.referrerPolicy = 'no-referrer'; img.src = url;
+      img.onerror = function () { if (img.parentNode) img.parentNode.removeChild(img); node.textContent = emoji; };
+      node.appendChild(img);
+    } else node.textContent = emoji;
+  }
+
+  function renderAccount() {
+    var on = acct.on, logged = acctLoggedIn();
+    var area = $('auth-area'); if (area) area.hidden = !on;
+    var out = $('auth-logged-out'); if (out) out.hidden = !on || logged;
+    var chip = $('account-chip'); if (chip) chip.hidden = !logged;
+    if (logged) { renderAcctAvatar($('chip-avatar')); var nm = $('chip-name'); if (nm) nm.textContent = acctName(); }
+    var top = $('btn-account-top'); if (top) top.hidden = !logged;
+    var slot = $('menu-slot-account'); if (slot) slot.hidden = !logged;
+    // 대기실 설정: 내 세트 불러오기 / 현재 단어를 세트로 저장
+    var tools = $('wordset-tools'); if (tools) tools.hidden = !logged;
+    var sel = $('wordset-load');
+    if (sel) {
+      sel.hidden = !acct.sets.length;
+      var key = acct.sets.map(function (s) { return s.id + ':' + s.name + ':' + s.words.length; }).join('|');
+      if (sel.getAttribute('data-key') !== key) {
+        sel.setAttribute('data-key', key); sel.innerHTML = '';
+        var o0 = el('option', null, '내 세트 불러오기…'); o0.value = ''; sel.appendChild(o0);
+        acct.sets.forEach(function (s) { var o = el('option', null, s.name + ' (' + s.words.length + '개)'); o.value = String(s.id); sel.appendChild(o); });
+      }
+      sel.disabled = !canApplySet();
+    }
+    if (acct.open) renderAccountPanel();
+  }
+
+  /** 내 정보 열기: 모바일은 바텀 시트(#sheet-account), 데스크톱은 모달(#overlay-account). 본문 노드는 하나를 옮겨 쓴다 */
+  function openAccount() {
+    if (!acctLoggedIn()) return;
+    acct.open = true;
+    var body = $('account-body');
+    if (mobileMq.matches) { placeNode(body, $('sheet-account-body')); openSheet('sheet-account'); }
+    else { placeNode(body, $('account-modal-body')); var m = $('overlay-account'); if (m) m.hidden = false; }
+    if (!acct.setsLoaded) refreshWordSets();
+    renderAccountPanel();
+  }
+  function closeAccount() {
+    acct.open = false; acct.formOpen = false; acct.editing = null;
+    var m = $('overlay-account'); if (m) m.hidden = true;
+    if (openSheetId === 'sheet-account') closeSheet(false);
+  }
+  function renderAccountPanel() {
+    if (!acct.open) return;
+    renderAcctAvatar($('acct-avatar'));
+    var nick = $('acct-nick'); if (nick && document.activeElement !== nick) nick.value = acctName();
+    var pv = $('acct-provider');
+    if (pv) pv.textContent = providerLabel(acct.user && acct.user.provider) + ' 계정으로 로그인' + (acct.user && acct.user.email ? ' · ' + acct.user.email : '');
+    var cnt = $('wordset-count'); if (cnt) cnt.textContent = acct.setsLoaded ? acct.sets.length + ' / ' + ACCT_MAX_SETS : '';
+    var loading = $('wordset-loading'); if (loading) loading.hidden = acct.setsLoaded;
+    var empty = $('wordset-empty'); if (empty) empty.hidden = !acct.setsLoaded || !!acct.sets.length;
+    var apply = canApplySet();
+    var hint = $('wordset-apply-hint'); if (hint) hint.hidden = apply || !acct.sets.length;
+    var list = $('wordset-list');
+    if (list) {
+      list.innerHTML = '';
+      acct.sets.forEach(function (s) {
+        var li = el('li', 'wordset-item'); li.setAttribute('data-id', String(s.id));
+        var head = el('div', 'ws-head');
+        head.appendChild(el('strong', 'ws-name', s.name));
+        head.appendChild(el('span', 'ws-meta', s.words.length + '개' + (s.updated_at ? ' · ' + fmtDate(s.updated_at) : '')));
+        li.appendChild(head);
+        li.appendChild(el('div', 'ws-preview', s.words.slice(0, 8).join(', ') + (s.words.length > 8 ? ' …' : '')));
+        var acts = el('div', 'ws-actions');
+        var ap = el('button', 'btn btn-secondary btn-sm ws-apply', '이 세트로 방 설정'); ap.type = 'button'; ap.disabled = !apply;
+        ap.title = apply ? '' : '호스트로 대기실에 있을 때 적용할 수 있어요';
+        ap.addEventListener('click', function () { applyWordSet(s); });
+        var ed = el('button', 'btn btn-ghost btn-sm ws-edit', '수정'); ed.type = 'button';
+        ed.addEventListener('click', function () { openWordSetForm(s); });
+        var dl = el('button', 'btn btn-ghost btn-sm ws-delete', '삭제'); dl.type = 'button';
+        dl.addEventListener('click', function () { deleteWordSet(s); });
+        acts.appendChild(ap); acts.appendChild(ed); acts.appendChild(dl);
+        li.appendChild(acts);
+        list.appendChild(li);
+      });
+    }
+    var form = $('wordset-form'); if (form) form.hidden = !acct.formOpen;
+    var nb = $('btn-wordset-new');
+    if (nb) { nb.hidden = acct.formOpen; nb.disabled = acct.sets.length >= ACCT_MAX_SETS; nb.title = nb.disabled ? '단어 세트는 ' + ACCT_MAX_SETS + '개까지 만들 수 있어요' : ''; }
+    var ft = $('ws-form-title'); if (ft) ft.textContent = acct.editing ? '세트 수정' : '새 세트';
+    updateWordCount();
+  }
+  function refreshWordSets() {
+    if (!acctLoggedIn() || acct.loadingSets) return Promise.resolve();
+    acct.loadingSets = true;
+    return Account.listWordSets().then(function (rows) { acct.sets = rows || []; })
+      .catch(function (e) { acctErr(e, '단어 세트를 불러오지 못했어요'); })
+      .then(function () { acct.loadingSets = false; acct.setsLoaded = true; renderAccount(); });
+  }
+  function openWordSetForm(set, prefillWords) {
+    acct.formOpen = true; acct.editing = set || null;
+    var n = $('ws-name'), w = $('ws-words'), err = $('ws-error');
+    if (n) n.value = set ? set.name : '';
+    if (w) w.value = set ? set.words.join(', ') : (prefillWords || '');
+    if (err) err.textContent = '';
+    renderAccountPanel();
+    setTimeout(function () { if (n) { try { n.focus(); } catch (e) { /* ignore */ } } }, 60);
+  }
+  function updateWordCount() {
+    var w = $('ws-words'), c = $('ws-count'); if (!w || !c) return;
+    var r = parseWords(w.value);
+    var txt = r.words.length + '개';
+    if (r.invalid.length) txt += ' · 제외 ' + r.invalid.length + '개(1~20자만)';
+    if (r.words.length > ACCT_MAX_WORDS) txt += ' · 최대 ' + ACCT_MAX_WORDS + '개';
+    c.textContent = txt;
+    c.classList.toggle('over', r.words.length > ACCT_MAX_WORDS);
+  }
+  function submitWordSet() {
+    var n = $('ws-name'), w = $('ws-words'), err = $('ws-error'), btn = $('btn-ws-submit');
+    var name = n ? n.value.trim() : '', r = parseWords(w ? w.value : '');
+    var msg = !name ? '세트 이름을 입력해주세요'
+      : Array.from(name).length > 30 ? '세트 이름은 30자까지예요'
+      : !r.words.length ? '단어를 1개 이상 입력해주세요 (쉼표로 구분, 각 1~20자)'
+      : r.words.length > ACCT_MAX_WORDS ? '단어는 세트당 ' + ACCT_MAX_WORDS + '개까지 저장할 수 있어요' : '';
+    if (msg) { if (err) err.textContent = msg; return; }
+    if (btn) btn.disabled = true;
+    var editing = acct.editing;
+    Account.saveWordSet({ id: editing ? editing.id : undefined, name: name, words: r.words })
+      .then(function () { toast(editing ? '세트를 수정했어요' : '세트를 저장했어요', 'ok'); acct.formOpen = false; acct.editing = null; return refreshWordSets(); })
+      .catch(function (e) { if (err) err.textContent = e && e.message ? e.message : '저장에 실패했어요'; acctErr(e, '저장에 실패했어요'); return refreshWordSets(); }) // 실패 원인이 서버 상태(개수 제한 등)일 수 있으니 목록도 새로 고친다
+      .then(function () { if (btn) btn.disabled = false; renderAccountPanel(); });
+  }
+  function deleteWordSet(s) {
+    if (!window.confirm('"' + s.name + '" 세트를 삭제할까요?')) return;
+    Account.deleteWordSet(s.id)
+      .then(function () {
+        toast('세트를 삭제했어요', 'ok');
+        if (acct.editing && acct.editing.id === s.id) { acct.formOpen = false; acct.editing = null; }
+        return refreshWordSets();
+      })
+      .catch(function (e) { acctErr(e, '삭제에 실패했어요'); });
+  }
+  /** 세트의 단어를 방 설정(사용자 단어 + "사용자 단어만 사용")에 넣고 전송. 호스트·대기실에서만 */
+  function applyWordSet(s) {
+    if (!canApplySet()) { toast('호스트로 대기실에 있을 때 적용할 수 있어요', 'error'); return; }
+    var ta = $('set-customWords'), cb = $('set-customWordsOnly');
+    if (ta) ta.value = s.words.join(', ');
+    if (cb) cb.checked = true;
+    sendSettings();
+    toast('"' + s.name + '" 세트를 방 설정에 적용했어요', 'ok');
+    closeAccount();
+  }
+  function startSignIn(provider) {
+    if (!Account) return;
+    try { var code = codeInput(); if (code) sessionStorage.setItem(PENDING_ROOM_KEY, code); } catch (e) { /* ignore */ }
+    var btns = [$('btn-login-google'), $('btn-login-kakao')];
+    btns.forEach(function (b) { if (b) b.disabled = true; });
+    Account.signIn(provider)
+      .catch(function (e) { acctErr(e, '로그인을 시작하지 못했어요'); })
+      .then(function () { btns.forEach(function (b) { if (b) b.disabled = false; }); });
+  }
+  function doSignOut() {
+    if (!Account) return;
+    Account.signOut().then(function () { toast('로그아웃했어요', 'ok'); }).catch(function (e) { acctErr(e, '로그아웃에 실패했어요'); });
+  }
+  function saveNickname() {
+    var n = $('acct-nick'), b = $('btn-acct-nick-save');
+    var v = n ? n.value.trim().slice(0, 12) : '';
+    if (!v) { toast('닉네임은 1~12자예요', 'error'); if (n) n.focus(); return; }
+    if (b) b.disabled = true;
+    Account.updateProfile({ nickname: v })
+      .then(function () { toast('닉네임을 저장했어요', 'ok'); })
+      .catch(function (e) { acctErr(e, '닉네임 저장에 실패했어요'); })
+      .then(function () { if (b) b.disabled = false; });
+  }
+  function buildAccount() {
+    var g = $('btn-login-google'); if (g) g.addEventListener('click', function () { startSignIn('google'); });
+    var k = $('btn-login-kakao'); if (k) k.addEventListener('click', function () { startSignIn('kakao'); });
+    ['btn-account-open', 'btn-account-top'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', openAccount); });
+    ['btn-logout', 'btn-acct-logout'].forEach(function (id) { var b = $(id); if (b) b.addEventListener('click', doSignOut); });
+    var cl = $('btn-account-close'); if (cl) cl.addEventListener('click', closeAccount);
+    var ov = $('overlay-account'); if (ov) ov.addEventListener('click', function (e) { if (e.target === ov) closeAccount(); });
+    var ns = $('btn-acct-nick-save'); if (ns) ns.addEventListener('click', saveNickname);
+    var ni = $('acct-nick'); if (ni) ni.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); saveNickname(); } });
+    var nb = $('btn-wordset-new'); if (nb) nb.addEventListener('click', function () { openWordSetForm(null); });
+    var wc = $('btn-ws-cancel'); if (wc) wc.addEventListener('click', function () { acct.formOpen = false; acct.editing = null; renderAccountPanel(); });
+    var wf = $('wordset-form'); if (wf) wf.addEventListener('submit', function (e) { e.preventDefault(); submitWordSet(); });
+    var ww = $('ws-words'); if (ww) ww.addEventListener('input', updateWordCount);
+    var sel = $('wordset-load');
+    if (sel) sel.addEventListener('change', function () {
+      var id = sel.value; sel.value = '';
+      var s = null; acct.sets.forEach(function (x) { if (String(x.id) === id) s = x; });
+      if (!s || !canApplySet()) return;
+      var ta = $('set-customWords'); if (ta) ta.value = s.words.join(', ');
+      sendSettings();
+      toast('"' + s.name + '" 세트를 불러왔어요', 'ok');
+    });
+    var sv = $('btn-wordset-save');
+    if (sv) sv.addEventListener('click', function () {
+      var ta = $('set-customWords'); var cur = ta ? ta.value : '';
+      openAccount(); openWordSetForm(null, cur);
+    });
+  }
+
+  // ------------------------------------------------------------------
   // Boot
   // ------------------------------------------------------------------
   function boot() {
     loadProfile();
     buildLanding();
     buildRoom();
+    buildAccount();
     clearCanvas();
     renderAll();
     connect();
+    initAccount(); // 로그인(선택): 설정이 없으면 즉시 false 로 끝나고 아무 UI 도 켜지 않는다
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 
   // 디버깅용 (콘솔에서 상태 확인)
-  window.__dg = { state: state, ui: ui, ops: function () { return ops; }, redrawAll: redrawAll, myId: function () { return myId; } };
+  window.__dg = { state: state, ui: ui, acct: acct, ops: function () { return ops; }, redrawAll: redrawAll, myId: function () { return myId; } };
 })();

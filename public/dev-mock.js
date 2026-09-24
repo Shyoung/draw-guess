@@ -1,8 +1,103 @@
 /* dev-mock.js — 개발용 가짜 io(). index.html?mock=1 로 열면 client.js 앞에 로드된다.
    ?mock=1&scene=<label> 을 주면 해당 단계까지 즉시 진행한 뒤 정상 속도로 이어간다.
-   labels: lobby, choosing, drawing, hint, guessed, turnEnd, drawer, mydraw, gameOver, backToLobby */
+   labels: lobby, choosing, drawing, hint, guessed, turnEnd, drawer, mydraw, gameOver, backToLobby
+   &stay=1        : 대기실(lobby)에서 자동 진행을 멈춘다(게임 시작을 누를 때까지). 설정/내 정보 UI 확인용
+   &auth=1        : 가짜 window.supabase + window.APP_CONFIG 를 설치해 로그인 UI 를 켠다(네트워크 없음, 메모리 DB).
+                    기본은 로그인된 상태로 시작. &auth_state=out 이면 로그아웃 상태로 시작. window.__mockAuth 로 상태 확인 */
 (function () {
   var handlers = {}, ME = 'me', chosen = null;
+  var qs = new URLSearchParams(location.search);
+  var stayLobby = qs.get('stay') === '1';
+  var authMock = qs.get('auth') === '1';
+  var mockSession = null;
+
+  // ---- 가짜 Supabase: auth(getSession/onAuthStateChange/signInWithOAuth/signOut) + 최소 쿼리 빌더(from().select/insert/update/delete/eq/order/single/maybeSingle) ----
+  if (authMock) {
+    window.APP_CONFIG = { supabaseUrl: 'https://mock.supabase.local', supabaseAnonKey: 'mock-anon-key' };
+    var authListeners = [];
+    var mockUser = { id: 'mock-user-1', email: 'mock@example.com', app_metadata: { provider: 'google' }, user_metadata: { name: '모크유저', avatar_url: '' } };
+    var makeSession = function () { return { access_token: 'mock-access-token-' + Date.now(), user: mockUser }; };
+    if (qs.get('auth_state') !== 'out') mockSession = makeSession();
+    var nowIso = new Date().toISOString();
+    var tables = {
+      profiles: [{ user_id: 'mock-user-1', nickname: '모크유저', avatar_url: null, avatar_emoji: null, avatar_color: null, created_at: nowIso, updated_at: nowIso }],
+      word_sets: []
+    };
+    var seq = 1;
+    var clone = function (r) { return JSON.parse(JSON.stringify(r)); };
+    var emitAuth = function (ev) { var s = mockSession; authListeners.slice().forEach(function (fn) { setTimeout(function () { fn(ev, s); }, 0); }); };
+    var ok = function (data) { return Promise.resolve({ data: data, error: null }); };
+    var builder = function (table) {
+      var rows = tables[table] || (tables[table] = []);
+      var op = 'select', payload = null, filters = [], order = null, single = false, maybe = false, returning = false;
+      function match(r) { return filters.every(function (f) { return r[f[0]] === f[1]; }); }
+      function run() {
+        var now = new Date().toISOString(), out;
+        try {
+          if (op === 'select') {
+            out = rows.filter(match).map(clone);
+            if (order) out.sort(function (a, b) { var x = a[order.key], y = b[order.key]; return (x < y ? -1 : x > y ? 1 : 0) * (order.asc ? 1 : -1); });
+          } else if (op === 'insert') {
+            out = [];
+            (Array.isArray(payload) ? payload : [payload]).forEach(function (v) {
+              if (table === 'word_sets') {
+                if (rows.filter(function (r) { return r.owner_id === v.owner_id; }).length >= 20) throw new Error('단어 세트는 20개까지 만들 수 있어요');
+                if ((v.words || []).length > 500) throw new Error('new row for relation "word_sets" violates check constraint "word_sets_words_check"');
+              }
+              var row = Object.assign(table === 'word_sets' ? { id: 'ws-' + (seq++), is_public: false } : {}, { created_at: now, updated_at: now }, v);
+              rows.push(row); out.push(clone(row));
+            });
+          } else if (op === 'update') {
+            out = [];
+            rows.forEach(function (r) { if (match(r)) { Object.assign(r, payload, { updated_at: now }); out.push(clone(r)); } });
+          } else if (op === 'delete') {
+            out = [];
+            for (var i = rows.length - 1; i >= 0; i--) if (match(rows[i])) out.push(rows.splice(i, 1)[0]);
+            if (!returning) out = null;
+          }
+          if (single) { if (!out || out.length !== 1) throw new Error('JSON object requested, multiple (or no) rows returned'); out = out[0]; }
+          else if (maybe) { out = out && out.length ? out[0] : null; }
+          return { data: out, error: null };
+        } catch (e) { return { data: null, error: { message: e.message, code: 'MOCK' } }; }
+      }
+      var b = {
+        select: function () { if (op !== 'select') returning = true; return b; },
+        insert: function (v) { op = 'insert'; payload = v; return b; },
+        update: function (v) { op = 'update'; payload = v; return b; },
+        upsert: function (v) { op = 'insert'; payload = v; return b; },
+        delete: function () { op = 'delete'; return b; },
+        eq: function (k, v) { filters.push([k, v]); return b; },
+        order: function (k, o) { order = { key: k, asc: !o || o.ascending !== false }; return b; },
+        limit: function () { return b; },
+        single: function () { single = true; return b; },
+        maybeSingle: function () { maybe = true; return b; },
+        then: function (res, rej) { return new Promise(function (r) { setTimeout(function () { r(run()); }, 10); }).then(res, rej); }
+      };
+      return b;
+    };
+    window.supabase = {
+      createClient: function () {
+        return {
+          auth: {
+            getSession: function () { return ok({ session: mockSession }); },
+            onAuthStateChange: function (fn) {
+              authListeners.push(fn);
+              return { data: { subscription: { unsubscribe: function () { authListeners = authListeners.filter(function (f) { return f !== fn; }); } } } };
+            },
+            signInWithOAuth: function (opts) {
+              mockUser.app_metadata.provider = (opts && opts.provider) || 'google';
+              mockSession = makeSession(); emitAuth('SIGNED_IN');
+              return ok({ provider: opts && opts.provider, url: null });
+            },
+            signOut: function () { mockSession = null; emitAuth('SIGNED_OUT'); return ok(null); }
+          },
+          from: builder
+        };
+      }
+    };
+    window.__mockAuth = { tables: tables, session: function () { return mockSession; } };
+    console.log('[mock] fake supabase installed (auth=1)');
+  }
   function fire(ev, payload) {
     (handlers[ev] || []).forEach(function (fn) { try { fn(payload); } catch (e) { console.error('[mock]', ev, e); } });
   }
@@ -18,6 +113,7 @@
   var timeLeft = 0, word = '';
   function st() {
     players.forEach(function (p) { p.isDrawing = p.id === room.drawerId; });
+    players[0].loggedIn = authMock ? !!mockSession : false;
     // 다음 출제자(모바일 턴 띠 "다음 ○○" 확인용): 참가 순서상 현재 출제자의 다음 사람
     var di = players.findIndex(function (p) { return p.id === room.drawerId; });
     var next = (room.phase === 'choosing' || room.phase === 'drawing' || room.phase === 'turnEnd') && di >= 0 ? players[(di + 1) % players.length].id : null;
@@ -87,7 +183,7 @@
   function advance() {
     var s = steps[idx]; if (!s) return;
     var fast = idx <= target;
-    if (s.manual && !fast) { pending = s; return; }
+    if ((s.manual || (stayLobby && s.label === 'choosing')) && !fast) { pending = s; return; }
     idx++;
     setTimeout(function () { s.run(); advance(); }, fast ? 0 : (s.delay || 0));
   }
@@ -117,7 +213,8 @@
       } else if (ev === 'player:kick' && payload) {
         var i = players.findIndex(function (p) { return p.id === payload.playerId; });
         if (i > 0) { chat('system', players[i].name + '님이 강퇴되었어요'); players.splice(i, 1); fire('room:state', st()); }
-      } else if (ev === 'game:start') { if (idx === 1) { idx = 2; steps[1].run(); } }
+      } else if (ev === 'game:start') { if (pending && pending.label === 'choosing') resume('choosing'); else if (idx === 1) { idx = 2; steps[1].run(); } }
+      else if (ev === 'auth:token') { if (started) fire('room:state', st()); }
       return sock;
     }
   };

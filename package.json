@@ -10,6 +10,7 @@
     "test": "node test/smoke.js && node test/reconnect.js && node test/persist.js && node test/modes.js",
     "test:modes": "node test/modes.js",
     "test:mobile": "node test/mobile.js",
+    "test:auth": "node test/auth.js",
     "shots:mobile": "node test/mobile-shots.js",
     "test:persist": "node test/persist.js",
     "test:reconnect": "node test/reconnect.js",
