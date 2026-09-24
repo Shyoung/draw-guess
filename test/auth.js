@@ -186,7 +186,16 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check((await txt(g, '#btn-create')) === '새 방 만들기' && !(await g.getAttribute('#btn-create', 'class')).includes('btn-primary'), '초대 카드: "새 방 만들기"는 보조 버튼');
     await g.click('#btn-invite-dismiss');
     check(await g.locator('#invite-card').isHidden() && await g.locator('#room-code-input').isVisible() && (await val(g, '#room-code-input')) === 'ABCD', '다른 방 코드 입력: 일반 화면(코드 유지)');
-    check((await txt(g, '#btn-create')) === '방 만들기' && !g.url().includes('room='), '다른 방 코드 입력: 방 만들기 주 버튼 · 주소에서 ?room= 제거', g.url());
+    check((await txt(g, '#btn-create')) === '방 만들기' && !g.url().includes('room='), '다른 방 코드 입력: 일반 메인 · 주소에서 ?room= 제거', g.url());
+    const mainOrder = await g.evaluate(() => {
+      const ids = ['join-row', 'join-divider', 'btn-create'];
+      const ys = ids.map((id) => document.getElementById(id).getBoundingClientRect().top);
+      return { ys, joinCls: document.getElementById('btn-join').className, createCls: document.getElementById('btn-create').className,
+        div: document.getElementById('join-divider-text').textContent.trim(), plus: getComputedStyle(document.getElementById('btn-create'), '::before').content };
+    });
+    check(mainOrder.ys[0] < mainOrder.ys[1] && mainOrder.ys[1] < mainOrder.ys[2], '메인 순서: 코드 입력 + 참가하기 → 또는 → 방 만들기', JSON.stringify(mainOrder.ys.map(Math.round)));
+    check(mainOrder.joinCls.includes('btn-primary') && !mainOrder.createCls.includes('btn-primary') && mainOrder.createCls.includes('btn-outline'), '메인 위계: 참가하기 = 주 버튼, 방 만들기 = 보조', `${mainOrder.joinCls} / ${mainOrder.createCls}`);
+    check(mainOrder.div === '또는' && mainOrder.plus === '"+"', '메인: 구분선 "또는" · 방 만들기 앞 "+"', `${mainOrder.div} ${mainOrder.plus}`);
     // 처음 온 사람 + 초대 링크 → 프로필 → 저장 → 초대 카드
     const g2 = await newPage(browser, '게스트2');
     await g2.goto(URL + '/?room=WXYZ');

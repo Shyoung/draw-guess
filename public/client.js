@@ -1324,18 +1324,19 @@
     var stt = $('me-status'); if (stt) stt.textContent = logged ? providerLabel(acct.user && acct.user.provider) + ' 계정' : '게스트';
     var ml = $('btn-me-login'); if (ml) ml.hidden = !(loginAvailable() && !logged);
     var ma = $('me-account'); if (ma) ma.hidden = !logged;
-    // 초대받은 방: 코드 카드 안에 #btn-join(주 버튼)을 두고, "새 방 만들기"는 보조로 아래에
+    // 참가가 우선: 코드 입력 + [참가하기](주 버튼) → 또는 → [+ 방 만들기](보조).
+    // 초대받은 방: 코드 카드 안에 #btn-join("이 방에 참가하기")을 두고, "새 방 만들기"는 보조로 아래에
     var inv = landing.invite;
     var card = $('invite-card'), bc = $('btn-create'), bj = $('btn-join'), dv = $('join-divider'), jr = $('join-row'), dm = $('btn-invite-dismiss');
     var meCard = sr ? sr.querySelector('.me-card') : null, head = card ? card.querySelector('.invite-head') : null;
     if (inv) { orderChildren(card, [head, jr]); orderChildren(sr, [meCard, card, dv, bc, dm]); }
-    else { orderChildren(sr, [meCard, card, bc, dv, jr, dm]); }
+    else { orderChildren(sr, [meCard, card, jr, dv, bc, dm]); }
     if (card) card.hidden = !inv;
     var ic = $('invite-code'); if (ic) ic.textContent = inv || '';
     if (sr) sr.classList.toggle('is-invite', !!inv);
-    if (bj) { bj.textContent = inv ? '이 방에 참가하기' : '참가하기'; bj.className = 'btn btn-lg ' + (inv ? 'btn-primary btn-block' : 'btn-secondary'); }
-    if (bc) { bc.textContent = inv ? '새 방 만들기' : '방 만들기'; bc.className = 'btn btn-lg btn-block ' + (inv ? 'btn-outline' : 'btn-primary'); }
-    var dt = $('join-divider-text'); if (dt) dt.textContent = inv ? '또는' : '또는 방 코드로 참가';
+    if (bj) { bj.textContent = inv ? '이 방에 참가하기' : '참가하기'; bj.className = 'btn btn-lg btn-primary' + (inv ? ' btn-block' : ''); }
+    if (bc) { bc.textContent = inv ? '새 방 만들기' : '방 만들기'; bc.className = 'btn btn-lg btn-block btn-outline btn-plus'; }
+    var dt = $('join-divider-text'); if (dt) dt.textContent = '또는';
     if (dm) dm.hidden = !inv;
   }
   function showLandingStep(step, animate) {
@@ -1454,7 +1455,9 @@
       setConfirmed(acct.user.id);
     } else setGuestStarted(true);
     returnTo('room', true);
-    focusNode(landing.invite ? $('btn-join') : $('btn-create')); // 키보드면 Enter 한 번 더로 진행
+    // 키보드면 바로 이어서: 초대 → "이 방에 참가하기", 아니면 방 코드 입력(모바일은 키보드가 튀어나오지 않게 포커스하지 않는다)
+    if (landing.invite) focusNode($('btn-join'));
+    else if (!mobileMq.matches) focusNode($('room-code-input'));
   }
   function dismissInvite() {
     landing.invite = null;

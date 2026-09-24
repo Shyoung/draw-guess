@@ -102,15 +102,16 @@
           </div>
         </div>
 
-        <button id="btn-create" class="btn btn-primary btn-lg btn-block" type="button">방 만들기</button>
-
-        <div id="join-divider" class="divider"><span id="join-divider-text">또는 방 코드로 참가</span></div>
-
+        <!-- 참가가 우선: 코드 입력 + 참가하기(주) → 또는 → + 방 만들기(보조) -->
         <div id="join-row" class="join-row">
           <input id="room-code-input" type="text" maxlength="4" placeholder="ABCD" inputmode="latin"
                  autocapitalize="characters" autocomplete="off" spellcheck="false" aria-label="방 코드 4글자">
-          <button id="btn-join" class="btn btn-secondary btn-lg" type="button">참가하기</button>
+          <button id="btn-join" class="btn btn-primary btn-lg" type="button">참가하기</button>
         </div>
+
+        <div id="join-divider" class="divider"><span id="join-divider-text">또는</span></div>
+
+        <button id="btn-create" class="btn btn-outline btn-lg btn-block btn-plus" type="button">방 만들기</button>
 
         <button id="btn-invite-dismiss" class="link-btn link-muted invite-dismiss" type="button" hidden>다른 방 코드 입력하기</button>
       </div>
