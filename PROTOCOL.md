@@ -25,13 +25,13 @@
 ```js
 {
   rounds: 3,          // 1..10
-  drawTime: 80,       // 초, 30..180
+  drawTime: 80,       // 초, 15..180
   wordCount: 3,       // 출제자에게 제시할 단어 후보 수, 2..5
   hints: 2,           // 턴당 자동 힌트(초성 공개) 횟수, 0..5 (단어의 공개 가능 글자 수가 더 적으면 그만큼만)
   hintEndAt: 15,      // 마지막 힌트가 뜨는 시점(종료 N초 전), 5..60
   customWords: '',    // 쉼표 구분 사용자 단어, 각 단어 1..20자
   customWordsOnly: false,
-  mode: 'classic',    // 'classic' 돌아가며 그리기(기본) | 'fixed' 한 명이 계속 그리기(지정 출제자)
+  mode: 'classic',    // 'classic' 돌아가며 그리기(기본) | 'fixed' 한 명이 계속 그리기(지정 출제자) | 'blitz' 속도전
   fixedDrawerId: null // fixed 모드 출제자 id. 방에 없는 id/null 이면 호스트가 출제자
 }
 ```
@@ -139,6 +139,7 @@
 
 ## 게임 모드
 - **classic (돌아가며 그리기)**: 아래 턴/라운드 흐름 그대로. 라운드마다 모든 플레이어가 한 번씩 출제.
+- **blitz (속도전)**: 출제 순서는 classic 과 같지만 `choosing` 단계가 없다 — 서버가 단어 1개를 자동 선택해 곧바로 `game:drawing`. 힌트는 설정과 무관하게 없다. 정답 점수는 맞힌 순서로 1등 400 · 2등 300 · 3등 200 · 이후 100(시간 무관). 출제자 점수는 classic 과 동일. 클라이언트는 카드 선택 시 프리셋(drawTime 25, hints 0, rounds 5)을 함께 보낸다.
 - **fixed (한 명이 그리기)**: `fixedDrawerId`(없으면 호스트)가 모든 턴을 출제. 라운드 순서는 `[fixedDrawerId]` 하나이므로 `rounds` = 그릴 단어 수. 출제자는 점수를 받지 않고 `game:over.ranking`에서 제외되며 `drawer`로 따로 전달된다. 출제자가 끊기면 유예 동안 기다리고(`turnEnd` 유지), 유예가 끝나 나가면 지정이 해제되어 호스트가 이어서 그린다. 중간 참가자는 바로 맞히기에 참여한다.
 
 ## 턴/라운드 흐름

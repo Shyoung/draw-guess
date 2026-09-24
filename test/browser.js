@@ -121,6 +121,10 @@ async function say(page, text) {
     await host.selectOption('#set-rounds', '1');
     await host.selectOption('#set-drawTime', '30');
     await host.selectOption('#set-hints', '1');
+    // 단어를 3음절 이상 사용자 단어로 고정: 1글자 단어가 뽑히면 마스크·근접 정답 검사가 흔들리던 플레이크 제거
+    await host.fill('#set-customWords', '자전거,냉장고,해바라기,고슴도치,선풍기,소방차,다람쥐,무지개,피라미드,헬리콥터,미끄럼틀,아이스크림');
+    await host.locator('#set-customWords').blur();
+    await host.check('#set-customWordsOnly');
     await sleep(500);
     check((await p2.inputValue('#set-rounds')) === '1', '설정 변경 동기화(rounds=1)', await p2.inputValue('#set-rounds'));
     check((await p2.inputValue('#set-drawTime')) === '30', '설정 변경 동기화(drawTime=30)', await p2.inputValue('#set-drawTime'));

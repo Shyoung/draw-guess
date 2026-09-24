@@ -162,6 +162,38 @@ const lastState = (c) => { const e = c.log.filter((x) => x.ev === 'room:state').
   const se = await startErrP;
   check('game:start refused while fixed drawer is disconnected', /출제자/.test(se.message), se);
 
+  // ── 속도전(blitz): 새 방에서 3명 ──────────────────────────────
+  const b1 = await connect('B1'), b2 = await connect('B2'), b3 = await connect('B3');
+  const bc = await emitAck(b1, 'room:create', { name: '블리츠', avatar: {}, token: 'tok-b1-blitz-000001' });
+  await emitAck(b2, 'room:join', { roomCode: bc.roomCode, name: '둘', avatar: {}, token: 'tok-b2-blitz-000002' });
+  await emitAck(b3, 'room:join', { roomCode: bc.roomCode, name: '셋', avatar: {}, token: 'tok-b3-blitz-000003' });
+  const B1 = bc.playerId, B2 = b2.playerId, B3 = b3.playerId;
+  const bstP = waitNext(b3, 'room:state', (s) => s.settings.mode === 'blitz' && s.settings.drawTime === 20, 5000, 'blitz settings');
+  b1.emit('room:settings', { settings: { mode: 'blitz', drawTime: 20, hints: 3, rounds: 1, wordCount: 3, customWords: '자전거,냉장고,해바라기,고슴도치,선풍기', customWordsOnly: true } });
+  b1.emit('lobby:step', { step: 'settings' });
+  const bst = await bstP;
+  check('blitz: drawTime 20 accepted (min 15)', bst.settings.drawTime === 20, bst.settings);
+  const noChoosingP = waitNext(b2, 'game:choosing', undefined, 2500).then(() => true).catch(() => false);
+  const bd1P = waitNext(b1, 'game:drawing', undefined, 5000, 'blitz drawing (drawer)');
+  const bd2P = waitNext(b2, 'game:drawing', undefined, 5000, 'blitz drawing (guesser)');
+  const stBP = waitNext(b3, 'room:state', (s) => s.phase === 'drawing', 5000, 'blitz state drawing');
+  b1.emit('game:start');
+  const bd1 = await bd1P, bd2 = await bd2P;
+  check('blitz: goes straight to drawing (drawer gets word, guesser gets mask)', typeof bd1.word === 'string' && bd2.word === undefined && bd1.timeLeft === 20, { bd1, bd2 });
+  check('blitz: no game:choosing was sent', (await noChoosingP) === false);
+  const stB = await stBP.catch(() => null);
+  check('blitz: room:state phase drawing right after start', !!stB);
+  const bteP = waitNext(b1, 'game:turnEnd', undefined, 10000, 'blitz turnEnd');
+  b2.emit('chat:message', { text: bd1.word });
+  await waitNext(b1, 'chat:message', (m) => m.kind === 'correct' && m.id === B2, 3000);
+  b3.emit('chat:message', { text: bd1.word });
+  const bte = await bteP;
+  const d2 = (bte.deltas.find((d) => d.id === B2) || {}).delta, d3 = (bte.deltas.find((d) => d.id === B3) || {}).delta, d1 = (bte.deltas.find((d) => d.id === B1) || {}).delta;
+  check('blitz: rank-based points 1st=400, 2nd=300, drawer=300 (all guessed)', d2 === 400 && d3 === 300 && d1 === 300, bte.deltas);
+  // 정답자에게 가는 전체 공개(game:hint, 실제 글자)는 힌트가 아니다 → 마스크가 정답과 다른 game:hint 만 힌트로 본다
+  const noHint = !b2.log.some((e) => e.ev === 'game:hint' && e.payload && (e.payload.wordMask || '').replace(/ /g, '') !== bd1.word);
+  check('blitz: no choseong hints were sent (hints setting ignored)', noHint);
+
   cleanup(failures ? 1 : 0);
 })().catch((err) => {
   check(`unexpected error: ${err && err.message}`, false, err && err.stack);

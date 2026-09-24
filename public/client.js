@@ -67,7 +67,9 @@
     allowSolo: false // 서버가 ALLOW_SOLO=1 로 떠 있으면 true(최소 인원 1명). room:state 로 내려온다
   };
   function minPlayers() { return state.allowSolo ? 1 : 2; }
-  var MODE_NAMES = { classic: '돌아가며 그리기', fixed: '한 명이 그리기' };
+  var MODE_NAMES = { classic: '돌아가며 그리기', fixed: '한 명이 그리기', blitz: '속도전' };
+  // 모드 카드를 고를 때 함께 적용되는 프리셋 (그 뒤엔 설정 화면에서 자유롭게 바꿀 수 있다)
+  var MODE_PRESETS = { blitz: { drawTime: 25, hints: 0, rounds: 5 }, classic: { drawTime: 80, hints: 2, rounds: 3 }, fixed: { drawTime: 80, hints: 2, rounds: 5 } };
   /** fixed 모드에서 실제 출제자(지정된 사람이 없으면 호스트). classic 이면 null */
   function fixedDrawerId() {
     if (state.settings.mode !== 'fixed') return null;
@@ -995,6 +997,11 @@
     var back = $('btn-mode-back'); if (back) back.hidden = !isHost();
     var rl = $('set-rounds-label'); if (rl) rl.textContent = fixed ? '단어 수' : '라운드';
     var fw = $('set-fixedDrawer-wrap'); if (fw) fw.hidden = !fixed;
+    // 속도전: 단어 후보·힌트 설정은 의미가 없으므로 숨긴다
+    var blitz = s.mode === 'blitz';
+    ['set-wordCount', 'set-hints', 'set-hintEndAt'].forEach(function (id) {
+      var n = $(id); var wrap = n && n.closest ? n.closest('.setting') : null; if (wrap) wrap.hidden = blitz;
+    });
     var fsel = $('set-fixedDrawer');
     if (fsel && fixed) {
       var want = fixedDrawerId();
@@ -1024,7 +1031,7 @@
       hint.textContent = viewing.length ? '결과 화면을 보고 있는 사람이 있어요: ' + viewing.join(', ')
         : !enough ? '플레이어가 ' + need + '명 이상이어야 시작할 수 있어요'
         : !drawerOk ? '출제자가 접속 중이어야 시작할 수 있어요'
-        : (isHost() ? (fixed && fd ? '✏️ ' + fd.name + '님이 ' + s.rounds + '개의 단어를 그려요' : '') : '호스트가 게임을 시작하면 바로 시작돼요');
+        : (isHost() ? (fixed && fd ? '✏️ ' + fd.name + '님이 ' + s.rounds + '개의 단어를 그려요' : blitz ? '⚡ 단어는 자동으로 정해지고 ' + s.drawTime + '초씩, 힌트 없음. 1등 400 · 2등 300 · 3등 200점' : '') : '호스트가 게임을 시작하면 바로 시작돼요');
     }
   }
 
@@ -1389,7 +1396,7 @@
     var s = Object.assign({}, state.settings);
     var g = function (id) { return $(id); };
     if (g('set-rounds')) s.rounds = clamp(num(g('set-rounds').value, 3), 1, 10);
-    if (g('set-drawTime')) s.drawTime = clamp(num(g('set-drawTime').value, 80), 30, 180);
+    if (g('set-drawTime')) s.drawTime = clamp(num(g('set-drawTime').value, 80), 15, 180);
     if (g('set-wordCount')) s.wordCount = clamp(num(g('set-wordCount').value, 3), 2, 5);
     if (g('set-hints')) s.hints = clamp(num(g('set-hints').value, 2), 0, 5);
     if (g('set-hintEndAt')) s.hintEndAt = clamp(num(g('set-hintEndAt').value, 15), 5, 60);
@@ -1409,7 +1416,7 @@
   function buildRoom() {
     var range = function (a, b, step) { var r = []; for (var v = a; v <= b; v += (step || 1)) r.push(v); return r; };
     fillSelect('set-rounds', range(1, 10), function (v) { return v + ' 라운드'; });
-    fillSelect('set-drawTime', range(30, 180, 10), function (v) { return v + '초'; });
+    fillSelect('set-drawTime', [15, 20, 25].concat(range(30, 180, 10)), function (v) { return v + '초'; });
     fillSelect('set-wordCount', range(2, 5), function (v) { return v + '개'; });
     fillSelect('set-hints', range(0, 5), function (v) { return v === 0 ? '없음' : v + '회'; });
     fillSelect('set-hintEndAt', [5, 10, 15, 20, 30, 45, 60], function (v) { return '종료 ' + v + '초 전'; });
@@ -1421,7 +1428,7 @@
       b.addEventListener('click', function () {
         if (!isHost() || state.phase !== 'lobby') return;
         var mode = b.getAttribute('data-mode');
-        state.settings = Object.assign({}, state.settings, { mode: mode });
+        state.settings = Object.assign({}, state.settings, MODE_PRESETS[mode] || {}, { mode: mode });
         emit('room:settings', { settings: state.settings });
         emit('lobby:step', { step: 'settings' });
         state.lobbyStep = 'settings'; renderAll();

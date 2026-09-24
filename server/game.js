@@ -40,7 +40,9 @@ const DEFAULT_SETTINGS = Object.freeze({
   mode: 'classic',      // 'classic' 돌아가며 그리기 | 'fixed' 한 명이 계속 그리기(지정 출제자)
   fixedDrawerId: null,  // fixed 모드의 출제자. null 이면 호스트
 });
-const MODES = ['classic', 'fixed'];
+const MODES = ['classic', 'fixed', 'blitz'];
+// 속도전(blitz): 단어 후보 없이 자동 선택, 힌트 없음, 짧은 시간. 맞힌 순서로 점수(1등 400, 2등 300, 3등 200, 이후 100)
+const BLITZ_RANK_POINTS = [400, 300, 200];
 const LOBBY_STEPS = ['mode', 'settings'];
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -737,7 +739,7 @@ class Room {
 
     const s = { ...this.settings };
     if ('rounds' in patch) s.rounds = clampInt(patch.rounds, 1, 10, s.rounds);
-    if ('drawTime' in patch) s.drawTime = clampInt(patch.drawTime, 30, 180, s.drawTime);
+    if ('drawTime' in patch) s.drawTime = clampInt(patch.drawTime, 15, 180, s.drawTime);
     if ('wordCount' in patch) s.wordCount = clampInt(patch.wordCount, 2, 5, s.wordCount);
     if ('hints' in patch) s.hints = clampInt(patch.hints, 0, 5, s.hints);
     if ('hintEndAt' in patch) s.hintEndAt = clampInt(patch.hintEndAt, 5, 60, s.hintEndAt);
@@ -864,10 +866,16 @@ class Room {
 
     // 이미 정답으로 쓰였거나 후보로 제시됐던 단어는 가능하면 다시 내지 않는다
     const exclude = new Set([...this.usedWords, ...this.offeredWords]);
-    let options = pickWords(this.settings, exclude, this.settings.wordCount);
+    const blitz = this.settings.mode === 'blitz';
+    let options = pickWords(this.settings, exclude, blitz ? 1 : this.settings.wordCount);
     for (const o of options) this.offeredWords.add(o);
     if (!options.length) options = ['사과']; // 방어: 절대 비어있지 않게
     this.wordOptions = options;
+    if (blitz) {
+      // 속도전: 고르는 단계 없이 곧바로 그리기 (힌트는 설정과 무관하게 없음 — beginDrawing 에서 처리)
+      this.beginDrawing(options[0]);
+      return;
+    }
     this.timeLeft = CHOOSING_TIME;
 
     const base = { drawerId, drawerName: drawer.name, timeLeft: this.timeLeft };
@@ -905,7 +913,8 @@ class Room {
     this.drawTime = this.settings.drawTime;
     this.timeLeft = this.drawTime;
     // 힌트 개수는 설정값과 이 단어의 공개 가능 글자 수 중 작은 쪽. 마지막 힌트는 항상 종료 hintEndAt초 전
-    this.hintTimes = computeHintTimes(Math.min(this.settings.hints, maxReveals(word)), this.drawTime, this.settings.hintEndAt);
+    const hintCount = this.settings.mode === 'blitz' ? 0 : Math.min(this.settings.hints, maxReveals(word));
+    this.hintTimes = computeHintTimes(hintCount, this.drawTime, this.settings.hintEndAt);
     this.hintCount = this.hintTimes.size;
     this.categoryRevealed = false;
 
@@ -1177,7 +1186,14 @@ class Room {
   /** 정답 처리: 점수 부여, correct/player:guessed 전송, 전원 정답 시 턴 종료 */
   onCorrectGuess(p) {
     p.hasGuessed = true;
-    const pts = Math.max(100, Math.round(100 + (300 * this.timeLeft) / this.drawTime));
+    let pts;
+    if (this.settings.mode === 'blitz') {
+      // 맞힌 순서로 차등 (p 는 아직 hasGuessed 로 세지 않았으므로 이전에 맞힌 사람 수 = 순위)
+      const before = this.players.filter((q) => q.id !== this.drawerId && q.id !== p.id && q.hasGuessed).length;
+      pts = BLITZ_RANK_POINTS[before] != null ? BLITZ_RANK_POINTS[before] : 100;
+    } else {
+      pts = Math.max(100, Math.round(100 + (300 * this.timeLeft) / this.drawTime));
+    }
     p.score += pts;
     this.turnPoints.set(p.id, pts);
 
