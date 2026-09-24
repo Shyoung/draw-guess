@@ -877,6 +877,32 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await nv.locator('#drawings-unavailable').isVisible() && await nv.locator('#btn-drawings-zip').isHidden(), '테이블 없음: 그림 탭 "준비 중"');
     await nv.context().close();
 
+    // ---------- 2-g. 세로로 긴 소셜 사진도 모든 자리에서 원(정사각형) ----------
+    console.log('\n== 세로로 긴 사진 (가짜 Supabase) ==');
+    const tp = await newPage(browser, '긴사진');
+    const squareCheck = async (label, sel) => {
+      const r = await tp.evaluate((sel) => { const n = document.querySelector(sel); const i = n && n.querySelector('img.avatar-img'); if (!i) return null; const a = n.getBoundingClientRect(), b = i.getBoundingClientRect(); return [Math.round(a.width), Math.round(a.height), Math.round(b.width), Math.round(b.height)]; }, sel);
+      check(!!r && r[0] === r[2] && r[1] === r[3] && Math.abs(r[2] - r[3]) <= 1, `세로 사진: ${label} 원 모양 유지(칸 = 사진)`, r);
+    };
+    await tp.goto(`${URL}/?mock=1&auth=1&stay=1&auth_photo=tall`);
+    await tp.waitForSelector('#photo-preview img.avatar-img', { timeout: 5000 });
+    await sleep(300);
+    await squareCheck('프로필 설정 미리보기', '#photo-preview');
+    await tp.click('#btn-profile-next');
+    await tp.waitForSelector('#me-avatar img.avatar-img', { timeout: 3000 });
+    await sleep(200);
+    await squareCheck('메인 요약 카드', '#me-avatar');
+    await tp.click('#btn-account-open');
+    await tp.waitForSelector('#mp-avatar img.avatar-img', { timeout: 3000 });
+    await squareCheck('내 정보', '#mp-avatar');
+    await tp.click('#btn-me-back');
+    await tp.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    await tp.click('#btn-create');
+    await tp.waitForSelector('#player-list li.me .avatar img.avatar-img', { timeout: 5000 });
+    await sleep(200);
+    await squareCheck('방 플레이어 목록', '#player-list li.me .avatar');
+    await tp.context().close();
+
     // ---------- 2-e. OAuth 복귀 뒤 뒤로가기 ----------
     console.log('\n== OAuth 복귀 뒤 뒤로가기 (가짜 Supabase) ==');
     const o = await newPage(browser, 'OAuth복귀');

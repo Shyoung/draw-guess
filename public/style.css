@@ -943,6 +943,9 @@ body.sheet-open { overflow: hidden; }
 .k-label { font-family: -apple-system, BlinkMacSystemFont, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif; }
 /* 프로필 사진: 아바타 칸(.avatar · .me-avatar · .avatar-preview · .photo-preview · .acct-avatar)을 꽉 채우는 원 */
 img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; background: #fff; }
+/* 세로로 긴 사진(카카오 프로필 등)이 grid 행을 늘려 타원으로 보이지 않게: 칸에 절대 위치로 딱 맞춘다 */
+.has-img { position: relative; }
+.has-img > img.avatar-img { position: absolute; inset: 0; }
 /* 대기실 설정: 내 세트 도구 */
 .wordset-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: -4px; }
 .wordset-tools select { width: auto; flex: 1 1 200px; min-width: 0; padding: 8px 10px; font-size: 13px; font-weight: 600; }

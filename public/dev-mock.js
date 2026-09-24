@@ -4,7 +4,7 @@
    &stay=1        : 대기실(lobby)에서 자동 진행을 멈춘다(게임 시작을 누를 때까지). 설정/내 정보 UI 확인용
    &auth=1        : 가짜 window.supabase + window.APP_CONFIG 를 설치해 로그인 UI 를 켠다(네트워크 없음, 메모리 DB).
                     기본은 로그인된 상태로 시작. &auth_state=out 이면 로그아웃 상태로 시작. window.__mockAuth 로 상태 확인
-                    모크 사용자는 소셜 사진(인라인 SVG data URL)을 가진다. &auth_photo=0 이면 사진 없음.
+                    모크 사용자는 소셜 사진(인라인 SVG data URL)을 가진다. &auth_photo=0 이면 사진 없음, &auth_photo=tall 이면 세로로 긴 사진.
                     storage.from('avatars').upload/getPublicUrl/remove 는 메모리에 blob 을 두고 blob: URL 을 공개 URL 로 준다
                     (window.__mockAuth.storage.avatars[path]). 실제 서버라면 허용 호스트가 아니라 img 를 버리겠지만 모크 소켓은 서버를 거치지 않는다
                     그림 보관: tables.drawings(100장 제한) + storage.drawings(createSignedUrls → blob: URL, download → Blob).
@@ -22,7 +22,9 @@
     window.APP_CONFIG = { supabaseUrl: 'https://mock.supabase.local', supabaseAnonKey: 'mock-anon-key' };
     var authListeners = [];
     // 소셜 프로필 사진 대용: 하늘색 배경의 사람 실루엣 SVG
-    var SOCIAL_PHOTO = qs.get('auth_photo') === '0' ? null : 'data:image/svg+xml,' + encodeURIComponent(
+    // &auth_photo=tall : 세로로 긴 소셜 사진(카카오 프로필처럼 정사각형이 아닌 사진)
+    var TALL_PHOTO = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="960" viewBox="0 0 480 960"><rect width="480" height="960" fill="#c9a"/><circle cx="240" cy="420" r="170" fill="#fff"/></svg>');
+    var SOCIAL_PHOTO = qs.get('auth_photo') === '0' ? null : qs.get('auth_photo') === 'tall' ? TALL_PHOTO : 'data:image/svg+xml,' + encodeURIComponent(
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#6fb7ff"/>' +
       '<circle cx="32" cy="25" r="12" fill="#fff"/><path d="M10 64c2-14 11-21 22-21s20 7 22 21z" fill="#fff"/></svg>');
     var mockUser = { id: 'mock-user-1', email: 'mock@example.com', app_metadata: { provider: 'google' }, user_metadata: { name: '모크유저', avatar_url: SOCIAL_PHOTO || '' } };
