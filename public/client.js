@@ -1330,7 +1330,7 @@
   }
 
   function renderCenter() {
-    requestAnimationFrame(fitDrawerCanvas); // 레이아웃 확정 후 출제자 캔버스 크기 맞춤(모바일)
+    requestAnimationFrame(function () { fitDrawerCanvas(); fitTabletCanvas(); }); // 레이아웃 확정 후 캔버스 크기 맞춤(모바일 출제자 · 가로 태블릿)
     var lobby = state.phase === 'lobby';
     var sp = $('settings-panel'), mp = $('mode-panel'), cw = $('canvas-wrap'), tb = $('toolbar'), ds = $('draw-status');
     if (mp) mp.hidden = !(lobby && state.lobbyStep === 'mode');
@@ -2340,12 +2340,31 @@
 
     var form = $('chat-form'), input = $('chat-input');
     if (form && input) {
-      form.addEventListener('submit', function (e) {
-        e.preventDefault();
+      // 한글 조합(IME) 중 Enter: 조합이 끝난 뒤 보낸다. 보낸 직후 iOS/iPadOS 가 조합하던 마지막 글자를 다시 넣으면 지운다
+      var ime = { composing: false, pending: false, clearedAt: 0, sent: '' };
+      var sendNow = function () {
         var text = input.value.trim().slice(0, 100);
         if (!text) { input.focus(); return; }
         emit('chat:message', { text: text });
-        input.value = ''; input.focus();
+        input.value = ''; ime.clearedAt = Date.now(); ime.sent = text;
+        input.focus();
+      };
+      input.addEventListener('compositionstart', function () { ime.composing = true; });
+      input.addEventListener('compositionend', function () {
+        ime.composing = false;
+        if (ime.pending) { ime.pending = false; setTimeout(sendNow, 0); return; }
+        setTimeout(dropEcho, 0);
+      });
+      var dropEcho = function () {
+        if (!ime.clearedAt || Date.now() - ime.clearedAt > 600) return;
+        var v = input.value;
+        if (v && v.length <= 2 && ime.sent.slice(-v.length) === v) { input.value = ''; }
+      };
+      input.addEventListener('input', function () { if (!ime.composing) dropEcho(); });
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (ime.composing) { ime.pending = true; setTimeout(function () { if (ime.pending) { ime.pending = false; ime.composing = false; sendNow(); } }, 400); return; } // compositionend 가 안 오는 경우 대비
+        sendNow();
       });
     }
     buildToolbar();
@@ -2364,6 +2383,12 @@
     try { return !window.matchMedia || !window.matchMedia('(pointer: coarse)').matches; } catch (e) { return true; }
   }
   var COMPACT_MAX_H = 520; // visualViewport 높이가 이보다 짧으면(키보드) 컴팩트 모드
+  var KB_DROP = 120;       // 같은 폭에서 본 최대 높이보다 이만큼 줄면 키보드가 열린 것으로 본다
+  var SHELL_CHROME_H = 300; // 모바일 게임 셸에서 캔버스를 뺀 나머지(헤더·턴 띠·상태 띠·채팅 최소·간격) 대략 높이
+  var vvMax = 0, vvW = 0;
+  // 가로 태블릿(아이패드 가로) 게임 셸 — style.css 의 같은 미디어 조건과 맞춘다
+  var TABLET_LAND_MQ = '(min-width: 1100px) and (orientation: landscape) and (pointer: coarse)';
+  var tabletLandMq = window.matchMedia ? window.matchMedia(TABLET_LAND_MQ) : { matches: false, addEventListener: null, addListener: null };
   var openSheetId = null, sheetTimer = null, tickerTimer = null, lastCompact = false;
 
   /** node 를 parent 안(before 앞, 없으면 끝)으로 옮긴다. 이미 그 자리면 건드리지 않는다(포커스 유지). */
@@ -2401,6 +2426,7 @@
     if (!mobile && openSheetId) closeSheet(true);
     // 게임 셸(position:fixed)이 떠 있는 동안 문서 자체는 스크롤/바운스되지 않게 (iOS 주소창·키보드 대응)
     document.body.classList.toggle('game-shell', mobile && game && inRoom);
+    document.body.classList.toggle('tablet-shell', !mobile && tabletLandMq.matches && game && inRoom);
   }
 
   /** #chat-list / #chat-form 을 컨테이너(채팅 시트 본문 또는 채팅 패널)로 옮긴다 */
@@ -2549,11 +2575,32 @@
     var rs = document.documentElement.style;
     rs.setProperty('--vvh', Math.round(h) + 'px');
     rs.setProperty('--vvt', Math.round(top) + 'px');
-    var compact = mobileMq.matches && h < COMPACT_MAX_H;
+    var w = window.innerWidth;
+    if (w !== vvW) { vvW = w; vvMax = 0; } // 회전 등으로 폭이 바뀌면 다시 잰다
+    vvMax = Math.max(vvMax, h);
+    var kbOpen = vvMax - h > KB_DROP;
+    // 태블릿 세로: 키보드가 열려도 520px 보다 크지만, 폭 가득한 캔버스 + 입력칸이 남은 높이에 안 들어가면 컴팩트(캔버스를 통째로 줄이고 말풍선)
+    var fits = !kbOpen || h >= (w - 16) * 0.75 + SHELL_CHROME_H;
+    var compact = mobileMq.matches && (h < COMPACT_MAX_H || !fits);
     var vr = $('view-room');
     if (vr) { if (compact) vr.setAttribute('data-compact', '1'); else vr.removeAttribute('data-compact'); }
     if (compact !== lastCompact) { lastCompact = compact; if (!compact) setTimeout(scrollChatBottom, 0); renderChatPeek(false); }
     fitDrawerCanvas();
+    fitTabletCanvas();
+  }
+  /** 가로 태블릿 게임 셸: 가운데 패널 안에서(도구 모음/상태 띠를 뺀) 남는 높이에 4:3 캔버스 최대 너비를 --tw 로 */
+  function fitTabletCanvas() {
+    var cw = $('canvas-wrap'), cp = document.querySelector('.center-panel');
+    if (!cw || !cp) return;
+    if (!document.body.classList.contains('tablet-shell')) { cw.style.removeProperty('--tw'); return; }
+    var cs = getComputedStyle(cp);
+    var padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    var gap = parseFloat(cs.rowGap || cs.gap) || 8;
+    var innerW = cp.clientWidth - padX, availH = cp.clientHeight - padY;
+    ['toolbar', 'draw-status'].forEach(function (id) { var n = $(id); if (n && !n.hidden && n.offsetParent) availH -= n.offsetHeight + gap; });
+    if (innerW <= 0 || availH <= 0) return;
+    var wpx = Math.floor(Math.min(innerW, availH * 4 / 3));
+    cw.style.setProperty('--tw', wpx + 'px');
   }
 
   /**
@@ -2656,6 +2703,7 @@
     var bc = $('btn-copy'); if (bc) bc.addEventListener('click', function () { if (openSheetId === 'sheet-menu') closeSheet(false); });
     var onMq = function () { placeMobileChrome(); updateViewportVars(); renderChatPeek(false); };
     if (mobileMq.addEventListener) mobileMq.addEventListener('change', onMq); else if (mobileMq.addListener) mobileMq.addListener(onMq);
+    if (tabletLandMq.addEventListener) tabletLandMq.addEventListener('change', onMq); else if (tabletLandMq.addListener) tabletLandMq.addListener(onMq);
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', updateViewportVars);
       window.visualViewport.addEventListener('scroll', updateViewportVars);

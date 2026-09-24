@@ -4,6 +4,8 @@
  *   세로(≤1099px, 터치) = 모바일 UI(게임 셸 · 시트) / 가로 = 데스크톱 3단 / 좁고 긴 데스크톱 창(마우스) = 기존 중간 화면.
  *   게임 중(관전자·출제자): 페이지 스크롤 없음 · 캔버스 전부 보임 · 정답 입력칸(관전자) 화면 안 · 가로 스크롤 없음.
  *   가로 터치에서는 채팅 입력창에 자동 포커스하지 않는다(가상 키보드 방지).
+ *   키보드(화면 높이 축소) 흉내: 세로 = 컴팩트(캔버스 통째로 축소 + 말풍선), 가로 = 태블릿 셸에서 캔버스가 남는 높이에 맞춰 축소.
+ *   한글 IME: 조합 중 Enter 는 조합이 끝난 뒤 한 번만 보내고, 보낸 직후 되살아난 마지막 글자는 지운다.
  * 실행: node test/tablet.js   (스크린샷: test/shots/tablet/*.png)
  */
 const { spawn } = require('child_process');
@@ -50,7 +52,8 @@ async function measure(p) {
     const box = (s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); const cs = getComputedStyle(e); return { t: r.top, b: r.bottom, l: r.left, r: r.right, w: r.width, h: r.height, vis: cs.display !== 'none' && cs.visibility !== 'hidden' && r.width > 0 }; };
     return {
       vw: innerWidth, vh: innerHeight, sw: document.documentElement.scrollWidth, sh: document.documentElement.scrollHeight,
-      shell: document.body.classList.contains('game-shell'),
+      shell: document.body.classList.contains('game-shell'), tshell: document.body.classList.contains('tablet-shell'),
+      compact: document.getElementById('view-room').getAttribute('data-compact') === '1',
       canvas: box('#canvas'), input: box('#chat-input'), players: box('#players-panel') || box('.players-panel'), menu: box('#btn-menu'),
       focusChat: document.activeElement && document.activeElement.id === 'chat-input',
     };
@@ -117,7 +120,51 @@ const inside = (b, m) => !!b && b.vis && b.t >= -0.5 && b.l >= -0.5 && b.b <= m.
       if (d.mobile) check(m.canvas && m.canvas.w >= d.w - 60, `${d.tag} 관전자: 캔버스를 화면 폭 가득(≥ ${d.w - 60}px)`, m.canvas && Math.round(m.canvas.w));
       if (!d.mobile && d.w >= 1100) check(m.players && m.canvas && m.players.r <= m.canvas.l, `${d.tag} 관전자: 3단(참가자 | 캔버스 | 채팅)`, m.players && [Math.round(m.players.r), Math.round(m.canvas.l)]);
       if (d.touch) check(!m.focusChat, `${d.tag} 관전자: 채팅 입력창 자동 포커스 안 함(가상 키보드 방지)`);
+      if (d.touch && !d.mobile) check(m.tshell, `${d.tag} 관전자: 가로 태블릿 게임 셸`, m.tshell);
       await p.screenshot({ path: path.join(OUT, `${d.tag}-drawing.png`) });
+      // 키보드 흉내: 아이패드 사파리처럼 레이아웃(방향·innerHeight)은 그대로 두고 visualViewport 높이만 줄인다(키보드 ≈ 세로 400px · 가로 390px)
+      if (d.touch) {
+        const kb = d.h > d.w ? 400 : 390, before = m.canvas;
+        const setVV = (H) => p.evaluate((H) => { const vv = window.visualViewport; Object.defineProperty(vv, 'height', { configurable: true, get: () => (H == null ? window.innerHeight : H) }); vv.dispatchEvent(new Event('resize')); }, H);
+        await p.click('#chat-input');
+        await setVV(d.h - kb);
+        await sleep(600);
+        const k = await measure(p); const layoutVh = k.vh; k.vh = d.h - kb;
+        check(k.sh <= layoutVh + 1, `${d.tag} 키보드: 페이지 스크롤 없음`, `${k.sh} > ${layoutVh}`);
+        check(inside(k.canvas, k), `${d.tag} 키보드: 캔버스 전부 보임`, k.canvas);
+        check(inside(k.input, k), `${d.tag} 키보드: 정답 입력칸 화면 안`, k.input);
+        check(k.canvas && Math.abs(k.canvas.w / k.canvas.h - 4 / 3) < 0.03, `${d.tag} 키보드: 캔버스 4:3 유지`, k.canvas && (k.canvas.w / k.canvas.h).toFixed(3));
+        if (d.mobile) check(k.compact, `${d.tag} 키보드: 컴팩트 모드(캔버스 축소 · 말풍선)`, k.compact);
+        else check(k.tshell && k.canvas && before && k.canvas.w < before.w, `${d.tag} 키보드: 캔버스가 남는 높이에 맞춰 줄어듦`, k.canvas && before && [Math.round(before.w), Math.round(k.canvas.w)]);
+        await p.screenshot({ path: path.join(OUT, `${d.tag}-keyboard.png`) });
+        await setVV(null);
+        await sleep(600);
+        const r = await measure(p);
+        check(!r.compact && inside(r.canvas, r) && r.canvas.w >= (before ? before.w - 2 : 0), `${d.tag} 키보드 닫힘: 원래 크기로`, r.canvas && [Math.round(r.canvas.w), r.compact]);
+      }
+      // 한글 IME(아이패드 세로에서 한 번): 조합 중 Enter · 보낸 뒤 되살아난 글자
+      if (d.tag === 'ipad-air-portrait') {
+        const sentCount = () => p.evaluate(() => [...document.querySelectorAll('#chat-list > *')].filter((n) => /사과나무/.test(n.textContent)).length);
+        const c0 = await sentCount();
+        await p.evaluate(() => {
+          const i = document.getElementById('chat-input');
+          i.focus(); i.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }));
+          i.value = '사과나무';
+          document.getElementById('chat-form').requestSubmit();
+        });
+        await sleep(150);
+        check((await sentCount()) === c0 && (await p.inputValue('#chat-input')) === '사과나무', 'IME: 조합 중 Enter 는 바로 보내지 않음');
+        await p.evaluate(() => document.getElementById('chat-input').dispatchEvent(new CompositionEvent('compositionend', { data: '무' })));
+        await sleep(500);
+        check((await sentCount()) === c0 + 1 && (await p.inputValue('#chat-input')) === '', 'IME: 조합이 끝나면 한 번만 보내고 입력칸 비움', await sentCount());
+        // 보낸 직후 IME 가 마지막 글자를 다시 넣는 경우(iPadOS)
+        await p.evaluate(() => { const i = document.getElementById('chat-input'); i.value = '무'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+        check((await p.inputValue('#chat-input')) === '', 'IME: 보낸 직후 되살아난 마지막 글자 지움', await p.inputValue('#chat-input'));
+        await sleep(700);
+        await p.fill('#chat-input', '무지개');
+        check((await p.inputValue('#chat-input')) === '무지개', 'IME: 조금 뒤 새로 치는 글자는 그대로');
+        await p.fill('#chat-input', '');
+      }
 
       // 게임 중(출제자): 캔버스 · 도구가 화면 안
       await fresh();

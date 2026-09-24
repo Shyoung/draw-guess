@@ -610,6 +610,29 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 @media (max-width: 640px) { .gallery-grid { grid-template-columns: repeat(2, 1fr); } .modal { padding: 10px; } .modal-card { padding: 14px; } }
 
 /* =====================================================================
+   가로 태블릿(아이패드 가로) 게임 셸 — 게임 중에만 body.tablet-shell (client.js).
+   방을 화면(visualViewport) 높이에 고정해 키보드가 올라와도 입력칸이 화면 안에 있고,
+   캔버스는 JS(fitTabletCanvas)가 준 --tw 너비(4:3)로 가운데 패널의 남는 높이에 맞춰 줄어든다.
+   ===================================================================== */
+@media (min-width: 1100px) and (orientation: landscape) and (pointer: coarse) {
+  body.tablet-shell { overflow: hidden; height: 100vh; height: var(--vvh, 100dvh); }
+  body.tablet-shell .room {
+    position: fixed; left: 0; right: 0; top: 0; max-width: none; margin: 0; min-height: 0;
+    height: 100vh; height: var(--vvh, 100dvh); transform: translateY(var(--vvt, 0px));
+    display: flex; flex-direction: column; padding: 8px 10px; overflow: hidden;
+  }
+  body.tablet-shell .topbar { flex: 0 0 auto; margin-bottom: 8px; min-height: 0; padding: 6px 12px; }
+  body.tablet-shell .room-grid { flex: 1 1 auto; min-height: 0; gap: 10px; grid-template-rows: minmax(0, 1fr); grid-template-columns: 210px minmax(0, 1fr) 300px; }
+  body.tablet-shell .players-panel { align-self: stretch; min-height: 0; overflow-y: auto; }
+  body.tablet-shell .center-panel { min-height: 0; overflow: hidden; gap: 8px; justify-content: center; }
+  body.tablet-shell .canvas-wrap { flex: 0 0 auto; max-width: none; width: var(--tw, 100%); }
+  body.tablet-shell .toolbar, body.tablet-shell .draw-status { flex: 0 0 auto; max-width: none; }
+  body.tablet-shell .chat-panel { max-height: none; min-height: 0; }
+  body.tablet-shell .chat-list { min-height: 0; }
+  body.tablet-shell .chat-form input, body.tablet-shell .chat-form .btn { font-size: 16px; } /* iOS 확대 방지 */
+}
+
+/* =====================================================================
    모바일 전용 컴포넌트 — 데스크톱/태블릿에서는 존재하지만 렌더링되지 않는다(display:none).
    모바일 미디어 블록(≤767px 또는 세로 터치 태블릿)에서만 켜진다. #react-bar 가 비어 있으면 gap 만 차지하지 않도록 숨긴다.
    ===================================================================== */
