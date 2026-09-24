@@ -14,6 +14,7 @@ const express = require('express');
 const { Server } = require('socket.io');
 const { Room } = require('./game');
 const { createStore } = require('./store');
+const { createAuth } = require('./auth');
 
 const PORT = process.env.PORT || 3000;
 const MAX_PLAYERS = 12;
@@ -56,7 +57,15 @@ function sendIndex(req, res) {
 app.get(['/', '/index.html'], sendIndex);
 
 // 헬스체크 / keep-alive 핑 대상 (정적 파일보다 가볍게)
-app.get('/healthz', (req, res) => res.json({ ok: true, env: process.env.APP_ENV || 'production', version: ASSET_VERSION, store: store.kind, rooms: rooms.size, allowSolo: process.env.ALLOW_SOLO === '1', uptime: Math.round(process.uptime()) }));
+// 클라이언트 공개 설정 (Supabase URL/anon 키). 로그인이 꺼져 있으면 빈 객체 → 클라이언트는 게스트 UI 만 보여준다
+app.get('/config.js', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.type('application/javascript').send('window.APP_CONFIG = ' + JSON.stringify(auth.publicConfig()) + ';');
+});
+// 개인정보 처리방침 (소셜 로그인 심사에 URL 이 필요하다)
+app.get('/privacy', (req, res) => { res.set('Cache-Control', 'no-cache'); res.sendFile(path.join(PUBLIC_DIR, 'privacy.html')); });
+
+app.get('/healthz', (req, res) => res.json({ ok: true, env: process.env.APP_ENV || 'production', version: ASSET_VERSION, store: store.kind, rooms: rooms.size, allowSolo: process.env.ALLOW_SOLO === '1', auth: auth.enabled, uptime: Math.round(process.uptime()) }));
 
 // js/css는 URL에 버전이 붙으므로 1년 캐시(immutable)해도 안전하다. 그 외 파일은 매번 재검증.
 app.use(express.static(PUBLIC_DIR, {
@@ -72,6 +81,9 @@ const io = new Server(server);
 
 /** @type {Map<string, Room>} */
 const rooms = new Map();
+
+// 로그인(Supabase) — SUPABASE_URL/ANON_KEY/SERVICE_ROLE_KEY 가 모두 있을 때만 켜진다. 없으면 게스트 전용
+const auth = createAuth(process.env);
 
 // 방 상태 저장소: STORE_URL / REDIS_URL (redis://, rediss://, file:...) — 없으면 메모리만
 const store = createStore(process.env);
@@ -183,6 +195,14 @@ function deleteRoomIfEmpty(room) {
 }
 
 // ── 소켓 처리 ───────────────────────────────────────────────────
+// 접속 시 로그인 토큰 검증: io({ auth: { token } }) 로 온 Supabase access token → socket.data.user (없거나 무효면 null=게스트)
+io.use((socket, next) => {
+  socket.data.user = null;
+  const token = socket.handshake && socket.handshake.auth ? socket.handshake.auth.token : null;
+  if (!token) return next();
+  auth.verifyToken(token).then((user) => { socket.data.user = user; next(); }).catch(() => next());
+});
+
 io.on('connection', (socket) => {
   socket.data.roomCode = null;
   socket.data.playerId = null; // 방 안에서의 고정 id (최초 접속 시 socket.id, 재접속해도 유지)
@@ -263,7 +283,7 @@ io.on('connection', (socket) => {
     socket.data.playerId = p.id;
     socket.join(code);
     ack({ ok: true, roomCode: code, playerId: p.id, token: p.token });
-    room.reconnect(p.id, socket.id, extra || {});
+    room.reconnect(p.id, socket.id, Object.assign({}, extra || {}, { user: socket.data.user }));
   };
 
   /** (data, ack) 인자 정규화 — 클라이언트가 data 없이 ack 만 보낸 경우 대비 */
@@ -292,7 +312,7 @@ io.on('connection', (socket) => {
     socket.data.playerId = socket.id;
     socket.join(code);
     ack({ ok: true, roomCode: code, playerId: socket.id, token });
-    room.addPlayer({ id: socket.id, name, avatar, token, socketId: socket.id });
+    room.addPlayer({ id: socket.id, name, avatar, token, socketId: socket.id, user: socket.data.user });
     console.log(`[draw-guess] room ${code} created by ${name}. rooms=${rooms.size}`);
   });
 
@@ -328,7 +348,7 @@ io.on('connection', (socket) => {
     socket.data.playerId = socket.id;
     socket.join(code);
     ack({ ok: true, roomCode: code, playerId: socket.id, token });
-    room.addPlayer({ id: socket.id, name, avatar, token, socketId: socket.id });
+    room.addPlayer({ id: socket.id, name, avatar, token, socketId: socket.id, user: socket.data.user });
   });
 
   // room:rejoin { roomCode, token } → ack { ok, roomCode, playerId, token } | { ok:false, error }
@@ -369,6 +389,15 @@ io.on('connection', (socket) => {
     if (!room) return fail('방에 참가하지 않았습니다.');
     const err = room.updateSettings(pid(), data && data.settings);
     if (err) fail(err);
+  });
+
+  // auth:token { token } — 접속 중 로그인/토큰 갱신. 검증 후 이 소켓과(방에 있으면) 플레이어에 반영
+  on('auth:token', async (data) => {
+    const token = data && typeof data.token === 'string' ? data.token : null;
+    const user = token ? await auth.verifyToken(token) : null;
+    socket.data.user = user;
+    const room = currentRoom();
+    if (room) room.setUser(pid(), user);
   });
 
   // results:done — 게임 종료 결과 화면을 닫고 대기실로 (본인만)

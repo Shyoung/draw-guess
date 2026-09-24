@@ -23,6 +23,13 @@ services:
           type: keyvalue
           name: draw-guess-kv
           property: connectionString
+      # 로그인(Supabase). 대시보드에서 값을 넣는다(sync:false = Blueprint 가 덮어쓰지 않음). 비어 있으면 게스트 전용
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
 
   # ── 스테이징: develop 브랜치. 기능을 먼저 올려 실제 폰/브라우저로 확인한 뒤 main 에 머지한다 ──
   # ALLOW_SOLO=1 이라 혼자서도 게임을 시작해 화면을 볼 수 있고, KEEP_ALIVE=0 이라 안 쓸 때는 잠들어 무료 시간을 거의 쓰지 않는다.
@@ -46,6 +53,12 @@ services:
         value: "1"
       - key: KEEP_ALIVE
         value: "0"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
 
   # 방 상태 저장용 Redis 호환 인스턴스(무료 25MB). 웹 서비스가 재배포되어도 이 인스턴스는 유지되므로
   # 진행 중인 게임이 이어진다. 무료 플랜은 디스크 영속화가 없어 이 인스턴스 자체가 재시작되면 비워진다.

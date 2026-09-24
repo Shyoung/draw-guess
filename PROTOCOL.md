@@ -13,6 +13,11 @@
 - 논리 좌표계는 **800 x 600** 고정 (정수 px). CSS로 반응형 축소만 한다. 모든 좌표는 이 논리 공간 기준.
 - 배경은 흰색(`#ffffff`). 지우개(`eraser`)는 흰색으로 그린다.
 
+## 로그인 (선택, Supabase)
+- 서버는 `/config.js` 로 `window.APP_CONFIG = { supabaseUrl, supabaseAnonKey }` 를 내려준다(로그인이 꺼져 있으면 `{}`). 클라이언트는 supabase-js 로 Google/Kakao OAuth 를 직접 수행하고, 소켓 연결 시 `io({ auth: { token: <access_token> } })` 로 토큰을 보낸다.
+- 서버는 토큰을 검증해 플레이어에 `userId` 를 붙인다. `room:state.players[].loggedIn` 으로 노출(id 자체는 노출하지 않음). 접속 중 로그인/로그아웃은 `auth:token { token|null }`.
+- 프로필·단어 세트는 클라이언트가 supabase-js 로 직접 읽고 쓴다(RLS 로 본인 것만). 게임 서버는 관여하지 않는다.
+
 ## Identity
 - 플레이어 id = 최초 접속 시의 `socket.id`. 재접속(`room:rejoin`)해도 바뀌지 않는다(서버가 playerId→socketId를 매핑).
 - `avatar` = `{ emoji: string, color: string }` (color는 `#rrggbb`).
@@ -70,7 +75,7 @@
   roomCode, hostId, phase, round, totalRounds,
   drawerId,                 // 현재 출제자 (lobby면 null)
   settings,
-  players: [{ id, name, avatar, score, isDrawing, hasGuessed, connected, atResults }],  // 참가 순서. connected=false 는 유예 중(재접속 대기). atResults=true 는 게임 종료 결과 화면을 아직 닫지 않음
+  players: [{ id, name, avatar, score, isDrawing, hasGuessed, connected, atResults, loggedIn }],  // 참가 순서. connected=false 는 유예 중(재접속 대기). atResults=true 는 게임 종료 결과 화면을 아직 닫지 않음
   nextDrawerId,             // 다음 턴에 출제할 사람. lobby/gameOver거나 이번이 마지막 턴이면 null
   lobbyStep,                // 'mode' | 'settings' — 대기실 화면 단계
   fixedDrawerId,            // fixed 모드의 실제 출제자(지정 없으면 호스트). classic 이면 null

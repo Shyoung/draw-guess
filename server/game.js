@@ -283,7 +283,7 @@ class Room {
       lastGameOver: this.lastGameOver,
       players: this.players.map((p) => ({
         id: p.id, name: p.name, avatar: { ...p.avatar }, score: p.score,
-        isDrawing: p.isDrawing, hasGuessed: p.hasGuessed, token: p.token, atResults: !!p.atResults,
+        isDrawing: p.isDrawing, hasGuessed: p.hasGuessed, token: p.token, atResults: !!p.atResults, userId: p.userId || null,
       })),
       savedAt: Date.now(),
     };
@@ -326,7 +326,7 @@ class Room {
     room.players = (s.players || []).map((p) => ({
       id: p.id, name: p.name, avatar: { ...p.avatar }, score: p.score || 0,
       isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed, token: p.token || null,
-      connected: false, socketId: null, _graceTimer: null, atResults: !!p.atResults,
+      connected: false, socketId: null, _graceTimer: null, atResults: !!p.atResults, userId: p.userId || null,
     }));
     return room;
   }
@@ -509,6 +509,7 @@ class Room {
         hasGuessed: p.hasGuessed,
         connected: p.connected,
         atResults: !!p.atResults,
+        loggedIn: !!p.userId,
       })),
     };
   }
@@ -524,11 +525,12 @@ class Room {
    * 플레이어 추가. 소켓은 호출 전에 이미 this.code 룸에 join 되어 있어야 한다.
    * 게임 중이면 현재 진행 상황(choosing/drawing/turnEnd/gameOver)을 개별 전송한다.
    */
-  addPlayer({ id, name, avatar, token, socketId }) {
+  addPlayer({ id, name, avatar, token, socketId, user }) {
     if (this.getPlayer(id)) return this.getPlayer(id);
     const p = {
       id, name, avatar, score: 0, isDrawing: false, hasGuessed: false,
       token: token || null, connected: true, socketId: socketId || id, _graceTimer: null,
+      userId: user && user.userId ? user.userId : null, // 로그인 사용자면 Supabase user id (게스트는 null)
       atResults: false, // 게임 종료 결과 화면을 아직 보고 있는지 (직접 "대기실로" 를 눌러야 false)
     };
     this.players.push(p);
@@ -588,6 +590,7 @@ class Room {
     p.socketId = socketId;
     if (name) p.name = name;
     if (avatar) p.avatar = avatar;
+    if (arguments[2] && arguments[2].user !== undefined) p.userId = arguments[2].user && arguments[2].user.userId ? arguments[2].user.userId : p.userId;
     // 이미 연결돼 있던 자리를 새 소켓이 넘겨받는 경우(새로고침 경합, 다른 탭)에는 "다시 연결" 안내를 내지 않는다
     if (!wasConnected) this.systemMessage(`${p.name}님이 다시 연결되었습니다.`);
     this.broadcastState();
@@ -596,6 +599,14 @@ class Room {
       this.emitTo(id, 'game:hint', { wordMask: revealAll(this.word) });
     }
     return true;
+  }
+
+  /** 접속 중 로그인/로그아웃 반영 */
+  setUser(id, user) {
+    const p = this.getPlayer(id);
+    if (!p) return;
+    p.userId = user && user.userId ? user.userId : null;
+    this.broadcastState();
   }
 
   /** 반응(👍/👎): drawing 중, 출제자 제외. 기록하지 않고 방 전체에 중계만 한다. */
