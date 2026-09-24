@@ -125,11 +125,23 @@ async function say(page, text) {
     check(await host.locator('#btn-mode-back').isVisible() && await p2.locator('#btn-mode-back').isHidden(), '모드 선택으로 돌아가기 버튼은 호스트만');
     check(await host.locator('#set-fixedDrawer-wrap').isHidden(), '기본 모드에서는 출제자 선택 숨김');
 
+    // 게임 길이 빠른 선택: 기본 = 보통, 짧게를 누르면 라운드·시간·힌트가 한 번에
+    check((await host.getAttribute('#preset-row .preset-btn[data-preset="normal"]', 'aria-checked')) === 'true', '게임 길이: 기본 "보통" 선택');
+    check(/3명 × 3라운드 · 최대 약 \d+분/.test(await host.textContent('#settings-estimate')), '예상 시간 표시(인원 × 라운드)', await host.textContent('#settings-estimate'));
+    check(await host.locator('#settings-details').evaluate((d) => !d.open) && await host.locator('#custom-body').isHidden(), '세부 설정 · 우리만의 단어는 접힌 채 시작');
+    check(await p2.locator('#settings-host').isHidden() && await p2.locator('#settings-summary').isVisible() && (await p2.textContent('#settings-summary')).includes('보통'), '방장이 아닌 사람: 설정 요약만', await p2.textContent('#settings-summary'));
+    await host.click('#preset-row .preset-btn[data-preset="short"]');
+    await p2.waitForFunction(() => window.__dg.state.settings.rounds === 2 && window.__dg.state.settings.drawTime === 60 && window.__dg.state.settings.hints === 1, null, { timeout: 3000 }).catch(() => {});
+    check(await p2.evaluate(() => { const s = window.__dg.state.settings; return s.rounds === 2 && s.drawTime === 60 && s.hints === 1; }) && (await p2.textContent('#settings-summary')).includes('짧게'), '짧게: 2라운드 · 60초 · 힌트 1 동기화 · 요약 갱신', await p2.textContent('#settings-summary'));
     // 설정 변경 → 다른 클라이언트에 반영
+    await host.click('#settings-details > summary');
     await host.selectOption('#set-rounds', '1');
     await host.selectOption('#set-drawTime', '30');
     await host.selectOption('#set-hints', '1');
     // 단어를 3음절 이상 사용자 단어로 고정: 1글자 단어가 뽑히면 마스크·근접 정답 검사가 흔들리던 플레이크 제거
+    check((await host.textContent('#details-note')) === '직접 설정함' && (await host.getAttribute('#preset-row .preset-btn[aria-checked="true"]', 'data-preset').catch(() => null)) === null, '세부 설정을 바꾸면 "직접 설정함"(빠른 선택 해제)');
+    await host.click('label[for="set-useCustom"]');
+    check(await host.locator('#custom-body').isVisible(), '우리만의 단어 쓰기: 켜면 단어 입력 펼침');
     await host.fill('#set-customWords', '자전거,냉장고,해바라기,고슴도치,선풍기,소방차,다람쥐,무지개,피라미드,헬리콥터,미끄럼틀,아이스크림');
     await host.locator('#set-customWords').blur();
     await host.check('#set-customWordsOnly');
@@ -474,6 +486,8 @@ async function say(page, text) {
     check(await host.locator('#btn-end-game').isHidden() && await host.locator('#settings-panel').isVisible(), '게임 끝내기 뒤: 버튼 숨김 · 설정 화면');
 
     // 헤더 아이콘 버튼: 이름은 aria-label/title, 글자는 숨김
+    check(await host.evaluate(() => { const l = document.getElementById('btn-leave'); return l.previousElementSibling && l.previousElementSibling.id === 'btn-room-profile' && document.getElementById('btn-room-profile').getAttribute('aria-label') === '설정'; }), '헤더: 설정(톱니) 버튼이 나가기 바로 왼쪽');
+    check((await host.locator('.topbar #btn-sound').count()) === 0, '헤더: 효과음 버튼은 설정 창 안으로');
     for (const id of ['btn-room-profile', 'btn-leave']) {
       const info = await host.evaluate((id) => { const b = document.getElementById(id); const l = b.querySelector('.btn-label'); return { svg: !!b.querySelector('svg'), label: b.getAttribute('aria-label'), title: b.title, shown: !!l && getComputedStyle(l).display !== 'none' }; }, id);
       check(info.svg && info.label && info.title && !info.shown, `헤더 ${id}: 아이콘만(이름은 aria-label · title)`, info);

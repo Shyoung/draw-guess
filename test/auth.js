@@ -588,7 +588,9 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     await p.waitForSelector('#settings-panel:not([hidden])', { timeout: 5000 });
     check(await p.locator('.topbar #btn-account-top').isVisible() && await p.locator('.topbar #btn-room-profile').isVisible(), '방 안(데스크톱): 상단바 "프로필" · "내 정보" 버튼');
-    check(await p.locator('#wordset-tools').isVisible() && await p.locator('#btn-wordset-save').isVisible(), '설정: "현재 단어를 세트로 저장" 표시');
+    check(await p.locator('#custom-body').isHidden() && await p.locator('#wordset-tools').isHidden(), '설정: 우리만의 단어는 꺼진 채(세트 도구 숨김)');
+    await p.click('label[for="set-useCustom"]');
+    check(await p.locator('#wordset-tools').isVisible() && await p.locator('#btn-wordset-save').isVisible(), '우리만의 단어 켜기 → "현재 단어를 세트로 저장" 표시');
     check(await p.locator('#wordset-load').isVisible() && (await p.locator('#wordset-load option').count()) === 2, '설정: "내 세트 불러오기" 셀렉트(세트 1개)', await p.locator('#wordset-load option').count());
     await p.waitForFunction(() => window.__dg.state.players.some((pl) => pl.loggedIn), null, { timeout: 3000 }).catch(() => {});
     check(await p.evaluate(() => window.__dg.state.players.some((pl) => pl.id === window.__dg.myId() && pl.loggedIn)), '데이터: players[].loggedIn 은 그대로 받음');
@@ -1033,7 +1035,8 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await m.waitForSelector('#overlay-leave:not([hidden])', { timeout: 3000 });
     check(await m.locator('#sheet-menu').isHidden() && (await txt(m, '#leave-title')) === '내 정보로 이동할까요?', '모바일: 메뉴 → 내 정보 → 나가고 이동할지 묻기');
     await m.click('#btn-leave-cancel');
-    check(await m.locator('#wordset-tools').isVisible(), '모바일 설정: 세트 도구 표시');
+    await m.click('label[for="set-useCustom"]');
+    check(await m.locator('#wordset-tools').isVisible(), '모바일 설정: 우리만의 단어 켜면 세트 도구 표시');
     check((await m.locator('.login-badge').count()) === 0, '모바일: ✔ 로그인 배지 없음');
     sw = await m.evaluate(() => document.documentElement.scrollWidth);
     check(sw <= 390, '모바일 대기실(로그인): 가로 스크롤 없음', sw);

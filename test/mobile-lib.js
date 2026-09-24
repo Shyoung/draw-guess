@@ -96,11 +96,13 @@ async function runMobileFlow(hook, opts) {
     // 3. 설정 화면 (1라운드, 40초, 힌트 1회)
     await mobile.click('#mode-panel .mode-card[data-mode="classic"]');
     await mobile.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
+    await mobile.click('#settings-details > summary'); // 세부 설정 펼치기
     await mobile.selectOption('#set-rounds', '1');
     await mobile.selectOption('#set-drawTime', '40');
     await mobile.selectOption('#set-hints', '1');
     if (opts.customWords) {
       await mobile.selectOption('#set-wordCount', String(opts.wordCount || 2));
+      await mobile.click('label[for="set-useCustom"]'); // 우리만의 단어 쓰기
       await mobile.fill('#set-customWords', opts.customWords);
       await mobile.check('#set-customWordsOnly'); // change → 설정 전송(텍스트 영역 값 포함)
       await mobile.waitForFunction((w) => (window.__dg.state.settings.customWords || '') === w && window.__dg.state.settings.customWordsOnly, opts.customWords, { timeout: 3000 });

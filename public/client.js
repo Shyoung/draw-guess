@@ -103,6 +103,30 @@
   var MODE_NAMES = { classic: '돌아가며 그리기', fixed: '한 명이 그리기', blitz: '속도전' };
   // 모드 카드를 고를 때 함께 적용되는 프리셋 (그 뒤엔 설정 화면에서 자유롭게 바꿀 수 있다)
   var MODE_PRESETS = { blitz: { drawTime: 25, hints: 0, rounds: 5 }, classic: { drawTime: 80, hints: 2, rounds: 3 }, fixed: { drawTime: 80, hints: 2, rounds: 5 } };
+  /** 게임 길이 빠른 선택(모드별). 보통 = 모드를 고를 때의 기본값(MODE_PRESETS) */
+  var LENGTH_PRESETS = {
+    classic: { short: { rounds: 2, drawTime: 60, hints: 1 }, normal: { rounds: 3, drawTime: 80, hints: 2 }, long: { rounds: 5, drawTime: 100, hints: 2 } },
+    fixed: { short: { rounds: 3, drawTime: 60, hints: 1 }, normal: { rounds: 5, drawTime: 80, hints: 2 }, long: { rounds: 8, drawTime: 100, hints: 2 } },
+    blitz: { short: { rounds: 3, drawTime: 20, hints: 0 }, normal: { rounds: 5, drawTime: 25, hints: 0 }, long: { rounds: 8, drawTime: 30, hints: 0 } }
+  };
+  var PRESET_NAMES = { short: '짧게', normal: '보통', long: '길게' };
+  function presetsFor(mode) { return LENGTH_PRESETS[mode] || LENGTH_PRESETS.classic; }
+  function matchPreset(s) {
+    var ps = presetsFor(s.mode), found = null;
+    Object.keys(ps).forEach(function (k) {
+      var p = ps[k];
+      if (p.rounds === s.rounds && p.drawTime === s.drawTime && (s.mode === 'blitz' || p.hints === s.hints)) found = k;
+    });
+    return found;
+  }
+  /** 전체 턴 수와 최대 예상 시간(분). 턴마다 단어 고르기(평균 ~8초, 속도전 0) + 결과 5초를 더한다 */
+  function estimateGame(s) {
+    var n = Math.max(2, state.players.filter(function (p) { return p.connected !== false; }).length);
+    var turns = s.mode === 'fixed' ? s.rounds : s.rounds * n;
+    var per = s.drawTime + (s.mode === 'blitz' ? 0 : 8) + 5;
+    return { players: n, turns: turns, minutes: Math.max(1, Math.round(turns * per / 60)) };
+  }
+  function presetSub(mode, p) { return (mode === 'fixed' ? p.rounds + '문제' : p.rounds + '라운드') + ' · ' + p.drawTime + '초'; }
   /** fixed 모드에서 실제 출제자(지정된 사람이 없으면 호스트). classic 이면 null */
   function fixedDrawerId() {
     if (state.settings.mode !== 'fixed') return null;
@@ -175,9 +199,9 @@
 
   function renderSoundButton(btn) {
     var muted = SFX.isMuted();
-    btn.textContent = muted ? '🔇' : '🔊';
+    btn.setAttribute('aria-checked', muted ? 'false' : 'true');
     btn.title = muted ? '효과음 켜기' : '효과음 끄기';
-    btn.setAttribute('aria-pressed', String(muted));
+    var st = $('sound-state'); if (st) st.textContent = muted ? '꺼짐' : '켜짐';
   }
 
   // ------------------------------------------------------------------
@@ -1158,9 +1182,7 @@
     var vr = $('view-room');
     if (vr) { vr.setAttribute('data-phase', state.phase); vr.setAttribute('data-role', isDrawer() ? 'drawer' : 'guesser'); }
     placeMobileChrome();
-    if (roomProfile.open && (!inRoom || state.phase !== 'lobby')) { closeRoomProfile(); if (inRoom) toast('게임이 시작돼 프로필 수정을 닫았어요'); }
-    var rpb = $('btn-room-profile');
-    if (rpb) { rpb.disabled = inRoom && state.phase !== 'lobby'; rpb.title = rpb.disabled ? '대기실에서 바꿀 수 있어요' : '닉네임·아바타 바꾸기'; }
+    if (roomProfile.open && !roomProfile.formless && (!inRoom || state.phase !== 'lobby')) { closeRoomProfile(); if (inRoom) toast('게임이 시작돼 프로필 수정을 닫았어요'); }
     renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderResultsSave(); renderChatPeek(); renderAccount();
   }
 
@@ -1365,9 +1387,41 @@
     setVal('set-hints', s.hints); setVal('set-hintEndAt', s.hintEndAt);
     setVal('set-customWords', s.customWords || ''); setVal('set-customWordsOnly', s.customWordsOnly);
     var fixed = s.mode === 'fixed';
+    // 게임 길이 · 예상 시간 · 우리만의 단어 · 요약(방장이 아닌 사람)
+    var preset = matchPreset(s), ps = presetsFor(s.mode), est = estimateGame(s);
+    document.querySelectorAll('#preset-row .preset-btn').forEach(function (b) {
+      var k = b.getAttribute('data-preset'), p = ps[k];
+      b.setAttribute('aria-checked', k === preset ? 'true' : 'false');
+      b.disabled = !editable;
+      var sub = b.querySelector('.preset-sub'); if (sub && p) sub.textContent = presetSub(s.mode, p);
+    });
+    var estEl = $('settings-estimate');
+    if (estEl) estEl.textContent = (fixed ? s.rounds + '문제' : est.players + '명 × ' + s.rounds + '라운드') + ' · 최대 약 ' + est.minutes + '분';
+    var dn = $('details-note'); if (dn) dn.textContent = preset ? '' : '직접 설정함';
+    var hostView = $('settings-host'), sum = $('settings-summary');
+    if (hostView) hostView.hidden = !isHost();
+    if (sum) {
+      sum.hidden = isHost();
+      if (!sum.hidden) {
+        var cw = parseWords(s.customWords || '').words.length;
+        var chips = [[preset ? PRESET_NAMES[preset] : '직접 설정', 'sum-main'], [fixed ? s.rounds + '문제' : s.rounds + '라운드'], ['한 턴 ' + s.drawTime + '초'],
+          [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']];
+        if (cw) chips.push([(s.customWordsOnly ? '우리 단어만 ' : '우리 단어 ') + cw + '개']);
+        var skey = JSON.stringify(chips);
+        if (sum.getAttribute('data-key') !== skey) {
+          sum.setAttribute('data-key', skey); sum.innerHTML = '';
+          chips.forEach(function (c0) { sum.appendChild(el('span', 'sum-chip' + (c0[1] ? ' ' + c0[1] : ''), c0[0])); });
+        }
+      }
+    }
+    var uc = $('set-useCustom'), cb0 = $('custom-body');
+    var hasWords = !!String(s.customWords || '').trim();
+    if (uc) { if (!ui.customOpen && hasWords) ui.customOpen = true; uc.checked = !!ui.customOpen; uc.disabled = !editable; }
+    if (cb0) cb0.hidden = !ui.customOpen;
+    var rh = $('set-rounds-help'); if (rh) rh.textContent = fixed ? '출제자가 그릴 단어 개수' : '모두가 한 번씩 그리면 1라운드';
     var badge = $('mode-badge'); if (badge) badge.textContent = MODE_NAMES[s.mode] || s.mode;
     var back = $('btn-mode-back'); if (back) back.hidden = !isHost();
-    var rl = $('set-rounds-label'); if (rl) rl.textContent = fixed ? '단어 수' : '라운드';
+    var rl = $('set-rounds-label'); if (rl) rl.textContent = fixed ? '문제 수' : '라운드';
     var fw = $('set-fixedDrawer-wrap'); if (fw) fw.hidden = !fixed;
     // 속도전: 단어 후보·힌트 설정은 의미가 없으므로 숨긴다
     var blitz = s.mode === 'blitz';
@@ -2044,7 +2098,7 @@
     state.roomCode = null; state.hostId = null; state.phase = 'lobby'; state.round = 0; state.totalRounds = 0;
     state.drawerId = null; state.players = []; state.settings = Object.assign({}, DEFAULT_SETTINGS);
     ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null; ui.optionsKey = '';
-    ui.gallery = null; ui.galleryThumbs = []; ui.galleryOpen = false; ui.saveStatus = null; ui.saveJob = null;
+    ui.gallery = null; ui.galleryThumbs = []; ui.galleryOpen = false; ui.saveStatus = null; ui.saveJob = null; ui.customOpen = false; ui.customStash = null;
     state.lobbyStep = 'mode'; state.fixedDrawerId = null;
     setTimeLeft(null);
     resetCanvasState(); clearChat();
@@ -2209,6 +2263,31 @@
     });
     var cw = $('set-customWords');
     if (cw) { cw.addEventListener('input', sendSettingsDebounced); cw.addEventListener('blur', sendSettings); }
+    document.querySelectorAll('#preset-row .preset-btn').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (!isHost() || state.phase !== 'lobby') return;
+        var p = presetsFor(state.settings.mode)[b.getAttribute('data-preset')]; if (!p) return;
+        state.settings = Object.assign({}, state.settings, p);
+        emit('room:settings', { settings: state.settings });
+        renderAll();
+      });
+    });
+    var ucb = $('set-useCustom');
+    if (ucb) ucb.addEventListener('change', function () {
+      if (!isHost() || state.phase !== 'lobby') return;
+      ui.customOpen = ucb.checked;
+      if (!ucb.checked) {
+        // 끄면 단어를 비워 게임에 쓰지 않게 한다(다시 켜면 되돌린다)
+        ui.customStash = { words: state.settings.customWords || '', only: !!state.settings.customWordsOnly };
+        state.settings = Object.assign({}, state.settings, { customWords: '', customWordsOnly: false });
+        emit('room:settings', { settings: state.settings });
+      } else if (ui.customStash && ui.customStash.words && !String(state.settings.customWords || '').trim()) {
+        state.settings = Object.assign({}, state.settings, { customWords: ui.customStash.words, customWordsOnly: ui.customStash.only });
+        emit('room:settings', { settings: state.settings });
+      }
+      renderAll();
+      if (ucb.checked) { var t = $('set-customWords'); if (t && !t.value) focusNode(t); }
+    });
 
     var bs = $('btn-start');
     if (bs) bs.addEventListener('click', function () {
@@ -2306,17 +2385,17 @@
     var left = document.querySelector('.topbar-left'), right = document.querySelector('.topbar-right');
     if (mobile && game) { placeNode(chip, $('menu-slot-code')); placeNode(copy, $('menu-slot-copy')); }
     else { placeNode(chip, left, copy && copy.parentNode === left ? copy : null); placeNode(copy, left); }
-    if (mobile) { placeNode(sound, $('menu-slot-sound')); placeNode(leave, $('menu-slot-leave')); }
-    else { placeNode(sound, right, leave && leave.parentNode === right ? leave : menu); placeNode(leave, right, menu); }
+    if (mobile) placeNode(leave, $('menu-slot-leave'));
+    else placeNode(leave, right, menu);
     var endBtn = $('btn-end-game');
     if (mobile) placeNode(endBtn, $('menu-slot-end'));
-    else placeNode(endBtn, right, right ? right.querySelector('#btn-room-profile') : null);
+    else placeNode(endBtn, right, right ? right.querySelector('#btn-account-top') || right.querySelector('#btn-room-profile') : null);
     var profBtn = $('btn-room-profile');
     if (mobile) placeNode(profBtn, $('menu-slot-profile'));
-    else placeNode(profBtn, right, sound && sound.parentNode === right ? sound : (leave && leave.parentNode === right ? leave : menu));
+    else placeNode(profBtn, right, leave && leave.parentNode === right ? leave : menu);
     var acctBtn = $('btn-account-top');
     if (mobile) placeNode(acctBtn, $('menu-slot-account'));
-    else placeNode(acctBtn, right, sound && sound.parentNode === right ? sound : (leave && leave.parentNode === right ? leave : menu));
+    else placeNode(acctBtn, right, profBtn && profBtn.parentNode === right ? profBtn : (leave && leave.parentNode === right ? leave : menu));
     var expand = $('btn-chat-expand');
     if (mobile && game && !isDrawer()) placeNode(expand, $('draw-status')); else placeNode(expand, $('chat-bar'));
     if (!mobile && openSheetId) closeSheet(true);
@@ -2933,10 +3012,25 @@
   // 방 안 프로필 수정(대기실에서만): 랜딩의 #landing-step-profile 노드를 모달(데스크톱)/시트(모바일)로 옮겨 쓴다.
   //   저장 → 이 브라우저·계정 프로필에도 저장 + player:update. 닫기(저장 안 함) → 연 순간의 값으로 되돌린다.
   // ------------------------------------------------------------------
-  var roomProfile = { open: false, home: null, next: null, snap: null, timer: null };
+  var roomProfile = { open: false, home: null, next: null, snap: null, timer: null, formless: false };
+  /** 설정 창 윗부분(효과음 · 안내)을 모달/시트에 붙이고, 대기실이면 프로필 폼도 연다 */
   function openRoomProfile() {
     if (!inRoom) return;
-    if (state.phase !== 'lobby') { toast('프로필은 대기실에서 바꿀 수 있어요', 'error'); return; }
+    var top = $('room-settings-top');
+    var lobby = state.phase === 'lobby';
+    var lk = $('room-profile-locked'); if (lk) lk.hidden = lobby;
+    if (top) {
+      top.hidden = false;
+      if (mobileMq.matches) { var sb = $('sheet-profile-body'); if (sb) sb.insertBefore(top, sb.firstChild); }
+      else placeNode(top, $('room-settings-modal-slot'));
+    }
+    var sbtn = $('btn-sound'); if (sbtn) renderSoundButton(sbtn);
+    if (!lobby) { // 게임 중: 효과음만
+      roomProfile.open = true; roomProfile.snap = null; roomProfile.formless = true;
+      if (mobileMq.matches) openSheet('sheet-profile'); else { var m0 = $('overlay-profile'); if (m0) m0.hidden = false; }
+      return;
+    }
+    roomProfile.formless = false;
     var node = $('landing-step-profile'); if (!node) return;
     if (!roomProfile.home) { roomProfile.home = node.parentNode; roomProfile.next = node.nextElementSibling; }
     clearTimeout(roomProfile.timer); roomProfile.timer = null;
@@ -2971,6 +3065,7 @@
   function restoreProfileNode() {
     roomProfile.timer = null;
     if (roomProfile.open) return;
+    var top = $('room-settings-top'); if (top) { top.hidden = true; document.body.appendChild(top); }
     var node = $('landing-step-profile');
     if (node && roomProfile.home) { placeNode(node, roomProfile.home, roomProfile.next); node.hidden = landing.step !== 'profile'; }
   }

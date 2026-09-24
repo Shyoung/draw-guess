@@ -3,7 +3,7 @@
  *   node test/mobile.js        → PASS/FAIL 줄 출력, 실패가 있으면 exit 1
  *
  * 1회차(기본 단어) 확인 항목
- *  - 헤더(게임 중): #btn-leave/#room-code/#btn-copy/#btn-sound 가 헤더에 없고, #btn-menu → #sheet-menu 안에 들어 있다. 헤더 2행 이하
+ *  - 헤더(게임 중): #btn-leave/#room-code/#btn-copy/#btn-room-profile(설정) 가 헤더에 없고, #btn-menu → #sheet-menu 안에 들어 있다. 헤더 2행 이하
  *  - 턴 띠: #turn-strip 텍스트에 출제자 이름, 누르면 #sheet-players 에 플레이어 전원
  *  - 출제자: #chat-panel 이 흐름에 없음(display:none), #chat-ticker 가 최신 메시지 표시, 누르면 #sheet-chat(목록+입력)
  *  - 관전자: #canvas 와 #chat-input 이 스크롤 없이 뷰포트 안, 상태 띠에 #btn-chat-expand
@@ -76,7 +76,7 @@ async function headerChecks(page, label) {
   check(inside(wa), `${label}: 단어 영역 뷰포트 안`, fmt(wa));
   const m = await metrics(page);
   check(m.sw <= VW, `${label}: 가로 스크롤 없음`, m.sw);
-  for (const id of ['btn-leave', 'room-code', 'btn-copy', 'btn-sound']) {
+  for (const id of ['btn-leave', 'room-code', 'btn-copy', 'btn-room-profile']) {
     check((await page.locator(`.topbar #${id}`).count()) === 0, `${label}: 헤더에 #${id} 없음`);
   }
   check(await page.locator('#btn-menu').isVisible(), `${label}: ⋯ 메뉴 버튼 표시`);
@@ -220,7 +220,7 @@ async function mainRun() {
       await closeSheet(m, 'sheet-players', 'esc');
       // ⋯ → 메뉴 시트
       await openSheet(m, '#btn-menu', 'sheet-menu');
-      for (const id of ['btn-leave', 'room-code', 'btn-copy', 'btn-sound']) {
+      for (const id of ['btn-leave', 'room-code', 'btn-copy', 'btn-room-profile']) {
         const b = await box(m, `#sheet-menu #${id}`);
         check((await m.locator(`#sheet-menu #${id}`).count()) === 1 && inside(b), `drawing(출제자): 메뉴 시트 안 #${id} 보임`, fmt(b));
       }
@@ -257,7 +257,20 @@ async function mainRun() {
       check(inside(lb), 'drawing: 확인 대화상자가 화면 안', fmt(lb));
       await m.click('#btn-leave-cancel');
       check(await m.locator('#overlay-leave').isHidden() && await m.locator('#view-room').isVisible(), 'drawing: 계속 있기 → 게임 유지');
-      check(await m.locator('#btn-room-profile').isDisabled(), 'drawing: 게임 중에는 "프로필" 버튼 비활성');
+      // 게임 중 설정: 효과음만(프로필은 대기실에서)
+      await m.click('#btn-menu');
+      await m.waitForSelector('#sheet-menu.open', { timeout: 3000 });
+      await m.click('#sheet-menu #btn-room-profile');
+      await m.waitForSelector('#sheet-profile.open', { timeout: 3000 });
+      await sleep(350);
+      check(await m.locator('#sheet-profile #btn-sound').isVisible() && await m.locator('#room-profile-locked').isVisible() && (await m.locator('#sheet-profile #landing-step-profile').count()) === 0, 'drawing: 설정 = 효과음 + "대기실에서 바꿀 수 있어요"(프로필 폼 없음)');
+      const snd0 = await m.getAttribute('#btn-sound', 'aria-checked');
+      await m.click('#btn-sound');
+      check((await m.getAttribute('#btn-sound', 'aria-checked')) !== snd0 && (await m.textContent('#sound-state')) === (snd0 === 'true' ? '꺼짐' : '켜짐'), 'drawing: 효과음 스위치 전환');
+      await m.click('#btn-sound');
+      await m.keyboard.press('Escape');
+      await m.waitForSelector('#sheet-profile', { state: 'hidden', timeout: 3000 });
+      check(await m.locator('#view-room').isVisible(), 'drawing: 설정 닫아도 게임 유지');
       const c = await box(m, '#canvas'), ci = await box(m, '#chat-input'), ds = await box(m, '#draw-status'), strip = await box(m, '#turn-strip');
       check(inside(c), 'drawing(관전자): #canvas 뷰포트 안', fmt(c));
       check(inside(ci), 'drawing(관전자): #chat-input 뷰포트 안', fmt(ci));

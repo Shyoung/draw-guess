@@ -210,9 +210,8 @@
       <div class="topbar-right">
         <div id="timer" class="timer" aria-label="남은 시간">–</div>
         <button id="btn-end-game" class="btn btn-ghost btn-sm btn-ico btn-ico-danger" type="button" aria-label="게임 끝내기" title="게임 끝내기(방장)" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg><span class="btn-label">게임 끝내기</span></button>
-        <button id="btn-room-profile" class="btn btn-ghost btn-sm btn-ico" type="button" aria-label="프로필" title="프로필 수정"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10" cy="8" r="4"/><path d="M3 20c0-3.5 3-6 7-6 1.2 0 2.3.2 3.2.6"/><path d="M17.5 13.5l3 3L16 21h-3v-3z"/></svg><span class="btn-label">프로필</span></button>
         <button id="btn-account-top" class="btn btn-ghost btn-sm btn-ico" type="button" aria-label="내 정보" title="내 정보" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.6-1.4 1.7-2 3-2s2.4.6 3 2"/><path d="M14.5 10h4M14.5 14h4"/></svg><span class="btn-label">내 정보</span></button>
-        <button id="btn-sound" class="btn btn-ghost btn-sm btn-icon" type="button" aria-pressed="false" title="효과음 끄기">🔊</button>
+        <button id="btn-room-profile" class="btn btn-ghost btn-sm btn-ico" type="button" aria-label="설정" title="설정(효과음 · 프로필)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="btn-label">설정</span></button>
         <button id="btn-leave" class="btn btn-ghost btn-sm btn-ico" type="button" aria-label="나가기" title="방 나가기"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/></svg><span class="btn-label">나가기</span></button>
         <!-- 모바일 전용: 방 코드·초대·효과음·나가기를 담는 메뉴 시트를 연다 (CSS 로 데스크톱에서는 숨김) -->
         <button id="btn-menu" class="btn btn-ghost btn-sm btn-icon btn-menu" type="button" aria-label="방 메뉴" aria-haspopup="dialog" aria-controls="sheet-menu">⋯</button>
@@ -267,49 +266,82 @@
             <button id="btn-mode-back" class="btn btn-ghost btn-sm" type="button">← 모드 선택</button>
             <h2 class="panel-title">게임 설정 <span id="mode-badge" class="mode-badge"></span></h2>
           </div>
-          <div class="settings-grid">
+          <!-- 방장이 아닌 사람: 요약만 -->
+          <div id="settings-summary" class="settings-summary" hidden></div>
+
+          <div id="settings-host" class="settings-host">
+            <div class="setting-block">
+              <div class="block-head"><span class="block-title">게임 길이</span><span id="settings-estimate" class="settings-estimate"></span></div>
+              <div id="preset-row" class="preset-row" role="radiogroup" aria-label="게임 길이">
+                <button class="preset-btn" type="button" role="radio" aria-checked="false" data-preset="short"><strong>짧게</strong><small class="preset-sub"></small></button>
+                <button class="preset-btn" type="button" role="radio" aria-checked="false" data-preset="normal"><strong>보통</strong><small class="preset-sub"></small></button>
+                <button class="preset-btn" type="button" role="radio" aria-checked="false" data-preset="long"><strong>길게</strong><small class="preset-sub"></small></button>
+              </div>
+            </div>
+
             <label class="setting" id="set-fixedDrawer-wrap" hidden>
-              <span>출제자</span>
+              <span>출제자 <small>계속 그릴 사람</small></span>
               <select id="set-fixedDrawer"></select>
             </label>
-            <label class="setting">
-              <span id="set-rounds-label">라운드</span>
-              <select id="set-rounds"></select>
-            </label>
-            <label class="setting">
-              <span>그리기 시간</span>
-              <select id="set-drawTime"></select>
-            </label>
-            <label class="setting">
-              <span>단어 후보 수</span>
-              <select id="set-wordCount"></select>
-            </label>
-            <label class="setting">
-              <span>힌트 횟수</span>
-              <select id="set-hints"></select>
-            </label>
-            <label class="setting">
-              <span>마지막 힌트 시점</span>
-              <select id="set-hintEndAt"></select>
-            </label>
-          </div>
-          <label class="setting setting-wide">
-            <span>사용자 단어 <small>(쉼표로 구분, 각 1~20자)</small></span>
-            <textarea id="set-customWords" rows="3" placeholder="예) 사과, 자전거, 무지개"></textarea>
-          </label>
-          <div id="wordset-tools" class="wordset-tools" hidden>
-            <select id="wordset-load" aria-label="내 세트 불러오기" hidden></select>
-            <button id="btn-wordset-save" class="btn btn-ghost btn-sm" type="button">💾 현재 단어를 세트로 저장</button>
-            <div id="wordset-quick" class="wordset-quick" hidden>
-              <input id="ws-quick-name" type="text" maxlength="30" placeholder="세트 이름 (1~30자)" aria-label="새 세트 이름">
-              <button id="btn-ws-quick-save" class="btn btn-secondary btn-sm" type="button">저장</button>
-              <button id="btn-ws-quick-cancel" class="btn btn-ghost btn-sm" type="button">취소</button>
+
+            <div class="setting-block custom-block">
+              <label class="switch-row" for="set-useCustom">
+                <span class="switch-text"><span class="block-title">우리만의 단어 쓰기</span><small>우리끼리 아는 단어로 문제를 내요</small></span>
+                <input id="set-useCustom" class="switch-input" type="checkbox" role="switch">
+                <span class="switch" aria-hidden="true"><span class="switch-knob"></span></span>
+              </label>
+              <div id="custom-body" class="custom-body" hidden>
+                <label class="setting setting-wide">
+                  <span>단어 목록 <small>(쉼표로 구분, 각 1~20자)</small></span>
+                  <textarea id="set-customWords" rows="3" placeholder="예) 사과, 자전거, 무지개"></textarea>
+                </label>
+                <div id="wordset-tools" class="wordset-tools" hidden>
+                  <select id="wordset-load" aria-label="내 세트 불러오기" hidden></select>
+                  <button id="btn-wordset-save" class="btn btn-ghost btn-sm" type="button">💾 현재 단어를 세트로 저장</button>
+                  <div id="wordset-quick" class="wordset-quick" hidden>
+                    <input id="ws-quick-name" type="text" maxlength="30" placeholder="세트 이름 (1~30자)" aria-label="새 세트 이름">
+                    <button id="btn-ws-quick-save" class="btn btn-secondary btn-sm" type="button">저장</button>
+                    <button id="btn-ws-quick-cancel" class="btn btn-ghost btn-sm" type="button">취소</button>
+                  </div>
+                </div>
+                <label class="check">
+                  <input id="set-customWordsOnly" type="checkbox">
+                  <span>우리 단어만 쓰기 <small>기본 단어를 섞지 않아요</small></span>
+                </label>
+              </div>
             </div>
+
+            <details id="settings-details" class="settings-details">
+              <summary><span>세부 설정</span><span id="details-note" class="details-note"></span></summary>
+              <div class="settings-grid">
+                <label class="setting">
+                  <span id="set-rounds-label">라운드</span>
+                  <select id="set-rounds"></select>
+                  <small id="set-rounds-help" class="setting-help">모두가 한 번씩 그리면 1라운드</small>
+                </label>
+                <label class="setting">
+                  <span>그리기 시간</span>
+                  <select id="set-drawTime"></select>
+                  <small class="setting-help">한 사람이 그리는 시간</small>
+                </label>
+                <label class="setting">
+                  <span>단어 후보 수</span>
+                  <select id="set-wordCount"></select>
+                  <small class="setting-help">그리는 사람이 고를 수 있는 단어 개수</small>
+                </label>
+                <label class="setting">
+                  <span>힌트 횟수</span>
+                  <select id="set-hints"></select>
+                  <small class="setting-help">정답 글자를 초성으로 몇 번 보여 줄지</small>
+                </label>
+                <label class="setting">
+                  <span>마지막 힌트 시점</span>
+                  <select id="set-hintEndAt"></select>
+                  <small class="setting-help">마지막 힌트를 끝나기 몇 초 전에 줄지</small>
+                </label>
+              </div>
+            </details>
           </div>
-          <label class="check">
-            <input id="set-customWordsOnly" type="checkbox">
-            <span>사용자 단어만 사용</span>
-          </label>
           <div class="start-row">
             <button id="btn-start" class="btn btn-primary btn-xl btn-block" type="button">게임 시작</button>
             <p id="start-hint" class="start-hint"></p>
@@ -463,7 +495,6 @@
       <div class="sheet-body sheet-menu-body">
         <div class="menu-row" id="menu-slot-code"></div>
         <div class="menu-row" id="menu-slot-copy"></div>
-        <div class="menu-row menu-row-split"><span class="menu-label">효과음</span><span id="menu-slot-sound"></span></div>
         <div class="menu-row" id="menu-slot-profile"></div>
         <div class="menu-row menu-row-danger" id="menu-slot-end"></div>
         <div class="menu-row" id="menu-slot-account" hidden></div>
@@ -503,9 +534,10 @@
   <div id="overlay-profile" class="modal modal-profile" hidden>
     <div class="modal-card card-room-profile" role="dialog" aria-modal="true" aria-labelledby="room-profile-title">
       <header class="modal-head">
-        <h3 id="room-profile-title" class="card-title">프로필 수정</h3>
+        <h3 id="room-profile-title" class="card-title">설정</h3>
         <div class="modal-actions"><button id="btn-room-profile-close" class="btn btn-ghost btn-sm" type="button">닫기</button></div>
       </header>
+      <div id="room-settings-modal-slot" class="room-settings-slot"></div>
       <div id="room-profile-modal-body" class="room-profile-body"></div>
     </div>
   </div>
@@ -514,11 +546,21 @@
     <div class="sheet-panel sheet-panel-profile" role="dialog" aria-modal="true" aria-labelledby="sheet-profile-title">
       <div class="sheet-handle" aria-hidden="true"></div>
       <header class="sheet-head">
-        <h3 id="sheet-profile-title" class="sheet-title">프로필 수정</h3>
+        <h3 id="sheet-profile-title" class="sheet-title">설정</h3>
         <button class="sheet-close" type="button" aria-label="닫기" data-sheet-close>✕</button>
       </header>
       <div class="sheet-body room-profile-body" id="sheet-profile-body"></div>
     </div>
+  </div>
+
+  <!-- 방 설정 창의 공통 윗부분(효과음 · 게임 중 안내). client.js 가 모달/시트 안으로 옮긴다 -->
+  <div id="room-settings-top" class="room-settings-top" hidden>
+    <div class="rs-row">
+      <span class="rs-label">효과음<small id="sound-state">켜짐</small></span>
+      <button id="btn-sound" class="switch" type="button" role="switch" aria-checked="true" aria-label="효과음"><span class="switch-knob" aria-hidden="true"></span></button>
+    </div>
+    <div class="rs-section-title">프로필</div>
+    <p id="room-profile-locked" class="rs-note" hidden>닉네임과 아바타는 대기실에서 바꿀 수 있어요.</p>
   </div>
 
   <!-- 보관한 그림 크게 보기 -->
