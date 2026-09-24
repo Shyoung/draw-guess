@@ -1260,7 +1260,7 @@
   //   단계 구성(stepOrder): 로그인 기능이 켜져 있고 로그아웃 상태면 [start, profile, room], 아니면 [profile, room]
   //   (로그인 꺼짐 = 시작 단계를 건너뜀, 로그인 상태 = 이미 시작을 지남).
   //   첫 화면(initialStep): 로그인 + 이 브라우저에서 프로필을 확정("다음")한 적 있음 → 방 / 로그인 + 처음 → 프로필 설정(소셜 닉네임·사진 프리필)
-  //                        게스트 + 저장된 닉네임 → 방 / 그 외 → 첫 단계(시작, 로그인 꺼짐이면 프로필 설정)
+  //                        게스트 → 항상 첫 단계(시작, 로그인 꺼짐이면 프로필 설정). 저장된 닉네임·얼굴은 프로필에 프리필
   //   세션을 복원하는 중(localStorage 에 sb-…-auth-token 이 있거나 OAuth 복귀 URL)이면 결과가 나올 때까지 단계를 그리지 않는다(깜빡임 방지).
   //   history: 단계마다 { landing: step, d: 깊이 } 항목을 쌓는다(바닥 d=0 = 첫 단계). 기기 뒤로가기 = 이전 단계.
   //   앞 단계로 갈 때는 쌓은 항목을 history.go(-n) 으로 걷어내고, 로그인/로그아웃으로 구성이 바뀌면 바닥까지 내려가 다시 쌓는다.
@@ -1388,7 +1388,7 @@
   }
   function initialStep() {
     if (acctLoggedIn()) return isConfirmed(acct.user.id) && nickValue() ? 'room' : 'profile';
-    if (nickValue()) return 'room';
+    // 게스트는 매번 첫 단계(시작)부터. 저장된 닉네임·얼굴은 프로필 설정에 그대로 채워 둔다
     return stepOrder()[0];
   }
   /** 첫 화면을 정한다(한 번만). 방에 먼저 들어갔으면(재접속) 나올 때 resetToLanding 이 단계를 정한다 */
@@ -1418,7 +1418,7 @@
     if (step !== st.landing) { try { history.replaceState({ landing: step, d: typeof st.d === 'number' ? st.d : 0 }, ''); } catch (e) { /* ignore */ } }
     if (landing.step !== step) showLandingStep(step, true);
   }
-  /** 프로필 설정 "다음": 닉네임·아바타 확정 → 저장(로그인 상태면 프로필에도, 이 브라우저에 확정 표시) → 방 단계 */
+  /** 프로필 설정 "저장": 닉네임·아바타 확정 → 저장(로그인 상태면 프로필에도, 이 브라우저에 확정 표시) → 방 단계 */
   function submitProfile() {
     var name = nickValue();
     if (!name) { toast('닉네임을 입력해주세요', 'error'); focusNode($('nick')); return; }
@@ -1486,7 +1486,7 @@
     var nick = $('nick');
     if (nick) {
       nick.value = profile.name;
-      // 닉네임은 "다음"(또는 방 만들기/참가) 때 확정·저장한다 → 저장된 닉네임 유무로 첫 화면을 고른다
+      // 닉네임은 "저장"(또는 방 만들기/참가) 때 확정·저장한다 → 저장된 닉네임 유무로 첫 화면을 고른다
       nick.addEventListener('input', function () { landing.nickEdited = true; updateNextBtn(); });
       nick.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submitProfile(); } });
     }
@@ -2172,6 +2172,20 @@
     photo.social = (pr && pr.social_avatar_url) || u.avatarUrl || null;
     photo.url = (pr && pr.avatar_url) || photo.social;
     photo.mode = pr && pr.avatar_mode === 'emoji' ? 'emoji' : (photo.url ? 'photo' : 'emoji');
+    // 프로필 행이 오기 전(새로고침 직후)에는 지난번에 본 사진 상태를 먼저 쓴다 → 소셜 사진이 잠깐 비쳤다 바뀌는 깜빡임 방지
+    var PHOTO_CACHE_KEY = 'drawguess.photoCache';
+    if (pr) {
+      try { localStorage.setItem(PHOTO_CACHE_KEY, JSON.stringify({ uid: u.id, mode: photo.mode, url: photo.url })); } catch (e) { /* ignore */ }
+    } else {
+      try {
+        var pc = JSON.parse(localStorage.getItem(PHOTO_CACHE_KEY) || 'null');
+        if (pc && pc.uid === u.id) {
+          photo.mode = pc.mode === 'photo' ? 'photo' : 'emoji';
+          if (pc.url && avatarImgUrl(pc.url)) photo.url = pc.url;
+          if (photo.mode === 'photo' && !avatarImgUrl(photo.url)) photo.mode = 'emoji';
+        }
+      } catch (e) { /* ignore */ }
+    }
     if (pr) {
       var nick = $('nick');
       if (pr.nickname) {

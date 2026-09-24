@@ -4,13 +4,13 @@
  *
  * 랜딩 3단계: #landing-step-start(시작: Google/카카오/게스트) → #landing-step-profile(프로필 설정) → #landing-step-room(방)
  * 1) 서버를 SUPABASE_* 환경 변수 없이 3130 포트로 띄운다 → /config.js 는 {} → 시작 단계를 건너뛰고 프로필 설정부터, 로그인 UI 없음.
- *    - "다음"은 닉네임 1~12자일 때만 · 방 단계 요약 카드 · 프로필 수정 → 프로필(값 유지) · 기기 뒤로가기 → 프로필
+ *    - "저장"은 닉네임 1~12자일 때만 · 방 단계 요약 카드 · 프로필 수정 → 프로필(값 유지) · 기기 뒤로가기 → 프로필
  *    - 저장된 닉네임이면 새로고침 시 방 단계 · ?room= 초대 카드 · 개인정보 처리방침 링크는 카드 밖 맨 아래
  * 2) ?mock=1&auth=1&stay=1 : dev-mock.js 가 가짜 window.supabase(+storage) + APP_CONFIG 를 설치한다(메모리 DB).
  *    - 시작 단계: 버튼 3개(Google/카카오/게스트)와 "또는"만. 태그라인·"로그인하고 시작"·안내 문구 없음. 처리방침 링크는 카드 밖 맨 아래 가운데
  *    - 게스트로 시작하기 → 프로필(이모지·색상만, 사진 탭 없음) → 방 · 뒤로가기 방 → 프로필 → 시작
  *    - 로그인(모크) → 처음이면 프로필 설정(사진 모드 기본 + 소셜 사진) · 이모지 ↔ 사진 · 사진 올리기(256px webp, <uid>/ 폴더) ·
- *      기본 사진으로 · 다음 → avatar_mode/avatar_url 저장 + 안 쓰는 업로드 삭제 · 새로고침(확정 후) → 방 바로
+ *      기본 사진으로 · 저장 → avatar_mode/avatar_url 저장 + 안 쓰는 업로드 삭제 · 새로고침(확정 후) → 방 바로
  *    - 방(모크) 플레이어 목록: 사진 모드면 <img>, 이모지 모드면 이모지
  *    - 내 정보(닉네임 저장) · 단어 세트 생성/목록/"이 세트로 방 설정"/수정/삭제 · 20개 제한 · 대기실 세트 도구 · 로그아웃 → 시작
  * 3) 모바일(iPhone 13): 첫 로그인 → 프로필 설정(사진) → 방, 내 정보가 바텀 시트(#sheet-account)로 열리고, 방 메뉴 시트에 "내 정보" 행이 있다.
@@ -111,17 +111,17 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await g.evaluate(() => window.Account && window.Account.isEnabled() === false), '게스트: Account.isEnabled() === false');
     check((await g.locator('.tagline').count()) === 0, '랜딩: 태그라인 없음');
     await privacyChecks(g, '로그인 꺼짐(프로필)');
-    check(await g.locator('#btn-profile-next').isDisabled(), '프로필: 닉네임이 비어 있으면 "다음" 비활성');
+    check(await g.locator('#btn-profile-next').isDisabled(), '프로필: 닉네임이 비어 있으면 "저장" 비활성');
     await g.fill('#nick', '   ');
-    check(await g.locator('#btn-profile-next').isDisabled(), '프로필: 공백만 입력해도 "다음" 비활성');
+    check(await g.locator('#btn-profile-next').isDisabled(), '프로필: 공백만 입력해도 "저장" 비활성');
     await g.fill('#nick', '게스트');
-    check(!(await g.locator('#btn-profile-next').isDisabled()), '프로필: 닉네임 입력 → "다음" 활성');
+    check(!(await g.locator('#btn-profile-next').isDisabled()), '프로필: 닉네임 입력 → "저장" 활성');
     check((await g.getAttribute('#nick', 'maxlength')) === '12', '프로필: 닉네임 최대 12자');
     await g.locator('#emoji-strip .emoji-btn').nth(5).click();
     const pickedEmoji = (await g.locator('#emoji-strip .emoji-btn').nth(5).textContent()).trim();
     await g.click('#btn-profile-next');
     await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
-    check(await g.locator('#landing-step-profile').isHidden(), '다음 → 방 단계');
+    check(await g.locator('#landing-step-profile').isHidden(), '저장 → 방 단계');
     check((await txt(g, '#me-name')) === '게스트' && (await txt(g, '#me-status')) === '게스트', '방 단계: 요약 카드(닉네임 · "게스트")', `${await txt(g, '#me-name')} / ${await txt(g, '#me-status')}`);
     check((await txt(g, '#me-avatar')) === pickedEmoji && (await g.locator('#me-avatar img').count()) === 0, '방 단계: 요약 카드 아바타 = 고른 얼굴(사진 없음)', await txt(g, '#me-avatar'));
     check(await g.locator('#btn-profile-edit').isVisible(), '방 단계: "프로필 수정" 버튼');
@@ -134,10 +134,10 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
     check(await g.locator('#landing-step-room').isHidden(), '프로필 수정 → 프로필 설정');
     check((await val(g, '#nick')) === '게스트' && (await g.locator('#emoji-strip .emoji-btn').nth(5).getAttribute('aria-checked')) === 'true', '프로필 수정: 닉네임 · 얼굴 값 유지');
-    // Enter = 다음
+    // Enter = 저장
     await g.press('#nick', 'Enter');
     await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
-    check(await g.locator('#landing-step-room').isVisible(), '프로필: 닉네임에서 Enter = 다음');
+    check(await g.locator('#landing-step-room').isVisible(), '프로필: 닉네임에서 Enter = 저장');
     // 기기 뒤로가기(방 → 프로필, 페이지는 그대로)
     await g.evaluate(() => { window.__samePage = 1; });
     await g.goBack();
@@ -145,17 +145,24 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await g.locator('#landing-step-profile').isVisible() && await g.evaluate(() => window.__samePage === 1) && g.url().startsWith(URL), '뒤로가기: 방 → 프로필(페이지를 떠나지 않음)', g.url());
     await g.click('#btn-profile-next');
     await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
-    // 저장된 프로필 → 새로고침하면 방 단계부터
+    // 저장된 프로필이 있어도 게스트는 새로고침하면 첫 단계부터(로그인 꺼짐 = 프로필 설정), 값은 프리필
     await g.reload();
-    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 }).catch(() => {});
-    check((await visibleStep(g)) === 'room', '새로고침(저장된 닉네임): 방 단계부터', await visibleStep(g));
-    check((await txt(g, '#me-name')) === '게스트', '새로고침: 요약 카드에 저장된 닉네임');
+    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 }).catch(() => {});
+    check((await visibleStep(g)) === 'profile', '새로고침(게스트, 저장된 닉네임): 첫 단계부터', await visibleStep(g));
+    check((await val(g, '#nick')) === '게스트' && (await g.locator('#emoji-strip .emoji-btn').nth(5).getAttribute('aria-checked')) === 'true', '새로고침: 저장된 닉네임·얼굴 프리필');
+    check((await txt(g, '#btn-profile-next')) === '저장', '프로필: CTA 문구 "저장"', await txt(g, '#btn-profile-next'));
+    await g.click('#btn-profile-next');
+    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    check((await txt(g, '#me-name')) === '게스트', '저장 → 방 단계 요약 카드에 저장된 닉네임');
     await g.evaluate(() => { window.__samePage = 2; });
     await g.goBack();
     await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 }).catch(() => {});
     check(await g.locator('#landing-step-profile').isVisible() && await g.evaluate(() => window.__samePage === 2), '새로고침 후에도 뒤로가기: 방 → 프로필');
-    // 초대 링크(?room=ABCD, 저장된 프로필) → 방 단계 초대 카드
+    // 초대 링크(?room=ABCD, 저장된 프로필) → 프로필(프리필) → 저장 → 방 단계 초대 카드
     await g.goto(URL + '/?room=ABCD');
+    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 });
+    check((await val(g, '#nick')) === '게스트', '초대 링크(저장된 프로필): 프로필 설정부터, 닉네임 프리필');
+    await g.click('#btn-profile-next');
     await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
     check(await g.locator('#invite-card').isVisible() && (await txt(g, '#invite-code')) === 'ABCD', '초대 링크: "초대받은 방 ABCD" 카드', await txt(g, '#invite-code'));
     check((await txt(g, '#btn-join')) === '이 방에 참가하기' && (await g.getAttribute('#btn-join', 'class')).includes('btn-primary'), '초대 카드: 주 버튼 "이 방에 참가하기"');
@@ -164,7 +171,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await g.click('#btn-invite-dismiss');
     check(await g.locator('#invite-card').isHidden() && await g.locator('#room-code-input').isVisible() && (await val(g, '#room-code-input')) === 'ABCD', '다른 방 코드 입력: 일반 화면(코드 유지)');
     check((await txt(g, '#btn-create')) === '방 만들기' && !g.url().includes('room='), '다른 방 코드 입력: 방 만들기 주 버튼 · 주소에서 ?room= 제거', g.url());
-    // 처음 온 사람 + 초대 링크 → 프로필 → 다음 → 초대 카드
+    // 처음 온 사람 + 초대 링크 → 프로필 → 저장 → 초대 카드
     const g2 = await newPage(browser, '게스트2');
     await g2.goto(URL + '/?room=WXYZ');
     await g2.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 });
@@ -172,7 +179,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await g2.fill('#nick', '초대손님');
     await g2.click('#btn-profile-next');
     await g2.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
-    check(await g2.locator('#invite-card').isVisible() && (await txt(g2, '#invite-code')) === 'WXYZ', '초대 링크(새 방문자): 다음 → 초대 카드(코드 유지)');
+    check(await g2.locator('#invite-card').isVisible() && (await txt(g2, '#invite-code')) === 'WXYZ', '초대 링크(새 방문자): 저장 → 초대 카드(코드 유지)');
     await g2.context().close();
     await g.click('#btn-create');
     await g.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
@@ -200,7 +207,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await sleep(300);
     check((await visibleStep(p)) === 'start', '첫 방문(로그인 켜짐): 시작 단계', await visibleStep(p));
     const startBtns = await p.locator('#landing-step-start button:visible').allTextContents();
-    check(JSON.stringify(startBtns.map((s) => s.trim())) === JSON.stringify(['G Google로 시작하기', '💬 카카오로 시작하기', '게스트로 시작하기']), '시작: 버튼은 Google · 카카오 · 게스트 3개뿐', JSON.stringify(startBtns));
+    check(JSON.stringify(startBtns.map((s) => s.trim())) === JSON.stringify(['Google로 시작하기', '카카오로 시작하기', '게스트로 시작하기']), '시작: 버튼은 Google · 카카오 · 게스트 3개뿐', JSON.stringify(startBtns));
     check((await txt(p, '#landing-step-start .divider')) === '또는', '시작: 구분선 문구는 "또는"', await txt(p, '#landing-step-start .divider'));
     const startText = await p.locator('.landing-card').innerText();
     check(!/친구들과 함께|로그인하고 시작|로그인하면|단어 세트/.test(startText), '시작: 태그라인 · "로그인하고 시작" · 안내 문구 없음', JSON.stringify(startText));
@@ -216,7 +223,20 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.mouse.move(5, 5);
     const kakaoBg = await p.locator('#btn-login-kakao').evaluate((e) => getComputedStyle(e).backgroundColor);
     const kakaoFg = await p.locator('#btn-login-kakao').evaluate((e) => getComputedStyle(e).color);
-    check(kakaoBg === 'rgb(254, 229, 0)' && kakaoFg === 'rgb(0, 0, 0)', '카카오 버튼: #FEE500 배경 + 검정 글자', `${kakaoBg} / ${kakaoFg}`);
+    check(kakaoBg === 'rgb(254, 229, 0)' && kakaoFg === 'rgba(0, 0, 0, 0.85)', '카카오 버튼: #FEE500 배경 + 레이블 검정 85%', `${kakaoBg} / ${kakaoFg}`);
+    const brand = await p.evaluate(() => {
+      const r = (sel) => getComputedStyle(document.querySelector(sel));
+      const ks = document.querySelector('#btn-login-kakao svg.k-symbol path');
+      const gp = [...document.querySelectorAll('#btn-login-google svg.g-logo path')].map((e) => e.getAttribute('fill').toUpperCase());
+      return { kr: r('#btn-login-kakao').borderRadius, gr: r('#btn-login-google').borderRadius, ks: ks && ks.getAttribute('fill'), gp };
+    });
+    check(brand.kr === '12px' && brand.gr === '12px', '로그인 버튼: 모서리 12px(카카오 가이드)', `${brand.kr} / ${brand.gr}`);
+    check(brand.ks === '#000000', '카카오 버튼: 말풍선 심볼(검정)', String(brand.ks));
+    check(JSON.stringify(brand.gp) === JSON.stringify(['#EA4335', '#4285F4', '#FBBC05', '#34A853']), 'Google 버튼: 공식 4색 G 로고', JSON.stringify(brand.gp));
+    await p.hover('#btn-login-kakao');
+    await sleep(250);
+    check((await p.locator('#btn-login-kakao').evaluate((e) => getComputedStyle(e).backgroundColor)) === 'rgb(254, 229, 0)', '카카오 버튼: hover 에도 배경색 유지');
+    await p.mouse.move(5, 5);
     check((await p.locator('#btn-login-google').evaluate((e) => getComputedStyle(e).backgroundColor)) === 'rgb(255, 255, 255)', 'Google 버튼: 흰 배경');
     // 게스트로 시작하기 → 프로필(이모지·색상만)
     await p.evaluate(() => { window.__samePage = 'mock'; });
@@ -294,18 +314,18 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await sleep(200);
     paths = await storagePaths(p);
     check(!!up2 && up2 !== up1 && paths.length === 1, '다시 올리기: 새 사진 · 저장하지 않은 이전 업로드는 삭제', JSON.stringify(paths));
-    // 다음 → 프로필 저장(avatar_mode/avatar_url) → 방 단계(요약 카드에 사진)
+    // 저장 → 프로필 저장(avatar_mode/avatar_url) → 방 단계(요약 카드에 사진)
     await p.fill('#nick', '사진모크');
     await p.click('#btn-profile-next');
     await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
     await p.waitForFunction((u) => { const r = window.__mockAuth.tables.profiles[0]; return r.avatar_url === u && r.nickname === '사진모크'; }, up2, { timeout: 3000 }).catch(() => {});
     let row = await p.evaluate(() => window.__mockAuth.tables.profiles[0]);
-    check(row.avatar_mode === 'photo' && row.avatar_url === up2, '다음: 프로필에 avatar_mode=photo · avatar_url=올린 사진', `${row.avatar_mode} / ${String(row.avatar_url).slice(0, 30)}`);
-    check(row.nickname === '사진모크' && row.avatar_emoji && row.avatar_color, '다음: 닉네임 · 얼굴 · 색상도 저장', `${row.nickname} ${row.avatar_emoji} ${row.avatar_color}`);
+    check(row.avatar_mode === 'photo' && row.avatar_url === up2, '저장: 프로필에 avatar_mode=photo · avatar_url=올린 사진', `${row.avatar_mode} / ${String(row.avatar_url).slice(0, 30)}`);
+    check(row.nickname === '사진모크' && row.avatar_emoji && row.avatar_color, '저장: 닉네임 · 얼굴 · 색상도 저장', `${row.nickname} ${row.avatar_emoji} ${row.avatar_color}`);
     check((await imgSrc(p, '#me-avatar img.avatar-img')) === up2, '방 단계: 요약 카드에 사진', await imgSrc(p, '#me-avatar img'));
     check((await txt(p, '#me-status')) === 'Google 계정' && await p.locator('#me-account').isVisible() && await p.locator('#btn-me-login').isHidden(), '방 단계(로그인): 제공자 라벨 · 내 정보 · 로그아웃');
-    check(await p.evaluate(() => { try { return !!JSON.parse(localStorage.getItem('drawguess.profileConfirmed'))['mock-user-1']; } catch (e) { return false; } }), '다음: 이 브라우저에 프로필 확정 표시(사용자별)');
-    // 프로필 수정 → 기본 사진으로 → 다음: 올린 사진 파일은 저장소에서 삭제
+    check(await p.evaluate(() => { try { return !!JSON.parse(localStorage.getItem('drawguess.profileConfirmed'))['mock-user-1']; } catch (e) { return false; } }), '저장: 이 브라우저에 프로필 확정 표시(사용자별)');
+    // 프로필 수정 → 기본 사진으로 → 저장: 올린 사진 파일은 저장소에서 삭제
     await p.click('#btn-profile-edit');
     await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
     check((await imgSrc(p, '#photo-preview img')) === up2 && await p.locator('#btn-photo-reset').isVisible(), '프로필 수정: 저장한 사진 · "기본 사진으로" 표시');
@@ -425,15 +445,15 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.click('#btn-account-close');
     check(await p.locator('#overlay-account').isHidden(), '내 정보: 닫기');
 
-    // 프로필 설정에서 닉네임을 바꾸고 "다음" → 프로필에 저장, 그 뒤 방 만들기(모크 대기실, 호스트)
+    // 프로필 설정에서 닉네임을 바꾸고 "저장" → 프로필에 저장, 그 뒤 방 만들기(모크 대기실, 호스트)
     await p.click('#btn-profile-edit');
     await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
     await p.fill('#nick', '방장모크');
     await p.click('#btn-profile-next');
     await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
     await p.waitForFunction(() => window.__mockAuth.tables.profiles[0].nickname === '방장모크', null, { timeout: 3000 }).catch(() => {});
-    check(await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname === '방장모크'), '다음: 바꾼 닉네임이 프로필에 저장', await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname));
-    check((await txt(p, '#me-name')) === '방장모크', '다음: 요약 카드에 바꾼 닉네임');
+    check(await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname === '방장모크'), '저장: 바꾼 닉네임이 프로필에 저장', await p.evaluate(() => window.__mockAuth.tables.profiles[0].nickname));
+    check((await txt(p, '#me-name')) === '방장모크', '저장: 요약 카드에 바꾼 닉네임');
     await p.click('#btn-create');
     await p.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     await p.waitForSelector('#settings-panel:not([hidden])', { timeout: 5000 });
@@ -539,9 +559,8 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
 
     // 초대 링크로 와서(로그아웃 상태) 로그인(모크는 즉시) → 확정한 적 있으니 방 단계 + 초대 카드 유지
     await p.goto(`${URL}/?mock=1&auth=1&stay=1&auth_state=out&room=ABCD`);
-    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
-    check(await p.locator('#invite-card').isVisible() && (await txt(p, '#invite-code')) === 'ABCD', '초대 링크(저장된 닉네임, 로그아웃): 방 단계 초대 카드');
-    await p.click('#btn-me-login');
+    await p.waitForSelector('#landing-step-start:not([hidden])', { timeout: 5000 });
+    check((await visibleStep(p)) === 'start', '초대 링크(저장된 닉네임, 로그아웃): 게스트는 시작 단계부터', await visibleStep(p));
     await p.waitForSelector('#btn-login-kakao:visible', { timeout: 5000 });
     await p.click('#btn-login-kakao');
     await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
