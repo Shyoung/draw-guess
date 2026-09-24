@@ -179,6 +179,30 @@ const inside = (b, m) => !!b && b.vis && b.t >= -0.5 && b.l >= -0.5 && b.b <= m.
       check(m.sh <= m.vh + 1 || !d.mobile, `${d.tag} 출제자: 페이지 스크롤 없음`, `${m.sh} > ${m.vh}`);
       if (d.touch) check(inside(m.canvas, m), `${d.tag} 출제자: 캔버스 전부 보임`, m.canvas);
       if (d.touch) check(!!tools && tools.vis && tools.b <= m.vh + 0.5 && tools.r <= m.vw + 0.5, `${d.tag} 출제자: 도구 모음 화면 안`, tools);
+      // 태블릿 세로 출제자: 관전자와 같은 배치(캔버스 폭 가득 → 도구 모음 → 채팅 목록 + 입력줄)
+      if (d.mobile && d.w >= 700) {
+        const lay = await p.evaluate(() => {
+          const b = (sel) => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(); return { t: r.top, b: r.bottom, w: r.width, h: r.height, vis: r.width > 0 && getComputedStyle(e).display !== 'none' }; };
+          return { tab: document.getElementById('view-room').getAttribute('data-tablet'), dc: b('#drawer-chat'), list: b('#chat-panel #chat-list') || b('.chat-panel .chat-list'), input: b('#chat-input'), canvas: b('#canvas'), tools: b('#toolbar') };
+        });
+        check(lay.tab === '1' && lay.dc && !lay.dc.vis, `${d.tag} 출제자(태블릿): 채팅 버블 카드 대신`, lay.tab);
+        check(lay.canvas && lay.canvas.w >= d.w - 60, `${d.tag} 출제자(태블릿): 캔버스 폭 가득`, lay.canvas && Math.round(lay.canvas.w));
+        check(lay.canvas && lay.tools && lay.list && lay.canvas.b <= lay.tools.t + 1 && lay.tools.b <= lay.list.t + 1 && lay.list.vis && lay.list.h >= 50, `${d.tag} 출제자(태블릿): 캔버스 → 도구 모음 → 채팅 목록`, lay.list && Math.round(lay.list.h));
+        check(lay.input && lay.input.vis && lay.input.b <= m.vh + 0.5, `${d.tag} 출제자(태블릿): 채팅 입력칸 화면 안`, lay.input);
+        // 출제자가 채팅하려고 키보드를 열면: 캔버스 · 도구 · 입력칸이 한 화면에
+        const setVV = (H) => p.evaluate((H) => { const vv = window.visualViewport; Object.defineProperty(vv, 'height', { configurable: true, get: () => (H == null ? window.innerHeight : H) }); vv.dispatchEvent(new Event('resize')); }, H);
+        const KH = d.h - 400;
+        await p.click('#chat-input');
+        await setVV(KH);
+        await sleep(600);
+        const k = await measure(p); k.vh = KH;
+        const kt = await p.evaluate(() => { const r = document.getElementById('toolbar').getBoundingClientRect(); return { t: r.top, b: r.bottom, l: r.left, r: r.right, vis: r.width > 0 }; });
+        check(k.compact && inside(k.canvas, k) && kt.b <= KH + 0.5 && inside(k.input, k), `${d.tag} 출제자(태블릿) 키보드: 캔버스 · 도구 모음 · 입력칸 모두 화면 안`, { c: k.canvas && Math.round(k.canvas.b), t: Math.round(kt.b), i: k.input && Math.round(k.input.b), KH });
+        check(k.canvas && Math.abs(k.canvas.w / k.canvas.h - 4 / 3) < 0.03, `${d.tag} 출제자(태블릿) 키보드: 캔버스 4:3`, k.canvas && (k.canvas.w / k.canvas.h).toFixed(3));
+        await p.screenshot({ path: path.join(OUT, `${d.tag}-mydraw-keyboard.png`) });
+        await setVV(null);
+        await sleep(500);
+      }
       await p.screenshot({ path: path.join(OUT, `${d.tag}-mydraw.png`) });
 
       // 랜딩(게스트): 가로 스크롤 없음

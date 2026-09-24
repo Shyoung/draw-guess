@@ -1180,7 +1180,7 @@
   function renderAll() {
     // 모바일 CSS가 단계/역할별로 레이아웃을 바꿀 수 있도록 루트에 표시한다 (JS 레이아웃 코드 없이 CSS만으로 전환)
     var vr = $('view-room');
-    if (vr) { vr.setAttribute('data-phase', state.phase); vr.setAttribute('data-role', isDrawer() ? 'drawer' : 'guesser'); }
+    if (vr) { vr.setAttribute('data-phase', state.phase); vr.setAttribute('data-role', isDrawer() ? 'drawer' : 'guesser'); vr.setAttribute('data-tablet', isTabletPortrait() ? '1' : '0'); }
     placeMobileChrome();
     if (roomProfile.open && !roomProfile.formless && (!inRoom || state.phase !== 'lobby')) { closeRoomProfile(); if (inRoom) toast('게임이 시작돼 프로필 수정을 닫았어요'); }
     renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderResultsSave(); renderChatPeek(); renderAccount();
@@ -2386,6 +2386,8 @@
   var KB_DROP = 120;       // 같은 폭에서 본 최대 높이보다 이만큼 줄면 키보드가 열린 것으로 본다
   var SHELL_CHROME_H = 300; // 모바일 게임 셸에서 캔버스를 뺀 나머지(헤더·턴 띠·상태 띠·채팅 최소·간격) 대략 높이
   var vvMax = 0, vvW = 0;
+  var TABLET_MIN_W = 700; // 모바일 UI 중 이 폭 이상 = 태블릿 세로(출제자 배치가 다르다)
+  function isTabletPortrait() { return mobileMq.matches && window.innerWidth >= TABLET_MIN_W; }
   // 가로 태블릿(아이패드 가로) 게임 셸 — style.css 의 같은 미디어 조건과 맞춘다
   var TABLET_LAND_MQ = '(min-width: 1100px) and (orientation: landscape) and (pointer: coarse)';
   var tabletLandMq = window.matchMedia ? window.matchMedia(TABLET_LAND_MQ) : { matches: false, addEventListener: null, addListener: null };
@@ -2580,10 +2582,11 @@
     vvMax = Math.max(vvMax, h);
     var kbOpen = vvMax - h > KB_DROP;
     // 태블릿 세로: 키보드가 열려도 520px 보다 크지만, 폭 가득한 캔버스 + 입력칸이 남은 높이에 안 들어가면 컴팩트(캔버스를 통째로 줄이고 말풍선)
-    var fits = !kbOpen || h >= (w - 16) * 0.75 + SHELL_CHROME_H;
+    var tb0 = $('toolbar'), tbH = isDrawer() && tb0 && !tb0.hidden ? (tb0.offsetHeight || 110) : 0;
+    var fits = !kbOpen || h >= (w - 16) * 0.75 + SHELL_CHROME_H + tbH;
     var compact = mobileMq.matches && (h < COMPACT_MAX_H || !fits);
     var vr = $('view-room');
-    if (vr) { if (compact) vr.setAttribute('data-compact', '1'); else vr.removeAttribute('data-compact'); }
+    if (vr) { if (compact) vr.setAttribute('data-compact', '1'); else vr.removeAttribute('data-compact'); vr.setAttribute('data-tablet', isTabletPortrait() ? '1' : '0'); }
     if (compact !== lastCompact) { lastCompact = compact; if (!compact) setTimeout(scrollChatBottom, 0); renderChatPeek(false); }
     fitDrawerCanvas();
     fitTabletCanvas();
@@ -2611,7 +2614,7 @@
   function fitDrawerCanvas() {
     var vr = $('view-room'), cp = document.querySelector('.center-panel'), cw = $('canvas-wrap'), tb = $('toolbar');
     if (!vr || !cp || !cw) return;
-    var on = mobileMq.matches && state.phase !== 'lobby' && isDrawer();
+    var on = mobileMq.matches && !isTabletPortrait() && state.phase !== 'lobby' && isDrawer();
     if (!on) { cw.style.removeProperty('--dw'); return; }
     var cs = getComputedStyle(cp);
     var padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);

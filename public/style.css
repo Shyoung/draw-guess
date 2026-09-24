@@ -962,6 +962,25 @@ body.sheet-open { overflow: hidden; }
   }
   .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] #canvas { width: auto; height: auto; max-width: 100%; max-height: 100%; margin: auto; }
 
+  /* ---- 태블릿 세로(폭 ≥ 700px) 출제자: 관전자와 같은 배치 — 캔버스 폭 가득 → 도구 모음 → 채팅 목록 + 입력줄(남는 높이).
+       폰 출제자의 "채팅 버블 카드 + 바닥 팔레트" 배치는 좁은 화면용이라 태블릿에서는 쓰지 않는다 ---- */
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"] .drawer-chat { display: none; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"] .center-panel { flex: 0 1 auto; overflow-y: auto; display: flex; flex-direction: column; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"] .canvas-wrap { width: 100%; max-width: none; margin: 0 auto; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"] .toolbar { position: static; margin-top: 0; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"] .chat-panel { display: flex; flex: 1 1 0; min-height: 128px; flex-direction: column; padding: 6px 10px 8px; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"] .chat-panel > .chat-list { flex: 1 1 auto; min-height: 56px; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"] .chat-panel > .chat-form { flex: 0 0 auto; margin-top: 6px; }
+  /* 키보드가 열리면(컴팩트): 관전자처럼 채팅 목록을 숨기고 캔버스를 4:3 으로 줄여 캔버스 · 도구 모음 · 입력줄을 한 화면에 */
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .chat-panel > .chat-list { display: none; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .chat-panel { flex: 0 0 auto; min-height: 0; padding-top: 0; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .chat-panel > .chat-form { margin-top: 0; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .center-panel { flex: 1 1 auto; overflow: hidden; align-items: center; padding: 6px; position: relative; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .canvas-wrap { position: relative; flex: 1 1 auto; min-height: 120px; width: auto; max-width: 100%; max-height: calc((100vw - 28px) * 0.75); aspect-ratio: 4 / 3; display: flex; align-items: center; justify-content: center; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] #canvas { width: auto; height: auto; max-width: 100%; max-height: 100%; margin: auto; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .toolbar { flex: 0 0 auto; width: 100%; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .chat-bubbles { display: flex; left: 8px; right: 8px; bottom: 8px; } /* 말풍선은 캔버스 안 아래쪽(도구 모음을 가리지 않게) */
+
   /* 토스트: 바닥에 두면 채팅 입력창을 가리므로 모바일에서는 위쪽에 띄운다 */
   .toasts { top: calc(10px + env(safe-area-inset-top, 0px)); bottom: auto; }
   .toast { transform: translateY(-10px); }
