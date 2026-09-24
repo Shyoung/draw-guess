@@ -54,7 +54,8 @@ function sendIndex(req, res) {
   res.set('Expires', '0');
   res.type('html').send(INDEX_HTML);
 }
-app.get(['/', '/index.html'], sendIndex);
+// 랜딩 3화면(/login · /profile · /)은 같은 페이지. 주소는 클라이언트가 pushState 로 바꾼다
+app.get(['/', '/index.html', '/login', '/profile'], sendIndex);
 
 // 헬스체크 / keep-alive 핑 대상 (정적 파일보다 가볍게)
 // 클라이언트 공개 설정 (Supabase URL/anon 키). 로그인이 꺼져 있으면 빈 객체 → 클라이언트는 게스트 UI 만 보여준다

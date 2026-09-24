@@ -43,6 +43,7 @@ async function startServer() {
   throw new Error('server did not start');
 }
 
+const pathOf = (pg) => new globalThis.URL(pg.url()).pathname;
 async function newPage(browser, tag, ctxOpts) {
   const ctx = await browser.newContext(ctxOpts || { viewport: { width: 1280, height: 860 } });
   const page = await ctx.newPage();
@@ -129,40 +130,55 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await g.locator('#btn-create').isVisible() && await g.locator('#room-code-input').isVisible() && await g.locator('#btn-join').isVisible(), '방 단계: 방 만들기 + 방 코드 참가');
     check(await g.locator('#invite-card').isHidden(), '방 단계: 초대 링크가 아니면 초대 카드 없음');
     await privacyChecks(g, '로그인 꺼짐(방)');
-    // 프로필 수정 → 프로필(값 유지)
+    check(pathOf(g) === '/', '주소: 메인 = /', g.url());
+    // 프로필 수정 → /profile(값 유지) → 기기 뒤로가기 = 메인
+    await g.evaluate(() => { window.__samePage = 1; });
     await g.click('#btn-profile-edit');
     await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
-    check(await g.locator('#landing-step-room').isHidden(), '프로필 수정 → 프로필 설정');
+    check(await g.locator('#landing-step-room').isHidden() && pathOf(g) === '/profile', '프로필 수정 → 프로필 설정(/profile)', g.url());
     check((await val(g, '#nick')) === '게스트' && (await g.locator('#emoji-strip .emoji-btn').nth(5).getAttribute('aria-checked')) === 'true', '프로필 수정: 닉네임 · 얼굴 값 유지');
-    // Enter = 저장
+    await g.goBack();
+    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check((await visibleStep(g)) === 'room' && pathOf(g) === '/' && await g.evaluate(() => window.__samePage === 1), '메인 → 프로필 수정 → 뒤로가기: 메인(페이지 유지)', `${await visibleStep(g)} ${g.url()}`);
+    // 프로필 수정 → Enter = 저장 → 메인(들어온 항목을 되돌린다)
+    await g.click('#btn-profile-edit');
+    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
     await g.press('#nick', 'Enter');
     await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
-    check(await g.locator('#landing-step-room').isVisible(), '프로필: 닉네임에서 Enter = 저장');
-    // 기기 뒤로가기(방 → 프로필, 페이지는 그대로)
-    await g.evaluate(() => { window.__samePage = 1; });
-    await g.goBack();
+    await sleep(300);
+    check((await visibleStep(g)) === 'room' && pathOf(g) === '/', '프로필 수정: 닉네임에서 Enter = 저장 → 메인(/)', g.url());
+    check(await g.evaluate(() => !!(history.state && history.state.landing === 'room' && !history.state.from)), '프로필 수정 저장: 메인 항목으로 되돌아감', await g.evaluate(() => JSON.stringify(history.state)));
+    await g.goForward();
     await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 }).catch(() => {});
-    check(await g.locator('#landing-step-profile').isVisible() && await g.evaluate(() => window.__samePage === 1) && g.url().startsWith(URL), '뒤로가기: 방 → 프로필(페이지를 떠나지 않음)', g.url());
-    await g.click('#btn-profile-next');
-    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
-    // 저장된 프로필이 있어도 게스트는 새로고침하면 첫 단계부터(로그인 꺼짐 = 프로필 설정), 값은 프리필
+    check((await visibleStep(g)) === 'profile' && pathOf(g) === '/profile', '앞으로가기: 프로필 수정 항목으로', g.url());
+    await g.goBack();
+    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 }).catch(() => {});
+    // 같은 탭 새로고침: 지금 화면(메인) 그대로
     await g.reload();
-    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 }).catch(() => {});
-    check((await visibleStep(g)) === 'profile', '새로고침(게스트, 저장된 닉네임): 첫 단계부터', await visibleStep(g));
-    check((await val(g, '#nick')) === '게스트' && (await g.locator('#emoji-strip .emoji-btn').nth(5).getAttribute('aria-checked')) === 'true', '새로고침: 저장된 닉네임·얼굴 프리필');
-    check((await txt(g, '#btn-profile-next')) === '저장', '프로필: CTA 문구 "저장"', await txt(g, '#btn-profile-next'));
-    await g.click('#btn-profile-next');
-    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
-    check((await txt(g, '#me-name')) === '게스트', '저장 → 방 단계 요약 카드에 저장된 닉네임');
-    await g.evaluate(() => { window.__samePage = 2; });
-    await g.goBack();
-    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 }).catch(() => {});
-    check(await g.locator('#landing-step-profile').isVisible() && await g.evaluate(() => window.__samePage === 2), '새로고침 후에도 뒤로가기: 방 → 프로필');
-    // 초대 링크(?room=ABCD, 저장된 프로필) → 프로필(프리필) → 저장 → 방 단계 초대 카드
+    await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 }).catch(() => {});
+    check((await visibleStep(g)) === 'room' && (await txt(g, '#me-name')) === '게스트', '같은 탭 새로고침(게스트): 메인 그대로', await visibleStep(g));
+    // 새 탭(새 방문): 게스트는 첫 화면부터(로그인 꺼짐 = 프로필 설정), 저장된 닉네임·얼굴 프리필
+    const gt = await g.context().newPage();
+    gt.on('pageerror', (e) => { console.log('[게스트 새 탭] pageerror: ' + e.message); failures++; });
+    await gt.goto(URL + '/');
+    await gt.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 }).catch(() => {});
+    check((await visibleStep(gt)) === 'profile' && pathOf(gt) === '/profile', '새 방문(게스트, 저장된 닉네임): 첫 화면부터 · 주소 /profile', `${await visibleStep(gt)} ${gt.url()}`);
+    check((await val(gt, '#nick')) === '게스트' && (await gt.locator('#emoji-strip .emoji-btn').nth(5).getAttribute('aria-checked')) === 'true', '새 방문: 저장된 닉네임·얼굴 프리필');
+    check((await txt(gt, '#btn-profile-next')) === '저장', '프로필: CTA 문구 "저장"', await txt(gt, '#btn-profile-next'));
+    await gt.click('#btn-profile-next');
+    await gt.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    check(pathOf(gt) === '/' && (await txt(gt, '#me-name')) === '게스트', '저장 → 메인(/) 요약 카드에 저장된 닉네임', gt.url());
+    // 직접 주소: 새 탭에서 / 로 오면 첫 화면으로 주소도 바뀐다, /profile 직접 방문도 같은 규칙
+    const gt2 = await g.context().newPage();
+    await gt2.goto(URL + '/?room=ABCD');
+    await gt2.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 });
+    check((await val(gt2, '#nick')) === '게스트' && pathOf(gt2) === '/profile' && gt2.url().includes('room=ABCD'), '초대 링크(새 탭, 저장된 프로필): /profile?room=ABCD, 닉네임 프리필', gt2.url());
+    await gt2.click('#btn-profile-next');
+    await gt2.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
+    check(await gt2.locator('#invite-card').isVisible() && (await txt(gt2, '#invite-code')) === 'ABCD' && pathOf(gt2) === '/', '초대 링크: 저장 → 메인 초대 카드(코드 유지)', gt2.url());
+    await gt.close(); await gt2.close();
+    // 초대 링크(같은 탭, 이미 시작함) → 메인 초대 카드
     await g.goto(URL + '/?room=ABCD');
-    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 });
-    check((await val(g, '#nick')) === '게스트', '초대 링크(저장된 프로필): 프로필 설정부터, 닉네임 프리필');
-    await g.click('#btn-profile-next');
     await g.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
     check(await g.locator('#invite-card').isVisible() && (await txt(g, '#invite-code')) === 'ABCD', '초대 링크: "초대받은 방 ABCD" 카드', await txt(g, '#invite-code'));
     check((await txt(g, '#btn-join')) === '이 방에 참가하기' && (await g.getAttribute('#btn-join', 'class')).includes('btn-primary'), '초대 카드: 주 버튼 "이 방에 참가하기"');
@@ -194,10 +210,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await g.waitForSelector('#view-landing:not([hidden])', { timeout: 3000 });
     await sleep(200);
     check(await g.locator('#landing-step-room').isVisible() && !g.url().includes('room='), '방 나가기 → 방 단계, 주소에 ?room= 없음', g.url());
-    await g.evaluate(() => { window.__samePage = 3; });
-    await g.goBack();
-    await g.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 }).catch(() => {});
-    check(await g.locator('#landing-step-profile').isVisible() && await g.evaluate(() => window.__samePage === 3), '방 나간 뒤 뒤로가기: 프로필(페이지 유지)');
+    check(pathOf(g) === '/', '방 나가기 → 주소 /', g.url());
 
     // ---------- 2-a. 가짜 Supabase: 시작 단계 · 게스트 흐름 ----------
     console.log('\n== 시작 단계 · 게스트로 시작 (가짜 Supabase, 로그아웃) ==');
@@ -240,9 +253,11 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check((await p.locator('#btn-login-google').evaluate((e) => getComputedStyle(e).backgroundColor)) === 'rgb(255, 255, 255)', 'Google 버튼: 흰 배경');
     // 게스트로 시작하기 → 프로필(이모지·색상만)
     await p.evaluate(() => { window.__samePage = 'mock'; });
+    check(pathOf(p) === '/login', '주소: 시작 = /login', p.url());
+    check(p.url().includes('mock=1'), '주소를 바꿔도 쿼리 유지', p.url());
     await p.click('#btn-start-guest');
     await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
-    check((await visibleStep(p)) === 'profile', '게스트로 시작하기 → 프로필 설정');
+    check((await visibleStep(p)) === 'profile' && pathOf(p) === '/profile', '게스트로 시작하기 → 프로필 설정(/profile)', p.url());
     check(await p.locator('#avatar-mode').isHidden() && await p.locator('#photo-panel').isHidden() && (await p.locator('#btn-mode-photo:visible').count()) === 0, '게스트 프로필: 사진 탭 없음');
     check(await p.locator('#emoji-strip').isVisible() && await p.locator('#color-row').isVisible() && await p.locator('#avatar-preview').isVisible(), '게스트 프로필: 얼굴 · 색상 · 미리보기');
     await privacyChecks(p, '게스트 프로필');
@@ -250,13 +265,16 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.click('#btn-profile-next');
     await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
     check((await txt(p, '#me-status')) === '게스트' && await p.locator('#btn-me-login').isVisible(), '방 단계(게스트, 로그인 가능): "게스트" + "로그인" 링크');
-    // 뒤로가기: 방 → 프로필 → 시작
-    await p.goBack();
-    await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 }).catch(() => {});
-    check((await visibleStep(p)) === 'profile', '뒤로가기 1: 방 → 프로필', await visibleStep(p));
+    check(pathOf(p) === '/', '저장 → 메인(/)', p.url());
+    // 뒤로가기: 메인 → 시작(시작 → 프로필 → 저장 흐름은 프로필 항목을 메인으로 바꾼다)
     await p.goBack();
     await p.waitForSelector('#landing-step-start:not([hidden])', { timeout: 3000 }).catch(() => {});
-    check((await visibleStep(p)) === 'start' && await p.evaluate(() => window.__samePage === 'mock'), '뒤로가기 2: 프로필 → 시작(페이지 유지)', await visibleStep(p));
+    check((await visibleStep(p)) === 'start' && pathOf(p) === '/login' && await p.evaluate(() => window.__samePage === 'mock'), '뒤로가기: 메인 → 시작(/login, 페이지 유지)', `${await visibleStep(p)} ${p.url()}`);
+    await p.goForward();
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check((await visibleStep(p)) === 'room' && pathOf(p) === '/', '앞으로가기: 시작 → 메인', p.url());
+    await p.goBack();
+    await p.waitForSelector('#landing-step-start:not([hidden])', { timeout: 3000 }).catch(() => {});
     // 다시 앞으로: 게스트 → 프로필(값 유지) → 방 → "로그인" 링크 → 시작
     await p.click('#btn-start-guest');
     await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
@@ -266,7 +284,13 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.click('#btn-me-login');
     await p.waitForSelector('#landing-step-start:not([hidden])', { timeout: 3000 });
     await sleep(300);
-    check((await visibleStep(p)) === 'start' && await p.evaluate(() => history.state && history.state.landing === 'start' && history.state.d === 0), '방 단계 "로그인" 링크 → 시작(history 바닥 항목)', await p.evaluate(() => JSON.stringify(history.state)));
+    check((await visibleStep(p)) === 'start' && pathOf(p) === '/login' && await p.evaluate(() => !!(history.state && history.state.landing === 'start' && history.state.from === 'room')), '메인 "로그인" 링크 → 시작(/login, 메인에서 옴)', await p.evaluate(() => JSON.stringify(history.state)));
+    await p.goBack();
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check((await visibleStep(p)) === 'room' && pathOf(p) === '/', '메인 → 로그인 → 뒤로가기: 메인', p.url());
+    await p.click('#btn-me-login');
+    await p.waitForSelector('#landing-step-start:not([hidden])', { timeout: 3000 });
+    await sleep(300);
 
     // ---------- 2-b. 로그인 → 프로필 설정(사진) ----------
     console.log('\n== 로그인 · 프로필 사진 (가짜 Supabase, 데스크톱) ==');
@@ -346,6 +370,31 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check((await visibleStep(p)) === 'room', '새로고침(로그인 · 확정한 적 있음): 방 단계 바로', await visibleStep(p));
     await p.waitForFunction(() => (document.getElementById('me-name').textContent || '').trim() === '모크유저', null, { timeout: 3000 }).catch(() => {});
     check((await txt(p, '#me-name')) === '모크유저' && (await imgSrc(p, '#me-avatar img')) === social, '새로고침: 요약 카드에 프로필 닉네임 · 사진', await txt(p, '#me-name'));
+    check(pathOf(p) === '/', '로그인 메인: 주소 /', p.url());
+    // 로그인 사용자가 /login 으로 직접 오면 메인으로(주소도 /)
+    await p.goto(`${URL}/login?mock=1&auth=1&stay=1`);
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 }).catch(() => {});
+    await p.waitForFunction(() => location.pathname === '/', null, { timeout: 3000 }).catch(() => {});
+    check((await visibleStep(p)) === 'room' && pathOf(p) === '/', '로그인 상태로 /login 직접 방문 → 메인(/)', `${await visibleStep(p)} ${p.url()}`);
+    // 로그인: 메인 → 프로필 수정(/profile) → 저장 → 메인, 뒤로가기로도 메인
+    await p.click('#btn-profile-edit');
+    await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
+    check(pathOf(p) === '/profile', '로그인: 프로필 수정 → /profile', p.url());
+    await p.click('#btn-profile-next');
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    await sleep(300);
+    check(pathOf(p) === '/' && await p.evaluate(() => !!(history.state && history.state.landing === 'room')), '로그인: 프로필 수정 → 저장 → 메인(/)', p.url());
+    await p.click('#btn-profile-edit');
+    await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 3000 });
+    await p.goBack();
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check((await visibleStep(p)) === 'room' && pathOf(p) === '/', '로그인: 프로필 수정 → 뒤로가기 → 메인', p.url());
+    // /profile 새로고침(로그인): 프로필 화면 유지
+    await p.goto(`${URL}/profile?mock=1&auth=1&stay=1`);
+    await p.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 }).catch(() => {});
+    check((await visibleStep(p)) === 'profile' && pathOf(p) === '/profile', '로그인: /profile 직접 방문 → 프로필 설정', p.url());
+    await p.goto(`${URL}/?mock=1&auth=1&stay=1`);
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
     // 모크 방: 사진 모드 → 플레이어 목록에 <img>
     await p.click('#btn-create');
     await p.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
@@ -558,9 +607,16 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await p.locator('#btn-login-google').isVisible() && await p.locator('#btn-login-kakao').isVisible() && await p.locator('#btn-start-guest').isVisible(), '"로그인" 링크 → 시작 단계(Google/카카오/게스트)');
 
     // 초대 링크로 와서(로그아웃 상태) 로그인(모크는 즉시) → 확정한 적 있으니 방 단계 + 초대 카드 유지
+    // (같은 탭 = 이미 게스트로 시작함 → 메인 초대 카드. 새 탭이면 /login 부터)
     await p.goto(`${URL}/?mock=1&auth=1&stay=1&auth_state=out&room=ABCD`);
-    await p.waitForSelector('#landing-step-start:not([hidden])', { timeout: 5000 });
-    check((await visibleStep(p)) === 'start', '초대 링크(저장된 닉네임, 로그아웃): 게스트는 시작 단계부터', await visibleStep(p));
+    await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
+    check(await p.locator('#invite-card').isVisible() && (await txt(p, '#invite-code')) === 'ABCD', '초대 링크(같은 탭, 로그아웃): 메인 초대 카드');
+    const pNew = await p.context().newPage();
+    await pNew.goto(`${URL}/?mock=1&auth=1&stay=1&auth_state=out&room=ABCD`);
+    await pNew.waitForSelector('#landing-step-start:not([hidden])', { timeout: 5000 });
+    check((await visibleStep(pNew)) === 'start' && pathOf(pNew) === '/login' && pNew.url().includes('room=ABCD'), '초대 링크(새 탭, 게스트): 시작(/login?room=ABCD)부터', pNew.url());
+    await pNew.close();
+    await p.click('#btn-me-login');
     await p.waitForSelector('#btn-login-kakao:visible', { timeout: 5000 });
     await p.click('#btn-login-kakao');
     await p.waitForSelector('#landing-step-room:not([hidden])', { timeout: 5000 });
@@ -584,7 +640,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.waitForSelector('#landing-step-start:not([hidden])', { timeout: 3000 }).catch(() => {});
     await sleep(400);
     check((await visibleStep(p)) === 'start' && await p.locator('#btn-login-google').isVisible() && await p.evaluate(() => window.__samePage === 9), '로그아웃(방 단계) → 시작 단계, 페이지 유지', await visibleStep(p));
-    check(await p.evaluate(() => !!(history.state && history.state.landing === 'start' && history.state.d === 0)), '로그아웃: history 바닥 항목(시작)으로 정리', await p.evaluate(() => JSON.stringify(history.state)));
+    check(pathOf(p) === '/login' && await p.evaluate(() => !!(history.state && history.state.landing === 'start')), '로그아웃: 지금 항목을 시작(/login)으로', `${p.url()} ${await p.evaluate(() => JSON.stringify(history.state))}`);
 
     // ---------- 3. 모바일 ----------
     console.log('\n== 로그인 UI (가짜 Supabase, 모바일) ==');

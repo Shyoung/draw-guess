@@ -284,7 +284,7 @@ async function mainRun() {
       check(await m.locator('#chat-panel #chat-list').isHidden(), 'keyboard: 채팅 목록 숨김');
       check(await m.locator('#draw-status').isHidden(), 'keyboard: 상태 띠 숨김(공간 확보)');
       await say(m, '컴팩트테스트');
-      await m.waitForFunction(() => document.querySelectorAll('#chat-bubbles .chat-bubble').length >= 1, null, { timeout: 3000 }).catch(() => {});
+      await m.waitForFunction(() => { const b = document.querySelectorAll('#chat-bubbles .chat-bubble'); return b.length >= 1 && (b[b.length - 1].textContent || '').includes('컴팩트테스트'); }, null, { timeout: 3000 }).catch(() => {}); // 시스템 메시지 말풍선이 먼저 있을 수 있으니 내 메시지가 올 때까지
       const nb = await m.locator('#chat-bubbles .chat-bubble').count();
       check(nb >= 1 && nb <= 3, 'keyboard: 캔버스 위 말풍선 1~3개', nb);
       const lastBubble = (await m.locator('#chat-bubbles .chat-bubble').last().textContent().catch(() => '')).trim();

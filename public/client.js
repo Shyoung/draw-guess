@@ -1256,14 +1256,15 @@
     if (row) row.querySelectorAll('.color-btn').forEach(function (b) { b.setAttribute('aria-checked', b.getAttribute('data-color') === profile.color ? 'true' : 'false'); });
   }
   // ------------------------------------------------------------------
-  // 랜딩 3단계: 1) 시작(Google/카카오/게스트) → 2) 프로필 설정 → 3) 방(만들기 / 코드로 참가 / 초대받은 방)
-  //   단계 구성(stepOrder): 로그인 기능이 켜져 있고 로그아웃 상태면 [start, profile, room], 아니면 [profile, room]
-  //   (로그인 꺼짐 = 시작 단계를 건너뜀, 로그인 상태 = 이미 시작을 지남).
-  //   첫 화면(initialStep): 로그인 + 이 브라우저에서 프로필을 확정("다음")한 적 있음 → 방 / 로그인 + 처음 → 프로필 설정(소셜 닉네임·사진 프리필)
-  //                        게스트 → 항상 첫 단계(시작, 로그인 꺼짐이면 프로필 설정). 저장된 닉네임·얼굴은 프로필에 프리필
-  //   세션을 복원하는 중(localStorage 에 sb-…-auth-token 이 있거나 OAuth 복귀 URL)이면 결과가 나올 때까지 단계를 그리지 않는다(깜빡임 방지).
-  //   history: 단계마다 { landing: step, d: 깊이 } 항목을 쌓는다(바닥 d=0 = 첫 단계). 기기 뒤로가기 = 이전 단계.
-  //   앞 단계로 갈 때는 쌓은 항목을 history.go(-n) 으로 걷어내고, 로그인/로그아웃으로 구성이 바뀌면 바닥까지 내려가 다시 쌓는다.
+  // 랜딩 3화면 = 3주소: /login(시작: Google/카카오/게스트) · /profile(프로필 설정) · /(메인: 만들기 / 코드로 참가 / 초대받은 방)
+  //   한 페이지 안에서 주소만 바꾼다(pushState) → 소켓·로그인 상태가 끊기지 않는다. 서버는 세 주소 모두 index.html 을 준다.
+  //   들어갈 조건(resolveStep): 게스트는 이 탭에서 "게스트로 시작하기"를 지나야(sessionStorage) 프로필/메인에 들어간다 → 새로 오면 늘 /login.
+  //     로그인 기능이 꺼져 있으면 /login 대신 /profile 이 첫 화면. 로그인 사용자는 /login 에 오면 메인(처음이면 /profile)으로.
+  //     메인은 닉네임이 있어야 하고, 로그인 사용자는 이 브라우저에서 프로필을 확정("저장")한 적이 있어야 한다.
+  //   뒤로가기 = 들어온 곳: 메인 → 프로필 수정/로그인 은 { from: 'room' } 을 붙여 push, "저장"·로그인 완료는 history.back() 으로 메인에 돌아간다.
+  //     시작 → 프로필 → 저장 은 /profile 항목을 / 로 바꿔(replace) 뒤로가기가 /login 으로 가게 한다.
+  //   ?room=CODE(초대)·?mock= 같은 쿼리는 화면을 옮겨도 그대로 따라간다.
+  //   세션을 복원하는 중(localStorage 에 sb-…-auth-token 이 있거나 OAuth 복귀 URL)이면 결과가 나올 때까지 화면을 그리지 않는다(깜빡임 방지).
   // ------------------------------------------------------------------
   var STEPS = ['start', 'profile', 'room'];
   var CONFIRMED_KEY = 'drawguess.profileConfirmed'; // { [userId]: ts } — 이 브라우저에서 프로필 설정을 마친 로그인 사용자
@@ -1278,7 +1279,6 @@
   }
   /** 로그인 기능을 쓸 수 있는가(초기화 결과가 나오기 전에는 설정 유무로 짐작) */
   function loginAvailable() { return landing.authReady ? acct.on : authConfigured(); }
-  function stepOrder() { return loginAvailable() && !acctLoggedIn() ? ['start', 'profile', 'room'] : ['profile', 'room']; }
   /** 로그인 세션을 복원하는 중일 수 있는가: supabase-js 가 남긴 세션 키 또는 OAuth 복귀 파라미터 */
   function maybeRestoringSession() {
     if (!authConfigured()) return false;
@@ -1348,74 +1348,97 @@
       node.classList.add(STEPS.indexOf(step) > STEPS.indexOf(prev) ? 'step-fwd' : 'step-back');
     }
   }
-  /** history 스택을 [order[0] … step] 으로 맞춘다(걷어내는 중인 항목이 있으면 그 뒤에) */
-  function syncLandingHistory(step) {
+  var ROUTES = { start: '/login', profile: '/profile', room: '/' };
+  var GUEST_STARTED_KEY = 'drawguess.guestStarted'; // sessionStorage: 이 탭에서 게스트로 시작했는가
+  function guestStarted() { try { return sessionStorage.getItem(GUEST_STARTED_KEY) === '1'; } catch (e) { return false; } }
+  function setGuestStarted(v) { try { if (v) sessionStorage.setItem(GUEST_STARTED_KEY, '1'); else sessionStorage.removeItem(GUEST_STARTED_KEY); } catch (e) { /* ignore */ } }
+  function stepFromPath(p) {
+    p = String(p || '/').replace(/\/+$/, '') || '/';
+    if (p === '/login') return 'start';
+    if (p === '/profile') return 'profile';
+    return 'room';
+  }
+  function routeUrl(step) { var q = ''; try { q = location.search || ''; } catch (e) { /* ignore */ } return ROUTES[step] + q; }
+  /** 가려는 화면 → 지금 상태로 들어갈 수 있는 화면 */
+  function resolveStep(step) {
+    var logged = acctLoggedIn(), canLogin = loginAvailable();
+    if (STEPS.indexOf(step) < 0) step = 'room';
+    if (logged) {
+      var ok = isConfirmed(acct.user.id) && !!nickValue();
+      if (step === 'start') return ok ? 'room' : 'profile';
+      if (step === 'room' && !ok) return 'profile';
+      return step;
+    }
+    if (!guestStarted()) return canLogin ? 'start' : 'profile';
+    if (step === 'start' && !canLogin) step = 'profile';
+    if (step === 'room' && !nickValue()) return 'profile';
+    return step;
+  }
+  /**
+   * 랜딩 화면 이동(+주소). opts.mode: 'push'(기본) | 'replace'. opts.from: 이 화면을 끝내면 돌아갈 화면(returnTo 가 쓴다).
+   * 들어갈 수 없는 화면이면 resolveStep 이 고른 화면으로. 실제로 보여 준 화면을 돌려준다
+   */
+  function goStep(step, animate, opts) {
+    if (inRoom) return landing.step;
+    opts = opts || {};
+    step = resolveStep(step);
+    showLandingStep(step, animate);
+    var mode = opts.mode || 'push', from = opts.from;
     afterHistory(function () {
       if (inRoom || landing.step !== step) return;
       try {
-        var order = stepOrder(), t = order.indexOf(step), st = history.state;
-        if (t < 0 || (st && st.sheet)) return;
-        var cur = st && st.landing ? order.indexOf(st.landing) : -1;
-        var d = st && st.landing && typeof st.d === 'number' ? st.d : 0;
-        if (cur >= 0 && cur === d) { // 스택이 지금 구성과 맞음
-          if (cur < t) { for (var i = cur + 1; i <= t; i++) history.pushState({ landing: order[i], d: i }, ''); }
-          else if (cur > t) histBack(cur - t);
-          return;
-        }
-        // 구성이 바뀌었거나(로그인/로그아웃) 처음 → 바닥까지 내려가 다시 쌓는다
-        var rebuild = function () {
-          if (inRoom || landing.step !== step) return;
-          try {
-            var o = stepOrder(), k = o.indexOf(step); if (k < 0) return;
-            history.replaceState({ landing: o[0], d: 0 }, '');
-            for (var j = 1; j <= k; j++) history.pushState({ landing: o[j], d: j }, '');
-          } catch (e) { /* ignore */ }
-        };
-        if (d > 0) { histBack(d); afterHistory(rebuild); } else rebuild();
+        var st = { landing: step }; if (from) st.from = from;
+        var cur = history.state, same = cur && cur.landing === step && stepFromPath(location.pathname) === step;
+        if (mode === 'push' && !same) history.pushState(st, '', routeUrl(step));
+        else history.replaceState(st, '', routeUrl(step));
       } catch (e) { /* file:// 등 */ }
     });
-  }
-  /** 랜딩 단계로 이동(+history). 지금 구성에 없는 단계면 가장 가까운 단계로. 실제로 보여 준 단계를 돌려준다 */
-  function goStep(step, animate) {
-    if (inRoom) return landing.step;
-    var order = stepOrder();
-    if (order.indexOf(step) < 0) step = order[0];
-    if (step === 'room' && !nickValue()) step = 'profile';
-    showLandingStep(step, animate);
-    syncLandingHistory(step);
     if (animate && step === 'profile' && !mobileMq.matches) focusNode($('nick'));
     return step;
   }
-  function initialStep() {
-    if (acctLoggedIn()) return isConfirmed(acct.user.id) && nickValue() ? 'room' : 'profile';
-    // 게스트는 매번 첫 단계(시작)부터. 저장된 닉네임·얼굴은 프로필 설정에 그대로 채워 둔다
-    return stepOrder()[0];
+  /** 화면을 끝내고 step 으로: 지금 항목이 step 에서 넘어온 것이면 뒤로 가서(스택 되돌림), 아니면 지금 항목을 step 으로 바꾼다 */
+  function returnTo(step, animate) {
+    if (inRoom) return landing.step;
+    var st = history.state;
+    step = resolveStep(step);
+    if (st && st.landing && st.from === step) {
+      showLandingStep(step, animate);
+      histBack();
+      afterHistory(function () {
+        if (inRoom || landing.step !== step) return;
+        try { if (stepFromPath(location.pathname) !== step || !history.state || history.state.landing !== step) history.replaceState({ landing: step }, '', routeUrl(step)); } catch (e) { /* ignore */ }
+      });
+      return step;
+    }
+    return goStep(step, animate, { mode: 'replace' });
   }
-  /** 첫 화면을 정한다(한 번만). 방에 먼저 들어갔으면(재접속) 나올 때 resetToLanding 이 단계를 정한다 */
+  /** 첫 화면을 정한다(한 번만). 주소가 가리키는 화면에서 시작한다. 방에 먼저 들어갔으면(재접속) 나올 때 resetToLanding 이 정한다 */
   function startLanding() {
     if (landing.ready) return;
     landing.ready = true;
     clearTimeout(landing.readyTimer); landing.readyTimer = null;
     if (inRoom) return;
-    var step = goStep(initialStep(), false);
+    var want = stepFromPath(location.pathname), hs = history.state;
+    var step = goStep(want, false, { mode: 'replace', from: hs && hs.landing === want ? hs.from : undefined });
     if (step === 'profile' && !mobileMq.matches) focusNode($('nick'));
   }
-  /** 기기 뒤로가기/앞으로가기(시트와 무관한 popstate) */
+  /** 기기 뒤로가기/앞으로가기(시트와 무관한 popstate): 주소가 가리키는 화면으로(들어갈 수 없으면 대신 갈 화면으로 주소도 고친다) */
   function onLandingPopstate() {
     if (inRoom) {
-      // 방 안에서 랜딩 항목으로 내려와도 방은 그대로 두고 주소창의 ?room= 만 되살린다
+      // 방 안에서 이전 항목으로 내려와도 방은 그대로 두고 주소를 /?room= 으로 되살린다
       try {
         var qs = new URLSearchParams(location.search);
-        if (state.roomCode && qs.get('room') !== state.roomCode) { qs.set('room', state.roomCode); history.replaceState(history.state, '', location.pathname + '?' + qs.toString()); }
+        if (state.roomCode) { qs.set('room', state.roomCode); history.replaceState({ landing: 'room' }, '', '/?' + qs.toString()); }
       } catch (e) { /* ignore */ }
       return;
     }
+    if (!landing.ready) return;
     var st = history.state;
-    if (!st || !st.landing || !landing.ready) return;
-    var order = stepOrder(), step = st.landing;
-    if (step === 'room' && !nickValue()) step = 'profile';
-    if (order.indexOf(step) < 0) step = order[0];
-    if (step !== st.landing) { try { history.replaceState({ landing: step, d: typeof st.d === 'number' ? st.d : 0 }, ''); } catch (e) { /* ignore */ } }
+    var want = st && st.landing ? st.landing : stepFromPath(location.pathname);
+    var step = resolveStep(want);
+    if (step !== want || stepFromPath(location.pathname) !== step || !(st && st.landing)) {
+      try { var ns = { landing: step }; if (st && st.from && step === want) ns.from = st.from; history.replaceState(ns, '', routeUrl(step)); } catch (e) { /* ignore */ }
+    }
     if (landing.step !== step) showLandingStep(step, true);
   }
   /** 프로필 설정 "저장": 닉네임·아바타 확정 → 저장(로그인 상태면 프로필에도, 이 브라우저에 확정 표시) → 방 단계 */
@@ -1429,8 +1452,8 @@
       if (photo.mode === 'photo' && !avatarImgUrl(photo.url)) photo.mode = 'emoji'; // 사진이 없으면 이모지로
       syncAccountProfile(true);
       setConfirmed(acct.user.id);
-    }
-    goStep('room', true);
+    } else setGuestStarted(true);
+    returnTo('room', true);
     focusNode(landing.invite ? $('btn-join') : $('btn-create')); // 키보드면 Enter 한 번 더로 진행
   }
   function dismissInvite() {
@@ -1491,9 +1514,9 @@
       nick.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); submitProfile(); } });
     }
     var bn = $('btn-profile-next'); if (bn) bn.addEventListener('click', submitProfile);
-    var bg = $('btn-start-guest'); if (bg) bg.addEventListener('click', function () { goStep('profile', true); });
-    var be = $('btn-profile-edit'); if (be) be.addEventListener('click', function () { goStep('profile', true); });
-    var bl = $('btn-me-login'); if (bl) bl.addEventListener('click', function () { goStep('start', true); });
+    var bg = $('btn-start-guest'); if (bg) bg.addEventListener('click', function () { setGuestStarted(true); goStep('profile', true, { from: 'start' }); });
+    var be = $('btn-profile-edit'); if (be) be.addEventListener('click', function () { goStep('profile', true, { from: 'room' }); });
+    var bl = $('btn-me-login'); if (bl) bl.addEventListener('click', function () { goStep('start', true, { from: 'room' }); });
     ['btn-mode-photo', 'btn-mode-emoji'].forEach(function (id) {
       var b = $(id); if (b) b.addEventListener('click', function () { setPhotoMode(b.getAttribute('data-mode')); });
     });
@@ -1526,8 +1549,8 @@
     landing.invite = rc.length === 4 ? rc : null;
     renderProfile();
 
-    // 첫 화면. 새로고침 전 남은 history.state(랜딩/시트)는 지금 문서의 항목이 아니므로 비운다
-    try { if (history.state && (history.state.landing || history.state.sheet)) history.replaceState(null, ''); } catch (e) { /* ignore */ }
+    // 첫 화면. 새로고침 전 남은 시트 항목(history.state.sheet)은 비운다(시트는 닫힌 채로 시작). 랜딩 항목의 from 은 이어 쓴다
+    try { if (history.state && history.state.sheet) history.replaceState(null, ''); } catch (e) { /* ignore */ }
     if (maybeRestoringSession()) {
       // 로그인 세션 복원 결과(initAccount)를 기다린다. 라이브러리 로드가 멈춰도 4초 뒤에는 게스트 기준으로 보여 준다
       renderLanding();
@@ -1542,7 +1565,7 @@
   }
   function validName() {
     var p = currentProfile();
-    if (!p.name) { toast('닉네임을 입력해주세요', 'error'); goStep('profile', true); focusNode($('nick')); return null; }
+    if (!p.name) { toast('닉네임을 입력해주세요', 'error'); goStep('profile', true, { from: 'room' }); focusNode($('nick')); return null; }
     return p;
   }
   var busy = false;
@@ -1627,13 +1650,13 @@
     ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null; ui.timeLeft = null;
     var vl = $('view-landing'), vr = $('view-room');
     if (vl) vl.hidden = true; if (vr) vr.hidden = false;
-    // 지금 항목의 주소를 ?room=CODE 로(랜딩 표시는 유지 → 나갈 때 뒤로가기 구조를 이어 쓴다). 걷어내는 중인 항목이 있으면 그 뒤에
+    if (!acctLoggedIn()) setGuestStarted(true); // 방에 들어간 게스트는 이 탭에서 시작을 지난 것으로 본다
+    // 지금 항목(메인)의 주소를 /?room=CODE 로. 걷어내는 중인 항목이 있으면 그 뒤에
     afterHistory(function () {
       if (!inRoom || !state.roomCode) return;
       try {
         var qs = new URLSearchParams(location.search); qs.set('room', state.roomCode);
-        var hs = history.state, st = hs && hs.landing ? { landing: hs.landing, d: typeof hs.d === 'number' ? hs.d : 0 } : null;
-        history.replaceState(st, '', location.pathname + '?' + qs.toString());
+        history.replaceState({ landing: 'room' }, '', '/?' + qs.toString());
       } catch (e) { /* file:// 등 */ }
     });
     renderAll();
@@ -1656,7 +1679,7 @@
     resetCanvasState(); clearChat();
     var vl = $('view-landing'), vr = $('view-room');
     if (vr) vr.hidden = true; if (vl) vl.hidden = false;
-    // 방에서 나오면 방 단계. 주소에서 ?room= 을 빼고, 뒤로가기 → 프로필 설정 → (시작) 이 되도록 스택을 맞춘다
+    // 방에서 나오면 메인. 주소에서 ?room= 을 뺀다(지금 항목을 바꾼다)
     landing.invite = null; landing.ready = true;
     afterHistory(function () {
       if (inRoom) return;
@@ -1666,13 +1689,13 @@
         history.replaceState(history.state, '', location.pathname + (q ? '?' + q : ''));
       } catch (e) { /* ignore */ }
     });
-    goStep(nickValue() ? 'room' : 'profile', false);
+    goStep('room', false, { mode: 'replace' });
     renderAll();
   }
 
   function copyInvite() {
     if (!state.roomCode) return;
-    var url = location.origin + location.pathname + '?room=' + state.roomCode;
+    var url = location.origin + '/?room=' + state.roomCode;
     function ok() { toast('초대 링크를 복사했어요!', 'ok'); }
     function fallback() {
       try {
@@ -2125,7 +2148,7 @@
       if (!ok && window.APP_CONFIG && window.APP_CONFIG.supabaseUrl) toast('로그인 기능을 불러오지 못했어요. 게스트로 계속할 수 있어요', 'error');
       landing.authReady = true;
       if (!landing.ready) startLanding();                                              // 세션 복원 결과로 첫 화면을 정한다
-      else if (!inRoom && landing.step === 'start' && !loginAvailable()) goStep('profile', false); // 로그인을 못 켰으면 시작 단계를 건너뛴다
+      else if (!inRoom && landing.step === 'start' && !loginAvailable()) goStep('profile', false, { mode: 'replace' }); // 로그인을 못 켰으면 시작 화면을 건너뛴다
       renderAccount();
     });
   }
@@ -2151,10 +2174,16 @@
       }
     }
     applyProfileToLanding();
-    // 로그인/로그아웃(첫 화면을 정한 뒤, 방 밖): 로그인 → 이 브라우저에서 확정한 적 있으면 방, 처음이면 프로필 설정 / 로그아웃 → 시작
+    // 로그인/로그아웃(첫 화면을 정한 뒤, 방 밖): 로그인 → 이 브라우저에서 확정한 적 있으면 메인(메인에서 왔으면 뒤로), 처음이면 프로필 설정
+    //   (/login 항목을 바꾼다. 메인에서 왔으면 저장 뒤 메인으로 돌아가게 from 을 넘긴다) / 로그아웃 → 시작(지금 항목을 바꾼다)
     if (loginChanged && landing.ready && !inRoom) {
-      if (uid) goStep(isConfirmed(uid) && nickValue() ? 'room' : 'profile', true);
-      else goStep('start', true);
+      if (uid) {
+        if (isConfirmed(uid) && nickValue()) returnTo('room', true);
+        else { var hs0 = history.state; goStep('profile', true, { mode: 'replace', from: hs0 && hs0.from === 'room' ? 'room' : undefined }); }
+      } else {
+        setGuestStarted(false);
+        goStep('start', true, { mode: 'replace' });
+      }
     }
     renderAccount();
   }
