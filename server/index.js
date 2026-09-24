@@ -161,13 +161,37 @@ function sanitizeName(v) {
 }
 
 /** 아바타: { emoji, color:'#rrggbb' }. 형식이 틀리면 기본값으로 보정 */
-function sanitizeAvatar(v) {
+/**
+ * 아바타 사진 URL 검증: https 이고 허용된 호스트(우리 Supabase 저장소, Google·카카오 프로필 사진)만.
+ * 카카오는 http 주소를 주기도 하므로 kakaocdn 은 https 로 올려 준다. 그 외는 버린다(null).
+ */
+const SUPABASE_HOST = (() => { try { return process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).host : ''; } catch (e) { return ''; } })();
+function sanitizeAvatarImg(v) {
+  if (typeof v !== 'string' || v.length > 600) return null;
+  let u;
+  try { u = new URL(v); } catch (e) { return null; }
+  const host = u.hostname.toLowerCase();
+  const kakao = host === 'kakaocdn.net' || host.endsWith('.kakaocdn.net');
+  if (u.protocol === 'http:' && kakao) u.protocol = 'https:';
+  if (u.protocol !== 'https:') return null;
+  const google = host.endsWith('.googleusercontent.com');
+  const ours = SUPABASE_HOST && u.host.toLowerCase() === SUPABASE_HOST.toLowerCase() && u.pathname.startsWith('/storage/v1/object/public/avatars/');
+  if (!(kakao || google || ours)) return null;
+  return u.toString();
+}
+
+/**
+ * 아바타: { emoji, color:'#rrggbb', img? }. 형식이 틀리면 기본값으로 보정.
+ * img(프로필 사진)는 로그인 사용자에게만 허용 — 게스트는 이모지·색상만.
+ */
+function sanitizeAvatar(v, user) {
   const a = v && typeof v === 'object' ? v : {};
   let emoji = typeof a.emoji === 'string' ? a.emoji.trim() : '';
   if (!emoji || Array.from(emoji).length > 16) emoji = DEFAULT_AVATAR.emoji;
   const color =
     typeof a.color === 'string' && COLOR_RE.test(a.color) ? a.color.toLowerCase() : DEFAULT_AVATAR.color;
-  return { emoji, color };
+  const img = user ? sanitizeAvatarImg(a.img) : null;
+  return img ? { emoji, color, img } : { emoji, color };
 }
 
 /** 재접속 토큰: 클라이언트가 보낸 값이 형식에 맞으면 그대로, 아니면 새로 발급 */
@@ -297,7 +321,7 @@ io.on('connection', (socket) => {
     const [data, ack] = normalizeArgs(rawData, rawAck);
     const name = sanitizeName(data.name);
     if (!name) return ack({ ok: false, error: '이름은 1~12자여야 합니다.' });
-    const avatar = sanitizeAvatar(data.avatar);
+    const avatar = sanitizeAvatar(data.avatar, socket.data.user);
 
     leaveCurrentRoom();
     const code = generateRoomCode();
@@ -323,7 +347,7 @@ io.on('connection', (socket) => {
     if (!CODE_RE.test(code)) return ack({ ok: false, error: '방 코드는 영문 4글자입니다.' });
     const name = sanitizeName(data.name);
     if (!name) return ack({ ok: false, error: '이름은 1~12자여야 합니다.' });
-    const avatar = sanitizeAvatar(data.avatar);
+    const avatar = sanitizeAvatar(data.avatar, socket.data.user);
 
     const room = await getOrRestoreRoom(code);
     if (!room) return ack({ ok: false, error: '존재하지 않는 방입니다.' });

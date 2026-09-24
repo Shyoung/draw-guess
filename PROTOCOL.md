@@ -20,7 +20,7 @@
 
 ## Identity
 - 플레이어 id = 최초 접속 시의 `socket.id`. 재접속(`room:rejoin`)해도 바뀌지 않는다(서버가 playerId→socketId를 매핑).
-- `avatar` = `{ emoji: string, color: string }` (color는 `#rrggbb`).
+- `avatar` = `{ emoji: string, color: string, img?: string }` (color는 `#rrggbb`). `img`(프로필 사진 URL)는 **로그인 사용자만** 허용되며 서버가 https + 허용 호스트(우리 Supabase Storage `avatars` 버킷, `*.googleusercontent.com`, `*.kakaocdn.net`)만 통과시킨다. 클라이언트는 `img` 가 있으면 사진을, 로드 실패 시 emoji+color 로 대체해 그린다.
 - 이름은 1~12자, trim 후 빈 문자열이면 서버가 거절.
 
 ## Phases

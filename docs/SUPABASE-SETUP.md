@@ -13,6 +13,10 @@
 **SQL Editor → New query** 에 [`supabase/migrations/0001_init.sql`](../supabase/migrations/0001_init.sql) 내용을 붙여 넣고 Run.
 프로필(`profiles`)과 사용자 단어 세트(`word_sets`) 테이블, 가입 시 프로필 자동 생성 트리거, 본인 데이터만 읽고 쓰는 RLS 정책이 만들어집니다.
 
+### 2-1. 프로필 사진 (0002)
+같은 방법으로 [`supabase/migrations/0002_avatars.sql`](../supabase/migrations/0002_avatars.sql) 도 실행합니다.
+프로필에 사진 표시 방식(`avatar_mode`)과 소셜 원본 사진(`social_avatar_url`) 칸이 생기고, 업로드용 공개 저장소 버킷 `avatars`(1MB, jpeg/png/webp, 본인 폴더만 쓰기)가 만들어집니다.
+
 ## 3. 로그인 제공자 켜기
 **Authentication → Providers**
 
