@@ -4,3 +4,11 @@ node_modules/
 test/shots/
 test/.tmp-state.json
 data/
+
+# 로컬 비밀 값(OAuth 클라이언트 JSON, 키 등) — 절대 커밋하지 않는다
+secret/
+secrets/
+*.secret.json
+client_secret*.json
+.env
+.env.*
