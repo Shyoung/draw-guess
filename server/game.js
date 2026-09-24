@@ -18,9 +18,8 @@ const TURN_END_TIME = 5; // 초
 const GAME_OVER_TIME = 10; // 초
 // 연결이 끊긴 플레이어를 방에 남겨두는 시간(ms). 이 안에 room:rejoin 하면 점수·자리를 그대로 이어간다. 0이면 즉시 퇴장.
 /**
- * 방장이 오프라인인데 접속자가 있을 때, 방장이 돌아오길 기다리는 시간(ms).
- * 방장이 "접속 중인 상태에서" 끊기면 바로 넘기지만(markDisconnected), 서버 재시작 복원처럼 방장이 처음부터
- * 오프라인이면 넘길 계기가 없어 퇴장 유예(60초)가 끝날 때까지 방장 없는 방이 된다 → 이 시간 뒤에 넘긴다.
+ * 방장이 오프라인인데 접속자가 있을 때, 방장이 돌아오길 기다리는 시간(ms). 그 뒤에도 없으면 접속 중인 첫 사람에게 넘긴다.
+ * (끊기자마자 넘기면 새로고침·배포 재접속 때마다 방장이 바뀌었다. 서버 재시작 복원처럼 처음부터 오프라인인 경우도 같은 규칙)
  */
 const HOST_RETURN_MS = process.env.HOST_RETURN_MS != null ? Math.max(0, Number(process.env.HOST_RETURN_MS) || 0) : 10000;
 const RECONNECT_GRACE_MS = process.env.RECONNECT_GRACE_MS != null
@@ -593,11 +592,8 @@ class Room {
     const secs = Math.round(RECONNECT_GRACE_MS / 1000);
     this.systemMessage(`${p.name}님의 연결이 끊어졌습니다. ${secs}초 안에 돌아오면 이어서 할 수 있어요.`);
 
-    if (this.hostId === id) {
-      const next = this.connectedPlayers()[0];
-      if (next) this.hostId = next.id;
-    }
-
+    // 방장이 끊겨도 바로 넘기지 않는다: 새로고침·배포 뒤 재접속처럼 곧 돌아오는 경우가 대부분이라,
+    // broadcastState → checkHost() 가 HOST_RETURN_MS 동안 기다렸다가 그래도 없으면 접속 중인 사람에게 넘긴다.
     this.startGrace(p);
 
     // 인원 부족은 여기서 바로 끝내지 않는다: 유예 시간 안에 돌아올 수 있으므로 턴은 계속 진행하고,

@@ -41,7 +41,7 @@ function startServer() {
   return new Promise((resolve, reject) => {
     serverProc = spawn(process.execPath, ['server/index.js'], {
       cwd: ROOT,
-      env: { ...process.env, PORT: String(PORT), RECONNECT_GRACE_MS: String(GRACE_MS) },
+      env: { ...process.env, PORT: String(PORT), RECONNECT_GRACE_MS: String(GRACE_MS), HOST_RETURN_MS: '800' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     serverProc.stdout.on('data', (d) => { if (String(d).includes('listening')) resolve(); });
@@ -229,15 +229,27 @@ const byId = (list, id) => list.find((p) => p.id === id);
   const lateAck = await emitAck(late, 'room:rejoin', { roomCode: code, token: TOKEN2 });
   check('rejoin after grace expiry → ok:false', lateAck && lateAck.ok === false, lateAck);
 
-  // ── 호스트가 끊기면 접속 중인 사람에게 호스트 승계 (복귀해도 안 돌려받음) ──
+  // ── 호스트가 끊기면: 잠깐(HOST_RETURN_MS) 기다렸다 접속 중인 사람에게 승계 (넘어간 뒤 복귀해도 안 돌려받음) ──
   const c4 = await connect('P4');
   const j4 = await emitAck(c4, 'room:join', { roomCode: code, name: '넷째', avatar: {}, token: 'tok-p4-abcdefgh' });
   check('P4 joins', j4.ok);
-  const hostOffP = waitNext(c4, 'room:state', (s) => s.hostId === c4.playerId, 5000, 'host handoff');
   const P1_TOKEN = 'tok-p1-abcdefgh';
+  // 금방 돌아오면(새로고침) 호스트 그대로
+  const hOffP = waitNext(c4, 'room:state', (s) => byId(s.players, created.playerId) && byId(s.players, created.playerId).connected === false, 3000, 'host off');
   c1.disconnect();
+  const hOff = await hOffP;
+  check('host disconnect → host is NOT handed over right away', hOff.hostId === created.playerId, hOff.hostId);
+  const c1q = await connect('P1-quick');
+  const rjq = await emitAck(c1q, 'room:rejoin', { roomCode: code, token: P1_TOKEN });
+  await sleep(1200);
+  const lastQ = [...c4.log].reverse().find((e) => e.ev === 'room:state');
+  check('host back within HOST_RETURN_MS (reload) → keeps host', rjq.ok && lastQ && lastQ.payload.hostId === created.playerId, lastQ && lastQ.payload.hostId);
+  // 안 돌아오면 넘긴다
+  const hostOffP = waitNext(c4, 'room:state', (s) => s.hostId === c4.playerId, 5000, 'host handoff');
+  const tHost = Date.now();
+  c1q.disconnect();
   const hs = await hostOffP;
-  check('host disconnect → host handed to connected P4 immediately', hs.hostId === c4.playerId && byId(hs.players, created.playerId).connected === false, hs);
+  check('host stays away → handed to connected P4 after ~HOST_RETURN_MS', hs.hostId === c4.playerId && byId(hs.players, created.playerId).connected === false && Date.now() - tHost >= 600, { ms: Date.now() - tHost });
   const c1b = await connect('P1-again');
   const afterBackP = waitNext(c4, 'room:state', (s) => byId(s.players, created.playerId) && byId(s.players, created.playerId).connected === true, 5000, 'P1 back');
   const rj1 = await emitAck(c1b, 'room:rejoin', { roomCode: code, token: P1_TOKEN });
