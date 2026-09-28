@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="32" height="32">
+  <!-- 작은 크기용: 연필을 빼고 선을 굵게 -->
+  <rect width="120" height="120" rx="28" fill="#ff6b4a"/>
+  <path d="M24 26 h72 a8 8 0 0 1 8 8 v38 a8 8 0 0 1 -8 8 h-42 l-16 14 v-14 h-14 a8 8 0 0 1 -8 -8 v-38 a8 8 0 0 1 8 -8z" fill="#fff8ec"/>
+  <path d="M32 60 q8 -20 16 -5 t16 -3 t18 -12" fill="none" stroke="#3d7bf2" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

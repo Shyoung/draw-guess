@@ -1,5 +1,5 @@
 /* =====================================================================
-   서버가 터져서 도망친 곳에 낙원은 있나? — client.js
+   이뭔그 (이게 뭔 그림인데?) — client.js
    Pure JS. Follows PROTOCOL.md v1 exactly (event names / payload fields).
    ===================================================================== */
 (function () {
@@ -780,11 +780,11 @@
     var c2 = cv.getContext('2d');
     c2.fillStyle = '#ffffff'; c2.fillRect(0, 0, cv.width, cv.height);
     c2.drawImage(src, 0, 0);
-    c2.fillStyle = '#f3ecff'; c2.fillRect(0, H, W, 72);
+    c2.fillStyle = '#fff1d6'; c2.fillRect(0, H, W, 72);
     c2.fillStyle = '#2b2d42'; c2.font = 'bold 26px "Pretendard", "Malgun Gothic", sans-serif'; c2.textBaseline = 'middle';
     c2.fillText(g.word + (g.category ? '  (' + g.category + ')' : ''), 20, H + 26);
     c2.fillStyle = '#6c6f85'; c2.font = '16px "Pretendard", "Malgun Gothic", sans-serif';
-    c2.fillText('✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘 · ' + (g.round ? g.round + '라운드 · ' : '') + '서버가 터져서 도망친 곳에 낙원은 있나?', 20, H + 54);
+    c2.fillText('✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘 · ' + (g.round ? g.round + '라운드 · ' : '') + '이뭔그 — 이게 뭔 그림인데?', 20, H + 54);
     return cv.toDataURL('image/png');
   }
   /** 전체를 한 장에 모은 시트 PNG (3열) */
@@ -795,7 +795,7 @@
     var cv = document.createElement('canvas');
     cv.width = pad + cols * (cellW + pad); cv.height = head + rows * (cellH + cap + pad) + pad;
     var c2 = cv.getContext('2d');
-    c2.fillStyle = '#fdf6ec'; c2.fillRect(0, 0, cv.width, cv.height);
+    c2.fillStyle = '#fff8ec'; c2.fillRect(0, 0, cv.width, cv.height);
     c2.fillStyle = '#2b2d42'; c2.font = 'bold 26px "Pretendard", "Malgun Gothic", sans-serif'; c2.textBaseline = 'middle';
     c2.fillText('🖼 그림 갤러리 · 방 ' + (state.roomCode || '') + ' · ' + items.length + '장', pad, head / 2);
     items.forEach(function (g, i) {

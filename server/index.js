@@ -48,11 +48,29 @@ const INDEX_HTML = fs.readFileSync(path.join(PUBLIC_DIR, 'index.html'), 'utf8')
   .replace(/(href|src)="((?!https?:|\/|data:)[^"]+\.(?:css|js))"/g, (m, attr, file) => `${attr}="${file}?v=${ASSET_VERSION}"`)
   .replace('<meta charset="utf-8">', `<meta charset="utf-8">\n  <meta name="asset-version" content="${ASSET_VERSION}">`);
 
+// 링크 미리보기(og:*)는 절대 주소가 필요하다 → 요청 주소로 채운다(스테이징·프로덕션 공용). 초대 링크(?room=CODE)면 초대 문구로
+function requestOrigin(req) {
+  const proto = String(req.get('x-forwarded-proto') || req.protocol || 'http').split(',')[0].trim() === 'https' ? 'https' : 'http';
+  const host = String(req.get('host') || '');
+  return /^[a-z0-9.-]+(:\d+)?$/i.test(host) ? proto + '://' + host : '';
+}
+const OG_DESC = '친구들과 링크 하나로 바로 하는 실시간 그림 퀴즈. 설치·가입 없이 방 코드로 참가하세요.';
+function renderIndex(req) {
+  let html = INDEX_HTML.split('__ORIGIN__').join(requestOrigin(req));
+  const code = typeof req.query.room === 'string' ? req.query.room.trim().toUpperCase() : '';
+  if (/^[A-Z0-9]{4,8}$/.test(code)) {
+    html = html
+      .replace('<meta property="og:title" content="이뭔그 — 이게 뭔 그림인데?">', '<meta property="og:title" content="이뭔그 — 친구가 그림 퀴즈 방에 초대했어요">')
+      .replace('<meta property="og:description" content="' + OG_DESC + '">', '<meta property="og:description" content="방 코드 ' + code + ' · 눌러서 바로 참가! 설치·가입 없이 친구들과 그리고 맞혀요.">');
+  }
+  return html;
+}
+
 function sendIndex(req, res) {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.set('Pragma', 'no-cache');
   res.set('Expires', '0');
-  res.type('html').send(INDEX_HTML);
+  res.type('html').send(renderIndex(req));
 }
 // 랜딩 화면(/login · /profile · / · /me)은 같은 페이지. 주소는 클라이언트가 pushState 로 바꾼다
 app.get(['/', '/index.html', '/login', '/profile', '/me'], sendIndex);

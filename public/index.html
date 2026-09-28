@@ -4,27 +4,44 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <title>서버가 터져서 도망친 곳에 낙원은 있나?</title>
-  <link rel="icon" type="image/svg+xml" href="/icons/app-icon.svg">
+  <title>이뭔그 — 이게 뭔 그림인데?</title>
+  <meta name="description" content="친구들과 링크 하나로 바로 하는 실시간 그림 퀴즈. 설치·가입 없이 방 코드로 참가하세요.">
+  <!-- 링크 미리보기(카카오톡 · 메신저 · SNS). __ORIGIN__ 은 서버가 요청 주소로 바꾸고, ?room= 초대 링크면 문구도 바꾼다 -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="이뭔그">
+  <meta property="og:title" content="이뭔그 — 이게 뭔 그림인데?">
+  <meta property="og:description" content="친구들과 링크 하나로 바로 하는 실시간 그림 퀴즈. 설치·가입 없이 방 코드로 참가하세요.">
+  <meta property="og:url" content="__ORIGIN__/">
+  <meta property="og:image" content="__ORIGIN__/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="이뭔그 — 이게 뭔 그림인데? 친구들과 그리고 맞히는 그림 퀴즈">
+  <meta property="og:locale" content="ko_KR">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg">
   <link rel="icon" type="image/png" sizes="128x128" href="/icons/app-icon-128.png">
   <link rel="apple-touch-icon" href="/icons/app-icon-256.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <meta name="theme-color" content="#ff7a59">
-  <meta name="apple-mobile-web-app-title" content="그림 맞히기">
+  <meta name="theme-color" content="#ff6b4a">
+  <meta name="apple-mobile-web-app-title" content="이뭔그">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gaegu:wght@700&amp;display=swap&amp;text=%EC%9D%B4%EB%AD%94%EA%B7%B8%EA%B2%8C%20%EB%A6%BC%EC%9D%B8%EB%8D%B0%3F">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
   <!-- ================= Landing / 로비 진입 ================= -->
   <main id="view-landing" class="view landing">
-    <div class="blob blob-a" aria-hidden="true"></div>
-    <div class="blob blob-b" aria-hidden="true"></div>
-    <div class="blob blob-c" aria-hidden="true"></div>
+    <!-- 배경 낙서 -->
+    <svg class="doodle doodle-a" viewBox="0 0 120 120" aria-hidden="true" focusable="false"><circle cx="60" cy="64" r="40" fill="none" stroke="#ff6b4a" stroke-width="6" stroke-linecap="round" stroke-dasharray="228 24"/><path d="M60 24 q5 -13 16 -14" fill="none" stroke="#2b2d42" stroke-width="5" stroke-linecap="round"/><path d="M78 9 q11 2 13 11 q-11 2 -13 -11z" fill="#3ddc97" stroke="#2b2d42" stroke-width="3" stroke-linejoin="round"/></svg>
+    <svg class="doodle doodle-b" viewBox="0 0 160 40" aria-hidden="true" focusable="false"><path d="M8 24 q18 -16 36 0 t36 0 t36 0 t36 0" fill="none" stroke="#3d7bf2" stroke-width="6" stroke-linecap="round"/></svg>
+    <svg class="doodle doodle-c" viewBox="0 0 60 60" aria-hidden="true" focusable="false"><path d="M30 5 l7 16 l17 2 l-13 11 l4 17 l-15 -9 l-15 9 l4 -17 l-13 -11 l17 -2z" fill="#ffd84d" stroke="#2b2d42" stroke-width="3" stroke-linejoin="round"/></svg>
 
     <section class="landing-card" aria-labelledby="logo">
-      <h1 id="logo" class="logo">
-        <span class="logo-pencil" aria-hidden="true">✏️</span>
-        <span class="logo-text">서버가 터져서 도망친 곳에<br><em>낙원은 있나?</em></span>
+      <h1 id="logo" class="logo" aria-label="이뭔그 — 이게 뭔 그림인데?">
+        <span class="logo-mark" aria-hidden="true">이뭔<em>그</em><svg class="logo-squiggle" viewBox="0 0 72 72" aria-hidden="true" focusable="false"><path d="M10 50 q10 -30 20 -8 t20 -6 t14 -20" fill="none" stroke="#3d7bf2" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span class="logo-sub" aria-hidden="true">이게 뭔 그림인데?</span>
       </h1>
 
       <!-- 로그인 상태를 확인하는 동안(세션 복원 중)만 보인다 — 단계가 정해지면 client.js 가 숨긴다 -->

@@ -1,13 +1,13 @@
 {
-  "name": "서버가 터져서 도망친 곳에 낙원은 있나?",
-  "short_name": "그림 맞히기",
-  "description": "친구들과 함께 그리고 맞히는 실시간 그림 게임",
+  "name": "이뭔그 — 이게 뭔 그림인데?",
+  "short_name": "이뭔그",
+  "description": "친구들과 링크 하나로 바로 하는 실시간 그림 퀴즈",
   "lang": "ko",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#fdf6ec",
-  "theme_color": "#ff7a59",
+  "background_color": "#fff8ec",
+  "theme_color": "#ff6b4a",
   "icons": [
     {
       "src": "/icons/app-icon-128.png",
