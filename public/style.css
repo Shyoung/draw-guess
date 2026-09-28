@@ -99,6 +99,10 @@ ul, ol { padding: 0; list-style: none; }
 /* ---------- Landing ---------- */
 .landing {
   position: relative; min-height: 100vh; min-height: 100dvh;
+  /* 공책: 가로줄 + 왼쪽 여백 선. 카드 안은 흰 종이 그대로(읽기 편하게) */
+  background-image:
+    linear-gradient(to right, transparent 56px, var(--paper-margin) 56px, var(--paper-margin) 58px, transparent 58px),
+    repeating-linear-gradient(to bottom, transparent 0, transparent 35px, var(--paper-line) 35px, var(--paper-line) 36px);
   display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr auto; place-items: center;
   padding: 32px 16px 0; overflow: hidden;
   overflow: clip; /* 스크롤 컨테이너가 아니게: 넘친 배경 blob 때문에 포커스/클릭으로 카드가 밀려 보이지 않도록 */
@@ -118,25 +122,28 @@ ul, ol { padding: 0; list-style: none; }
   position: absolute; pointer-events: none; overflow: visible;
   animation: float 9s ease-in-out infinite alternate;
 }
-.doodle-a { width: 150px; height: 150px; top: 6%; left: max(12px, calc(50% - 400px)); }
-.doodle-b { width: 180px; height: 45px; bottom: 12%; right: max(12px, calc(50% - 420px)); animation-delay: -3s; }
-.doodle-c { width: 60px; height: 60px; top: 38%; right: max(16px, calc(50% - 360px)); animation-delay: -6s; }
+/* 카드(가운데 460px) 바깥 좌우에 흩어 놓는다. 큰 화면일수록 더 넓게 퍼진다 */
+.doodle-apple  { width: 150px; height: 150px; top: 5%;  left:  max(16px, calc(50% - 440px)); }
+.doodle-q      { width: 52px;  height: 78px;  top: 32%; left:  max(24px, calc(50% - 520px)); animation-delay: -2s; }
+.doodle-cloud  { width: 130px; height: 74px;  top: 50%; left:  max(8px,  calc(50% - 720px)); animation-delay: -5s; }
+.doodle-heart  { width: 64px;  height: 58px;  top: 62%; left:  max(30px, calc(50% - 380px)); animation-delay: -1s; }
+.doodle-pencil { width: 130px; height: 54px;  bottom: 8%; left: max(16px, calc(50% - 560px)); animation-delay: -7s; }
+.doodle-zig    { width: 120px; height: 34px;  top: 16%; left:  max(12px, calc(50% - 700px)); animation-delay: -4s; }
+.doodle-star   { width: 60px;  height: 60px;  top: 12%; right: max(16px, calc(50% - 400px)); animation-delay: -6s; }
+.doodle-sun    { width: 100px; height: 100px; top: 24%; right: max(20px, calc(50% - 640px)); animation-delay: -3s; }
+.doodle-bolt   { width: 44px;  height: 66px;  top: 46%; right: max(40px, calc(50% - 360px)); animation-delay: -8s; }
+.doodle-spiral { width: 76px;  height: 76px;  top: 56%; right: max(18px, calc(50% - 560px)); animation-delay: -1.5s; }
+.doodle-smile  { width: 72px;  height: 72px;  bottom: 22%; right: max(24px, calc(50% - 760px)); animation-delay: -5.5s; }
+.doodle-wave   { width: 180px; height: 45px;  bottom: 9%; right: max(12px, calc(50% - 440px)); animation-delay: -3s; }
 @media (prefers-reduced-motion: reduce) { .doodle, .logo-squiggle { animation: none; } }
 @keyframes float { from { transform: translateY(0) rotate(0); } to { transform: translateY(24px) rotate(12deg); } }
 
-/* 공책 한 장: 연필 테두리 + 가로줄 + 왼쪽 여백 선 */
+/* 흰 종이 한 장(연필 테두리). 줄무늬는 페이지 배경에만 */
 .landing-card {
   position: relative; width: 100%; max-width: 460px; min-width: 0;
   background-color: var(--card); border-radius: 28px;
   box-shadow: 0 0 0 2px var(--text), 6px 8px 0 rgba(43, 45, 66, 0.08);
   padding: 32px 28px 28px; display: flex; flex-direction: column; gap: 18px;
-}
-/* 여백 선도 배경으로 그려야 둥근 모서리에서 잘린다 */
-.landing-card:not(.is-wide) {
-  --margin-x: 14px;
-  background-image:
-    linear-gradient(to right, transparent var(--margin-x), var(--paper-margin) var(--margin-x), var(--paper-margin) calc(var(--margin-x) + 2px), transparent calc(var(--margin-x) + 2px)),
-    repeating-linear-gradient(to bottom, transparent 0, transparent 35px, var(--paper-line) 35px, var(--paper-line) 36px);
 }
 .logo {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
@@ -582,12 +589,16 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 }
 @media (max-width: 560px) {
   .landing-card { padding: 26px 18px 20px; border-radius: 22px; }
-  .landing-card:not(.is-wide) { --margin-x: 9px; }
   .logo-mark { font-size: 58px; }
   .logo-sub { font-size: 21px; }
-  .doodle-a { width: 110px; height: 110px; top: 2%; left: 4px; }
-  .doodle-b { width: 130px; bottom: 6%; right: 6px; }
-  .doodle-c { display: none; }
+  /* 좁은 화면: 카드가 거의 다 차지하므로 위·아래 가장자리에 몇 개만 */
+  .landing { background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 35px, var(--paper-line) 35px, var(--paper-line) 36px); }
+  .doodle { display: none; }
+  .doodle-apple { display: block; width: 100px; height: 100px; top: 1%; left: 6px; }
+  .doodle-star { display: block; width: 44px; height: 44px; top: 4%; right: 14px; }
+  .doodle-q { display: block; width: 34px; height: 52px; top: 12%; left: auto; right: 70px; }
+  .doodle-wave { display: block; width: 120px; height: 30px; bottom: 5%; right: 8px; }
+  .doodle-heart { display: block; width: 44px; height: 40px; top: auto; bottom: 8%; left: 14px; }
   .emoji-strip { grid-template-columns: repeat(8, 1fr); gap: 4px; }
   .emoji-btn { font-size: 20px; }
   .color-row { gap: 6px; }
