@@ -1007,7 +1007,7 @@ body.sheet-open { overflow: hidden; }
   /* ---- 컴팩트 모드(키보드 열림, 관전자): 채팅 목록·상태 띠를 숨기고 캔버스가 4:3 을 지키며 남은 높이에 맞게 줄어든다(최소 120px).
        캔버스 폭은 화면 폭을 넘지 않게 max-height 로 묶어 letterbox 가 생기지 않는다. 입력줄은 그대로 바닥(visualViewport 하단). ---- */
   .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .chat-panel > .chat-list { display: none; }
-  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .chat-panel { flex: 0 0 auto; min-height: 0; padding-top: 0; }
+  .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .chat-panel { flex: 0 0 auto; min-height: 0; padding-top: 8px; }
   .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .chat-panel > .chat-form { margin-top: 0; }
   .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .draw-status { display: none; }
   .room:not([data-phase="lobby"])[data-role="guesser"][data-compact="1"] .center-panel { flex: 1 1 auto; overflow: hidden; display: flex; flex-direction: column; align-items: center; padding: 6px; position: relative; }
@@ -1031,7 +1031,7 @@ body.sheet-open { overflow: hidden; }
   .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"] .chat-panel > .chat-form { flex: 0 0 auto; margin-top: 6px; }
   /* 키보드가 열리면(컴팩트): 관전자처럼 채팅 목록을 숨기고 캔버스를 4:3 으로 줄여 캔버스 · 도구 모음 · 입력줄을 한 화면에 */
   .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .chat-panel > .chat-list { display: none; }
-  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .chat-panel { flex: 0 0 auto; min-height: 0; padding-top: 0; }
+  .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .chat-panel { flex: 0 0 auto; min-height: 0; padding-top: 8px; }
   .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .chat-panel > .chat-form { margin-top: 0; }
   .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .center-panel { flex: 1 1 auto; overflow: hidden; align-items: center; padding: 6px; position: relative; }
   .room:not([data-phase="lobby"])[data-tablet="1"][data-role="drawer"][data-compact="1"] .canvas-wrap { position: relative; flex: 1 1 auto; min-height: 120px; width: auto; max-width: 100%; max-height: calc((100vw - 28px) * 0.75); aspect-ratio: 4 / 3; display: flex; align-items: center; justify-content: center; }

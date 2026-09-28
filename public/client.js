@@ -619,6 +619,7 @@
     state.fixedDrawerId = s.fixedDrawerId == null ? null : s.fixedDrawerId;
     if (typeof s.allowSolo === 'boolean') state.allowSolo = s.allowSolo;
     if (state.phase === 'lobby' && prevPhase !== 'lobby') {
+      closeGameKeyboard();
       resetCanvasState(); ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.chosenWord = null;
       ui.turnEnd = null; setTimeLeft(null);
       // ui.ranking 은 유지 — 결과 화면은 내가 "대기실로 돌아가기"를 누를 때까지 보여야 한다
@@ -686,7 +687,14 @@
   }
 
   /** 방장이 게임을 즉시 끝냄: 턴·단어·오버레이를 지우고 대기실로(결과 화면 없음). room:state(lobby) 가 곧 뒤따른다 */
+  /** 게임 화면을 떠날 때(대기실 · 결과 화면) 모바일에서 채팅 입력 키보드를 닫는다 — 대기실 화면이 키보드 위에서 어긋나 보이지 않게 */
+  function closeGameKeyboard() {
+    if (!mobileMq.matches) return;
+    var ci = $('chat-input');
+    if (ci && document.activeElement === ci && !openSheetId) { try { ci.blur(); } catch (e) { /* ignore */ } }
+  }
   function onGameAborted(p) {
+    closeGameKeyboard();
     cancelLocalStroke(false);
     closeLeaveDialog();
     ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null;
@@ -698,6 +706,7 @@
     renderAll();
   }
   function onGameOver(p) {
+    closeGameKeyboard();
     state.phase = 'gameOver';
     SFX.play('gameOver');
     cancelLocalStroke(false);
@@ -803,14 +812,7 @@
     });
     return cv.toDataURL('image/png');
   }
-  // ---------- 여러 장 저장: 모바일(터치)은 공유 시트(사진 앱에 한 번에 저장), 그 외는 한 장씩 내려받기 ----------
-  function isTouchDevice() { try { return !!window.matchMedia && window.matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } }
-  function toFiles(list) {
-    try { return list.map(function (f) { return new File([f.blob], f.name, { type: f.blob.type || 'image/png' }); }); } catch (e) { return null; }
-  }
-  function canShareFiles(files) {
-    try { return !!files && files.length > 0 && isTouchDevice() && !!navigator.share && !!navigator.canShare && navigator.canShare({ files: files }); } catch (e) { return false; }
-  }
+  // ---------- 여러 장 저장: 한 장씩 내려받기 ----------
   function dataUrlToBlob(u) {
     var i = u.indexOf(','), type = (u.slice(5, i).split(';')[0]) || 'image/png', bin = atob(u.slice(i + 1)), a = new Uint8Array(bin.length);
     for (var k = 0; k < bin.length; k++) a[k] = bin.charCodeAt(k);
@@ -827,17 +829,8 @@
       })();
     });
   }
-  /** list: [{ name, blob }]. 반드시 사용자 탭 안에서 부른다(공유 시트는 사용자 동작이 필요). 결과: 'shared' | 'cancelled' | 'downloaded' */
-  function saveManyFiles(list, title) {
-    var files = toFiles(list);
-    if (canShareFiles(files)) {
-      return navigator.share({ files: files, title: title || '그림' }).then(function () { return 'shared'; }, function (err) {
-        if (err && err.name === 'AbortError') return 'cancelled';
-        return downloadSequential(list);
-      });
-    }
-    return downloadSequential(list);
-  }
+  /** list: [{ name, blob }] → 한 장씩 내려받기(모바일도 공유 시트 대신 다운로드). 결과: 'downloaded' */
+  function saveManyFiles(list) { return downloadSequential(list); }
   function galleryFileName(i) {
     var g = ui.gallery[i];
     return safeFile('그림맞추기_' + (state.roomCode || '') + '_' + (i + 1) + '_' + g.word) + '.png';
@@ -851,9 +844,7 @@
       try { list.push({ name: galleryFileName(i), blob: dataUrlToBlob(galleryItemPng(i)) }); } catch (e) { /* ignore */ }
     });
     if (!list.length) { toast('저장할 그림이 없어요', 'error'); return; }
-    saveManyFiles(list, '그림 갤러리').then(function (how) {
-      if (how === 'downloaded') toast('그림 ' + list.length + '장을 한 장씩 저장했어요', 'ok');
-    });
+    saveManyFiles(list).then(function () { toast('그림 ' + list.length + '장을 한 장씩 저장했어요', 'ok'); });
   }
   function openGallery() { if (!ui.gallery || !ui.gallery.length) { toast('아직 갤러리에 담을 그림이 없어요'); return; } ui.galleryOpen = true; renderGallery(); }
   function closeGallery() { ui.galleryOpen = false; renderGallery(); }
@@ -905,7 +896,7 @@
   //   저장한 게임은 이 탭에서 표시해 두어(sessionStorage) 재접속으로 game:over 를 다시 받아도 두 번 저장하지 않는다.
   // ------------------------------------------------------------------
   var MAX_DRAWINGS = 100, SAVED_GAMES_KEY = 'drawguess.savedGames';
-  var vault = { rows: null, loading: false, unavailable: false, error: '', loadedAt: 0, viewing: null, busy: false, prepared: null };
+  var vault = { rows: null, loading: false, unavailable: false, error: '', loadedAt: 0, viewing: null, busy: false };
   function myGalleryItems() {
     return (ui.gallery || []).filter(function (g) { return g.drawerId === myId && g.ops && g.ops.length; });
   }
@@ -990,26 +981,14 @@
         .then(function (blob) { downloadBlob(blob, zipName); return files.length; });
     });
   }
-  function drawingsKey(rows) { return rows.map(function (r) { return r.id; }).join('|'); }
-  /** 내 정보 › 그림 "모두 저장": 한 장씩. 모바일은 파일을 먼저 받아 두고, 한 번 더 누르면 공유 시트(사진에 저장)를 연다 */
+  /** 내 정보 › 그림 "모두 저장": 파일을 받아 한 장씩 내려받기 */
   function saveAllDrawings() {
     var rows = vault.rows || []; if (!rows.length || vault.busy) return;
-    var prep = vault.prepared;
-    if (prep && prep.key === drawingsKey(rows)) {
-      vault.prepared = null; renderMeGallery();
-      saveManyFiles(prep.list, '내 그림').then(function (how) { if (how === 'downloaded') toast('그림 ' + prep.list.length + '장을 한 장씩 저장했어요', 'ok'); });
-      return;
-    }
-    vault.busy = true; vault.prepared = null; renderMeGallery();
-    toast('그림 ' + rows.length + '장을 준비하는 중…');
+    vault.busy = true; renderMeGallery();
+    toast('그림 ' + rows.length + '장을 받는 중…');
     fetchDrawingFiles(rows)
       .then(function (list) {
         if (!list.length) { toast('받을 수 있는 그림이 없어요', 'error'); return; }
-        if (canShareFiles(toFiles(list))) {
-          vault.prepared = { key: drawingsKey(rows), list: list };
-          toast('준비됐어요. "' + list.length + '장 저장하기"를 눌러 주세요', 'ok');
-          return;
-        }
         return downloadSequential(list).then(function () { toast('그림 ' + list.length + '장을 한 장씩 저장했어요', 'ok'); });
       })
       .catch(function (e) { acctErr(e, '그림을 받지 못했어요'); })
@@ -1099,9 +1078,7 @@
     var ab = $('btn-drawings-all');
     if (ab) {
       ab.hidden = !n || vault.unavailable; ab.disabled = vault.busy;
-      var ready = vault.prepared && vault.prepared.key === drawingsKey(rows);
-      ab.textContent = vault.busy ? '준비하는 중…' : ready ? vault.prepared.list.length + '장 저장하기' : '모두 저장';
-      ab.classList.toggle('btn-primary', !!ready); ab.classList.toggle('btn-secondary', !ready);
+      ab.textContent = vault.busy ? '받는 중…' : '모두 저장';
     }
     var grid = $('drawings-grid'); if (!grid) return;
     var key = vault.unavailable ? '' : rows.map(function (r) { return r.id + ':' + (r.url ? 1 : 0); }).join('|');

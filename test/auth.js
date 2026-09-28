@@ -516,6 +516,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     // 새 세트 (3단어, 빈 항목·공백은 무시)
     await p.click('#btn-wordset-new');
     await p.waitForSelector('#wordset-form:not([hidden])', { timeout: 2000 });
+    await sleep(150); // 폼이 열리면 60ms 뒤 이름 칸에 포커스가 간다 — 그 전에 입력하면 글자가 이름 칸으로 샐 수 있다
     await p.fill('#ws-name', '과일');
     await p.fill('#ws-words', '사과, 바나나 , 포도,, ');
     check((await txt(p, '#ws-count')).startsWith('3개'), '새 세트: 실시간 단어 수 3개', await txt(p, '#ws-count'));
@@ -909,37 +910,51 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await squareCheck('방 플레이어 목록', '#player-list li.me .avatar');
     await tp.context().close();
 
-    // ---------- 2-h. 모바일: 여러 장 저장 = 공유 시트(사진에 저장) ----------
-    console.log('\n== 모바일 여러 장 저장 (공유 시트 흉내) ==');
+    // ---------- 2-h. 모바일: 여러 장 저장 = 한 장씩 내려받기(공유 시트를 쓰지 않음) ----------
+    console.log('\n== 모바일 여러 장 저장 (다운로드) ==');
     const ms = await newPage(browser, '모바일저장', { ...devices['iPhone 13'] });
     await ms.addInitScript(() => {
-      window.__shared = [];
-      navigator.canShare = (d) => !!(d && d.files && d.files.length);
-      navigator.share = (d) => { window.__shared.push((d.files || []).map((x) => x.name + ':' + x.type)); return Promise.resolve(); };
+      window.__shared = 0;
+      navigator.canShare = () => true;
+      navigator.share = () => { window.__shared++; return Promise.resolve(); };
     });
+    const dlNames = [];
+    ms.on('download', (d) => dlNames.push(d.suggestedFilename()));
     await enterRoomAs(ms, `${URL}/?mock=1&auth=1&stay=1`);
     await gameOver(ms, game1);
     await ms.waitForSelector('#results-save.rs-saved', { timeout: 5000 }).catch(() => {});
     await ms.click('#btn-gallery-open');
     await ms.waitForSelector('#overlay-gallery:not([hidden])', { timeout: 3000 });
     await ms.click('#btn-gallery-all');
-    await ms.waitForFunction(() => window.__shared.length === 1, null, { timeout: 3000 }).catch(() => {});
-    const sh1 = await ms.evaluate(() => window.__shared[0] || []);
-    check(sh1.length === 2 && sh1.every((x) => /\.png:image\/png$/.test(x)), '모바일 게임 갤러리 "모두 저장": 공유 시트에 PNG 2장', sh1);
+    for (let i = 0; i < 30 && dlNames.length < 2; i++) await sleep(100);
+    check(dlNames.length === 2 && dlNames.every((n) => /\.png$/.test(n)) && (await ms.evaluate(() => window.__shared)) === 0, '모바일 게임 갤러리 "모두 저장": 공유 시트 없이 PNG 2장 내려받기', dlNames);
     const mcard = await ms.$$eval('#gallery-grid .gallery-item', (cards) => cards.every((c) => { const r = c.getBoundingClientRect(), b = c.querySelector('.btn').getBoundingClientRect(); return b.bottom <= r.bottom + 0.5 && b.height > 20; }));
     check(mcard, '모바일 게임 갤러리: 저장 버튼이 카드 안에 온전히');
     await ms.click('#btn-gallery-close');
     await leaveToMain(ms);
     await openGalleryTab(ms);
     await ms.waitForSelector('#drawings-grid .drawing-item', { timeout: 3000 });
+    dlNames.length = 0;
     await ms.click('#btn-drawings-all');
-    await ms.waitForFunction(() => /장 저장하기/.test(document.getElementById('btn-drawings-all').textContent), null, { timeout: 5000 }).catch(() => {});
-    check((await txt(ms, '#btn-drawings-all')) === '1장 저장하기' && (await ms.evaluate(() => window.__shared.length)) === 1, '모바일 내 정보 "모두 저장": 먼저 받아 두고 "1장 저장하기"', await txt(ms, '#btn-drawings-all'));
-    await ms.click('#btn-drawings-all');
-    await ms.waitForFunction(() => window.__shared.length === 2, null, { timeout: 3000 }).catch(() => {});
-    const sh2 = await ms.evaluate(() => window.__shared[1] || []);
-    check(sh2.length === 1 && /사과.*\.webp:image\/webp$/.test(sh2[0]) && (await txt(ms, '#btn-drawings-all')) === '모두 저장', '모바일 내 정보: 두 번째 탭에 공유 시트(webp 1장)', sh2);
+    for (let i = 0; i < 40 && dlNames.length < 1; i++) await sleep(100);
+    check(dlNames.length === 1 && /사과.*\.webp$/.test(dlNames[0]) && (await ms.evaluate(() => window.__shared)) === 0, '모바일 내 정보 "모두 저장": 한 번 눌러 바로 내려받기(webp)', dlNames);
     await ms.context().close();
+
+    // ---------- 2-j. 모바일: 키보드가 열린 채 채팅 입력 중 → 방장이 게임을 끝내면 키보드를 닫는다 ----------
+    console.log('\n== 모바일 입력 중 게임 끝남 (가짜 소켓) ==');
+    const mk = await newPage(browser, '모바일키보드', { ...devices['iPhone 13'] });
+    await mk.goto(`${URL}/?mock=1&scene=drawing`);
+    await mk.waitForFunction(() => window.__dg && window.__dg.state.phase === 'drawing', null, { timeout: 8000 });
+    await mk.click('#chat-input');
+    await mk.fill('#chat-input', '입력중');
+    await mk.evaluate(() => { const vv = window.visualViewport; Object.defineProperty(vv, 'height', { configurable: true, get: () => 330 }); vv.dispatchEvent(new Event('resize')); });
+    await sleep(400);
+    const padTop = await mk.evaluate(() => ({ compact: document.getElementById('view-room').getAttribute('data-compact'), pad: parseFloat(getComputedStyle(document.getElementById('chat-panel')).paddingTop) }));
+    check(padTop.compact === '1' && padTop.pad >= 6, '키보드 열림(컴팩트): 입력줄 위 여백', padTop);
+    await mk.evaluate(() => { window.__mockFire('game:aborted', { by: '토끼' }); window.__mockFire('room:state', Object.assign({}, window.__dg.state, { phase: 'lobby', drawerId: null })); });
+    await sleep(400);
+    check(await mk.evaluate(() => document.activeElement !== document.getElementById('chat-input')), '입력 중 게임 끝남: 채팅 입력 포커스 해제(키보드 닫힘)');
+    await mk.context().close();
 
     // ---------- 2-i. 새 버전 배포: 게임 중이면 대기실로 돌아올 때 새로고침 ----------
     console.log('\n== 새 버전 새로고침 미루기 (가짜 소켓) ==');
