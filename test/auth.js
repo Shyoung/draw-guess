@@ -956,6 +956,30 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await mk.evaluate(() => document.activeElement !== document.getElementById('chat-input')), '입력 중 게임 끝남: 채팅 입력 포커스 해제(키보드 닫힘)');
     await mk.context().close();
 
+    // ---------- 2-h2. 초대: PC 는 초대 문구 + 링크 복사, 모바일은 공유 시트 ----------
+    console.log('\n== 초대 문구 복사 · 공유 ==');
+    const INVITE = '이뭔그 한 판? 🎨 설치 없이 링크만 누르면 돼';
+    const pc = await newPage(browser, 'PC초대');
+    await enterRoomAs(pc, `${URL}/?mock=1&auth=1&stay=1`);
+    await pc.evaluate(() => { window.__copied = null; navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); }; });
+    check((await txt(pc, '#btn-copy .btn-copy-text')) === '초대 링크 복사', 'PC 초대 버튼 문구: "초대 링크 복사"');
+    await pc.click('#btn-copy');
+    await sleep(200);
+    const copied = await pc.evaluate(() => window.__copied);
+    check(copied === INVITE + ' → ' + URL + '/?room=MOCK', 'PC "초대 링크 복사": 초대 문구 + 링크', copied);
+    check((await pc.locator('#toasts').textContent().catch(() => '')).includes('초대 문구와 링크'), 'PC 복사 토스트');
+    await pc.context().close();
+    const mi = await newPage(browser, '모바일초대', { ...devices['iPhone 13'] });
+    await enterRoomAs(mi, `${URL}/?mock=1&auth=1&stay=1`);
+    await mi.evaluate(() => { window.__share = null; navigator.share = (d) => { window.__share = d; return Promise.resolve(); }; });
+    // 대기실에서는 초대 버튼이 헤더에 있다(게임 중에만 메뉴 시트로 들어간다)
+    check((await mi.getAttribute('#btn-copy', 'title')) === '초대 링크 보내기', '모바일 초대 버튼: "초대 링크 보내기"');
+    await mi.click('#btn-copy');
+    await sleep(200);
+    const shared = await mi.evaluate(() => window.__share);
+    check(shared && shared.url === URL + '/?room=MOCK' && shared.text === INVITE && shared.title === '이뭔그', '모바일 초대: 공유 시트(navigator.share)에 초대 문구 + 링크', shared);
+    await mi.context().close();
+
     // ---------- 2-i. 새 버전 배포: 게임 중이면 대기실로 돌아올 때 새로고침 ----------
     console.log('\n== 새 버전 새로고침 미루기 (가짜 소켓) ==');
     const upG = await newPage(browser, '새버전');

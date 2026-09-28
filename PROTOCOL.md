@@ -53,10 +53,10 @@
 
 | event | payload | ack / 비고 |
 |---|---|---|
-| `room:create` | `{ name, avatar, token? }` | ack `{ ok:true, roomCode, playerId, token }` 또는 `{ ok:false, error }`. `token`(영숫자·`_-` 8~64자)은 재접속용이며 없으면 서버가 발급 |
+| `room:create` | `{ name, avatar, token?, ref? }` | ack `{ ok:true, roomCode, playerId, token }` 또는 `{ ok:false, error }`. `token`(영숫자·`_-` 8~64자)은 재접속용이며 없으면 서버가 발급. `ref`(선택, 영숫자·`_-` 1~24자)는 유입 경로 코드 — 클라이언트가 `?ref=` 로 받아 sessionStorage 에 두었다가 보낸다. 지표에만 쓰고 방 상태에는 들어가지 않는다 |
 | `room:rejoin` | `{ roomCode, token }` | 같은 `token`을 가진 플레이어가 방에 있으면(연결 상태 무관) 그 자리로 복귀: 같은 `playerId`·점수·순서 유지. 옛 소켓이 아직 살아 있으면 그쪽에 `session:replaced`를 보내고 떼어낸다(새로고침 경합·다른 탭). 유예 시간(기본 60초, `RECONNECT_GRACE_MS`)이 지나 퇴장된 뒤에는 실패. ack 형식은 create와 동일. 성공 시 `room:state`와 진행 상황(catch-up)이 개별 전송된다 |
 | `react:send` | `{ kind:'up'\|'down' }` | drawing 중 비출제자. 기록되지 않고 방 전체에 `react:show`로 중계. 플레이어당 초당 8회 제한 |
-| `room:join` | `{ roomCode, name, avatar, token? }` | 같은 `token`이 이미 그 방에 있으면 새 자리를 만들지 않고 그 자리로 복귀(이름·아바타는 새 값으로 갱신, ack의 `playerId`는 기존 id). ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명. roomCode는 대문자 정규화 |
+| `room:join` | `{ roomCode, name, avatar, token?, ref?, via? }` | `via`(선택) `'link'`(초대 링크 `?room=` 로 들어옴) \| `'code'`(코드 직접 입력, 기본). `ref` 는 create 와 같음. 둘 다 지표용. 같은 `token`이 이미 그 방에 있으면 새 자리를 만들지 않고 그 자리로 복귀(이름·아바타는 새 값으로 갱신, ack의 `playerId`는 기존 id). ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명. roomCode는 대문자 정규화 |
 | `room:leave` | – | 방 나가기 |
 | `room:settings` | `{ settings }` | 호스트, lobby에서만. 성공 시 모두에게 `room:state` |
 | `results:done` | – | 게임 종료 결과 화면을 닫음(본인). `players[].atResults` 가 false 로 바뀜 |
@@ -175,6 +175,13 @@
 - 연결 끊김 = 유예 시간(`RECONNECT_GRACE_MS`, 기본 60초) 동안 자리·점수 유지(`connected:false`). 그 안에 `room:rejoin` 하면 복귀, 지나면 퇴장 처리. 끊긴 사람이 출제자였으면 턴은 즉시 `drawerLeft`로 끝나고, 호스트였으면 `HOST_RETURN_MS`(기본 10초) 안에 돌아오지 않을 때 접속 중인 다음 사람이 호스트가 된다(넘어간 뒤에는 복귀해도 돌려받지 않음). 끊긴 사람은 정답 대기 인원·다음 출제자 계산에서 제외된다. 명시적 `room:leave`/강퇴는 즉시 퇴장.
 - 호스트가 오프라인인데 접속 중인 사람이 있으면(끊김 · 새로고침 · 서버 재시작 복원 직후) `HOST_RETURN_MS`(기본 10초) 기다렸다가 접속 중인 첫 사람에게 호스트를 넘기고 시스템 메시지("방장이 돌아오지 않아 …")를 보낸다. 그 안에 돌아오면 그대로. `hostId` 가 목록에 없는 사람을 가리키면 즉시 바로잡는다.
 - URL `?room=CODE` 로 접속하면 클라이언트는 방 코드 입력란을 자동으로 채운다.
+- URL `?ref=코드` 는 유입 경로(홍보 채널) 표시. 클라이언트가 sessionStorage 에 기억하고 주소에서 지운 뒤 `room:create`/`room:join` 에 `ref` 로 실어 보낸다.
+
+## 이용 지표 (서버 전용, 닉네임·IP·채팅 내용 없음)
+- 서버는 stdout 에 `[metric] {"ev","ts",...}` 한 줄씩 남기고 일별 누적을 저장소에 쌓는다(Redis 해시 `draw-guess:stats:YYYY-MM-DD`, 한국 시간 기준, 40일 보관). 필드 목록은 `server/metrics.js` 머리 주석.
+- 이벤트: `room_created` · `player_joined`(via link|code, midGame, size) · `game_started` · `game_completed`(turns, durationSec, bytesOut) · `game_aborted`(reason host|notEnoughPlayers) · `room_closed`(gamesPlayed, peakPlayers, lifetimeSec) · `room_full_rejected`.
+- `bytesOut` 은 그 방에 보낸 socket.io 패킷 길이 × 받는 사람 수의 합(근사). 게임 시작 때 0 으로, 게임이 끝나면 기록하고 다시 0 으로.
+- `GET /admin/stats?key=<ADMIN_KEY>&days=30` → `{ ok, today, rooms, store, days:[{ day, ...counters }] }`(최신순, 기록 있는 날만). `ADMIN_KEY` 가 없으면 404, 틀리면 403. 공개 `/healthz` 에는 통계를 넣지 않는다.
 
 ## 서버 검증 원칙
 - 모든 C→S 이벤트는 phase/역할(호스트·출제자)을 검사하고, 위반 시 조용히 무시하거나 `error:msg`.

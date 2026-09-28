@@ -253,6 +253,27 @@ class Room {
     /** 상태 저장소 (index.js가 주입). 없으면 저장하지 않는다 */
     this.store = null;
     this._persistTimer = null;
+    /** 지표(index.js가 주입, metrics.js). 없으면 기록하지 않는다 */
+    this.metrics = null;
+    this.createdAt = Date.now();
+    this.gamesPlayed = 0; // 이 방에서 시작한 게임 수
+    this.peakPlayers = 0; // 동시 최대 인원
+    this.turnsPlayed = 0; // 이번 게임에서 끝난 턴 수
+    this.gameStartedAt = 0;
+    this.bytesOut = 0; // 이번 게임(또는 대기실) 동안 이 방에 보낸 바이트 근사치 — 호스팅 대역폭 한도 판단용
+  }
+
+  /** 지표 이벤트(방 코드 포함). metrics 가 없으면 무시 */
+  metric(ev, fields) {
+    if (this.metrics) this.metrics.event(ev, { room: this.code, ...fields });
+  }
+
+  /** 송신 바이트 근사: socket.io 패킷 `42["event",payload]` 길이 × 받는 사람 수 */
+  countOut(event, payload, recipients) {
+    if (recipients <= 0) return;
+    let size = 2;
+    try { size += Buffer.byteLength(JSON.stringify(payload === undefined ? [event] : [event, payload])); } catch (e) { return; }
+    this.bytesOut += size * recipients;
   }
 
   // ── 저장/복원 (배포·재시작 후 방 유지) ────────────────────────
@@ -286,6 +307,8 @@ class Room {
       turnPoints: [...this.turnPoints.entries()],
       lastTurnEnd: this.lastTurnEnd,
       lastGameOver: this.lastGameOver,
+      createdAt: this.createdAt, gamesPlayed: this.gamesPlayed, peakPlayers: this.peakPlayers,
+      turnsPlayed: this.turnsPlayed, gameStartedAt: this.gameStartedAt, bytesOut: this.bytesOut,
       players: this.players.map((p) => ({
         id: p.id, name: p.name, avatar: { ...p.avatar }, score: p.score,
         isDrawing: p.isDrawing, hasGuessed: p.hasGuessed, token: p.token, atResults: !!p.atResults, userId: p.userId || null,
@@ -328,6 +351,12 @@ class Room {
     room.turnPoints = new Map(s.turnPoints || []);
     room.lastTurnEnd = s.lastTurnEnd || null;
     room.lastGameOver = s.lastGameOver || null;
+    room.createdAt = s.createdAt || Date.now();
+    room.gamesPlayed = s.gamesPlayed || 0;
+    room.peakPlayers = s.peakPlayers || 0;
+    room.turnsPlayed = s.turnsPlayed || 0;
+    room.gameStartedAt = s.gameStartedAt || 0;
+    room.bytesOut = s.bytesOut || 0;
     room.players = (s.players || []).map((p) => ({
       id: p.id, name: p.name, avatar: { ...p.avatar }, score: p.score || 0,
       isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed, token: p.token || null,
@@ -352,7 +381,7 @@ class Room {
     } else if (this.phase === 'turnEnd') {
       const reason = this.lastTurnEnd ? this.lastTurnEnd.reason : 'time';
       this.setPhaseTimeout(Math.max(500, this.phaseEndsAt - Date.now()), () => {
-        if (reason === 'notEnoughPlayers') this.gameOver();
+        if (reason === 'notEnoughPlayers') this.gameOver('notEnoughPlayers');
         else this.nextTurn();
       });
     } else if (this.phase === 'gameOver') {
@@ -392,6 +421,7 @@ class Room {
   // ── 전송 헬퍼 ──────────────────────────────────────────────
   emitAll(event, payload) {
     if (this.destroyed) return;
+    this.countOut(event, payload, this.connectedPlayers().length);
     if (payload === undefined) this.io.to(this.code).emit(event);
     else this.io.to(this.code).emit(event, payload);
   }
@@ -406,12 +436,15 @@ class Room {
     if (this.destroyed || !id) return;
     const p = this.getPlayer(id);
     if (p && !p.connected) return; // 끊긴 사람에게는 보낼 곳이 없다
+    this.countOut(event, payload, 1);
     this.io.to(this.sid(id)).emit(event, payload);
   }
 
   emitExcept(id, event, payload) {
     if (this.destroyed) return;
     const target = id ? this.io.to(this.code).except(this.sid(id)) : this.io.to(this.code);
+    const skip = id ? this.getPlayer(id) : null;
+    this.countOut(event, payload, this.connectedPlayers().length - (skip && skip.connected ? 1 : 0));
     if (payload === undefined) target.emit(event);
     else target.emit(event, payload);
   }
@@ -420,6 +453,7 @@ class Room {
     if (this.destroyed) return;
     const sids = ids.filter((id) => { const p = this.getPlayer(id); return !p || p.connected; }).map((id) => this.sid(id));
     if (!sids.length) return;
+    this.countOut(event, payload, sids.length);
     this.io.to(sids).emit(event, payload);
   }
 
@@ -569,6 +603,7 @@ class Room {
     };
     this.players.push(p);
     if (!this.hostId) this.hostId = id;
+    this.peakPlayers = Math.max(this.peakPlayers, this.players.length);
 
     this.systemMessage(`${name}님이 입장했습니다.`);
     this.broadcastState();
@@ -848,6 +883,14 @@ class Room {
     this.turnIndex = -1;
     this.lastTurnEnd = null;
     this.lastGameOver = null;
+    this.gamesPlayed += 1;
+    this.turnsPlayed = 0;
+    this.gameStartedAt = Date.now();
+    this.bytesOut = 0;
+    this.metric('game_started', {
+      mode: this.settings.mode, players: this.connectedPlayers().length, rounds: this.settings.rounds, drawTime: this.settings.drawTime,
+      customWords: !!(this.settings.customWords && String(this.settings.customWords).trim()),
+    });
 
     this.systemMessage('게임이 시작되었습니다!');
     this.nextTurn();
@@ -861,7 +904,7 @@ class Room {
       // 유예 중인(곧 돌아올 수 있는) 사람이 있어 전체 인원은 2명 이상이면 잠시 기다린다.
       // 유예가 끝나 실제로 퇴장하면 players 가 줄어 아래 gameOver 로 내려온다.
       if (this.players.length >= MIN_PLAYERS) { this.waitForReconnect('다른 참가자의 재접속을 기다리고 있어요…'); return; }
-      this.gameOver();
+      this.gameOver('notEnoughPlayers');
       return;
     }
     if (this.settings.mode === 'fixed') {
@@ -1120,6 +1163,7 @@ class Room {
 
     const deltas = this.players.map((p) => ({ id: p.id, delta: this.turnPoints.get(p.id) || 0 }));
     this.phase = 'turnEnd';
+    this.turnsPlayed += 1;
 
     const payload = { word: this.word || '', reason, deltas, timeLeft: TURN_END_TIME };
     this.lastTurnEnd = payload;
@@ -1127,13 +1171,29 @@ class Room {
     this.broadcastState();
 
     this.setPhaseTimeout(TURN_END_TIME * 1000, () => {
-      if (reason === 'notEnoughPlayers') this.gameOver();
+      if (reason === 'notEnoughPlayers') this.gameOver('notEnoughPlayers');
       else this.nextTurn();
     });
   }
 
-  /** 게임 종료: 순위 전송 후 10초 뒤 lobby 복귀 */
-  gameOver() {
+  /** 지표: 게임 종료 한 건. reason 'completed' 면 game_completed, 그 외(notEnoughPlayers · host)는 game_aborted */
+  recordGameEnd(reason) {
+    if (!this.gameStartedAt) return;
+    const durationSec = Math.round((Date.now() - this.gameStartedAt) / 1000);
+    if (reason === 'completed') {
+      this.metric('game_completed', {
+        mode: this.settings.mode, players: this.players.length, turns: this.turnsPlayed, durationSec,
+        galleryTrimmed: this.gallery.some((t) => t.trimmed), bytesOut: this.bytesOut,
+      });
+    } else {
+      this.metric('game_aborted', { players: this.players.length, turnsPlayed: this.turnsPlayed, reason, durationSec, bytesOut: this.bytesOut });
+    }
+    this.gameStartedAt = 0;
+    this.bytesOut = 0; // 대기실부터 다시 센다(room_closed 의 bytesOut = 마지막 게임 뒤 대기실 분)
+  }
+
+  /** 게임 종료: 순위 전송 후 10초 뒤 lobby 복귀. reason: 'completed'(라운드 소진) | 'notEnoughPlayers' */
+  gameOver(reason = 'completed') {
     this.clearTimers();
     this.phase = 'gameOver';
     this.drawerId = null;
@@ -1160,6 +1220,7 @@ class Room {
     for (const p of this.players) p.atResults = true; // 각자 결과를 확인하고 직접 대기실로 돌아온다
     this.emitAll('game:over', this.lastGameOver);
     this.broadcastState();
+    this.recordGameEnd(reason);
     // 방은 바로 대기실로 돌아가되, 결과 화면을 보고 있는 사람이 있으면 새 게임은 시작할 수 없다(start 참고).
     this.backToLobby();
   }
@@ -1191,6 +1252,7 @@ class Room {
     this.gallery = [];
     for (const p of this.players) p.atResults = false;
     this.emitAll('game:aborted', { by: host ? host.name : '' });
+    this.recordGameEnd('host');
     this.backToLobby(`${host ? host.name : '방장'}님이 게임을 끝냈어요. 대기실로 돌아왔어요.`);
     return null;
   }

@@ -30,3 +30,10 @@
 ## 받고 나서 마케팅이 할 일
 - 프로덕션 반영 확인 → 카카오 OG 캐시 초기화(developers.kakao.com/tool/clear/og) → **새 대화방**에서 메인 링크·초대 링크 미리보기 확인
 - F2 배포 후 `/admin/stats` 값이 쌓이는지 확인하고 D14(10/12) 회고 표의 기준값으로 사용
+
+## 처리 결과 (개발 세션, 2026-09-29 밤)
+- 1 완료: main = 996b3be 프로덕션 배포·검증(제목·OG·초대 문구). 카카오 OG 캐시 초기화는 운영자 확인 대기.
+- 2 완료(develop): `[metric]` 7종 · Key Value 일별 누적 · `/admin/stats?key=` · `?ref=` → `room:create/join.ref` · `bytesOut` · 닉네임 로그 제거. `ADMIN_KEY` 는 render.yaml `generateValue` 로 자동 생성 → 대시보드 Environment 탭에서 값 확인.
+- 3 완료(develop): 모바일 `navigator.share`(문구+링크), PC 는 초대 문구 5-1 #1(“오늘 밤” 제외) + 링크 복사.
+- 4 보류: 도메인 구매 결정 뒤(재배정안 참고).
+- 운영자 확인: 작업공간 동일 · 143h/750h · 171MB/5GB · 카드 등록 완료 · Key Value Free 25MB(no persistence).

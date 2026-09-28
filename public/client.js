@@ -1780,6 +1780,20 @@
     }
   }
   var ROUTES = { start: '/login', profile: '/profile', room: '/', me: '/me' };
+  // 유입 경로(?ref=채널코드): 이 탭에 기억해 두고 방 만들기/참가 때 서버에 알린다(지표용). 주소에서는 바로 지운다
+  var REF_KEY = 'drawguess.ref';
+  function rememberRef() {
+    try {
+      var qs = new URLSearchParams(location.search || '');
+      var ref = (qs.get('ref') || '').trim().toLowerCase();
+      if (!qs.has('ref')) return;
+      if (/^[a-z0-9_-]{1,24}$/.test(ref)) sessionStorage.setItem(REF_KEY, ref);
+      qs.delete('ref');
+      var q = qs.toString();
+      history.replaceState(history.state, '', location.pathname + (q ? '?' + q : '') + location.hash);
+    } catch (e) { /* ignore */ }
+  }
+  function getRef() { try { return sessionStorage.getItem(REF_KEY) || ''; } catch (e) { return ''; } }
   var GUEST_STARTED_KEY = 'drawguess.guestStarted'; // sessionStorage: 이 탭에서 게스트로 시작했는가
   function guestStarted() { try { return sessionStorage.getItem(GUEST_STARTED_KEY) === '1'; } catch (e) { return false; } }
   function setGuestStarted(v) { try { if (v) sessionStorage.setItem(GUEST_STARTED_KEY, '1'); else sessionStorage.removeItem(GUEST_STARTED_KEY); } catch (e) { /* ignore */ } }
@@ -1996,6 +2010,7 @@
     var bc = $('btn-create'); if (bc) bc.addEventListener('click', createRoom);
     var bj = $('btn-join'); if (bj) bj.addEventListener('click', joinRoom);
 
+    rememberRef();
     // ?room=CODE → 초대받은 방. 없으면 OAuth 리다이렉트 전에 임시 저장해 둔 코드(redirectTo 에는 쿼리가 없다)
     var rc = '';
     try { rc = cleanCode(new URLSearchParams(location.search).get('room')); } catch (e) { /* ignore */ }
@@ -2051,6 +2066,7 @@
     profile.name = p.name; saveProfile();
     syncAccountProfile(false);
     p.token = getToken();
+    var ref = getRef(); if (ref) p.ref = ref;
     withAck('room:create', p, function (ack) { setToken(ack.token); enterRoom(ack.roomCode, ack.playerId); });
   }
   function joinRoom() {
@@ -2059,7 +2075,9 @@
     var p = validName(); if (!p) return;
     profile.name = p.name; saveProfile();
     syncAccountProfile(false);
-    withAck('room:join', { roomCode: code, name: p.name, avatar: p.avatar, token: getToken() }, function (ack) { setToken(ack.token); enterRoom(ack.roomCode || code, ack.playerId); });
+    var payload = { roomCode: code, name: p.name, avatar: p.avatar, token: getToken(), via: landing.invite === code ? 'link' : 'code' };
+    var ref = getRef(); if (ref) payload.ref = ref;
+    withAck('room:join', payload, function (ack) { setToken(ack.token); enterRoom(ack.roomCode || code, ack.playerId); });
   }
 
   /** 끊긴 방에 같은 자리로 복귀 시도. 실패하면 랜딩으로. */
@@ -2217,20 +2235,43 @@
     } catch (e) { /* ignore */ }
   }
 
-  function copyInvite() {
-    if (!state.roomCode) return;
-    var url = location.origin + '/?room=' + state.roomCode;
-    function ok() { toast('초대 링크를 복사했어요!', 'ok'); }
+  // ---------- 초대: 모바일은 공유 시트(카톡 등), PC 는 초대 문구 + 링크 복사 ----------
+  var INVITE_TEXT = '이뭔그 한 판? 🎨 설치 없이 링크만 누르면 돼';
+  function inviteUrl() { return location.origin + '/?room=' + state.roomCode; }
+  /** 터치 기기 + Web Share 가 있으면 공유 시트 */
+  function canShareInvite() {
+    try { return !!navigator.share && window.matchMedia('(pointer: coarse)').matches; } catch (e) { return false; }
+  }
+  function copyInviteText(text) {
+    function ok() { toast('초대 문구와 링크를 복사했어요!', 'ok'); }
     function fallback() {
       try {
-        var ta = document.createElement('textarea'); ta.value = url; ta.setAttribute('readonly', '');
+        var ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', '');
         ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
         var done = document.execCommand && document.execCommand('copy'); document.body.removeChild(ta);
         if (done) ok(); else toast('복사에 실패했어요. 방 코드: ' + state.roomCode, 'error');
       } catch (e) { toast('복사에 실패했어요. 방 코드: ' + state.roomCode, 'error'); }
     }
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(ok, fallback);
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback);
     else fallback();
+  }
+  function copyInvite() {
+    if (!state.roomCode) return;
+    var url = inviteUrl(), text = INVITE_TEXT + ' → ' + url;
+    if (canShareInvite()) {
+      navigator.share({ title: '이뭔그', text: INVITE_TEXT, url: url }).then(null, function (err) {
+        if (err && err.name === 'AbortError') return; // 시트를 닫음
+        copyInviteText(text);
+      });
+      return;
+    }
+    copyInviteText(text);
+  }
+  /** 초대 버튼 문구: 공유 시트가 있으면 "초대 링크 보내기" */
+  function labelInviteButton() {
+    var b = $('btn-copy'); if (!b || !canShareInvite()) return;
+    b.title = '초대 링크 보내기';
+    var t = b.querySelector('.btn-copy-text'); if (t) t.textContent = '초대 링크 보내기';
   }
 
   // ------------------------------------------------------------------
@@ -2324,6 +2365,7 @@
       emit('game:start');
     });
     var bc = $('btn-copy'); if (bc) bc.addEventListener('click', copyInvite);
+    labelInviteButton();
     var bl = $('btn-leave'); if (bl) bl.addEventListener('click', function () { resetToLanding(true); });
     var bs = $('btn-sound'); if (bs) { renderSoundButton(bs); bs.addEventListener('click', function () { SFX.toggle(); renderSoundButton(bs); }); }
     var go = $('btn-gallery-open'); if (go) go.addEventListener('click', openGallery);

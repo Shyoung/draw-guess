@@ -14,6 +14,7 @@ const express = require('express');
 const { Server } = require('socket.io');
 const { Room } = require('./game');
 const { createStore } = require('./store');
+const { createMetrics } = require('./metrics');
 const { createAuth } = require('./auth');
 
 const PORT = process.env.PORT || 3000;
@@ -112,6 +113,18 @@ app.post('/api/account/delete', async (req, res) => {
   res.json({ ok: true });
 });
 
+// 운영 통계: ADMIN_KEY 가 설정된 경우에만 열린다. 최근 days(기본 30, 최대 90)일 일별 누적. 공개 /healthz 에는 넣지 않는다
+app.get('/admin/stats', (req, res) => {
+  if (!ADMIN_KEY) return res.status(404).end();
+  const key = typeof req.query.key === 'string' ? req.query.key : '';
+  const a = Buffer.from(key), b = Buffer.from(ADMIN_KEY);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(403).json({ ok: false });
+  const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30));
+  res.set('Cache-Control', 'no-store');
+  metrics.stats(days)
+    .then((rows) => res.json({ ok: true, today: metrics.dayOf(), rooms: rooms.size, store: store.kind, days: rows }))
+    .catch((err) => res.status(500).json({ ok: false, error: err.message }));
+});
 app.get('/healthz', (req, res) => res.json({ ok: true, env: process.env.APP_ENV || 'production', version: ASSET_VERSION, store: store.kind, rooms: rooms.size, allowSolo: process.env.ALLOW_SOLO === '1', auth: auth.enabled, uptime: Math.round(process.uptime()) }));
 
 // js/css는 URL에 버전이 붙으므로 1년 캐시(immutable)해도 안전하다. 그 외 파일은 매번 재검증.
@@ -134,6 +147,15 @@ const auth = createAuth(process.env);
 
 // 방 상태 저장소: STORE_URL / REDIS_URL (redis://, rediss://, file:...) — 없으면 메모리만
 const store = createStore(process.env);
+// 이용 지표(닉네임·IP 없음): 로그 한 줄 + 일별 누적. 조회는 /admin/stats?key=ADMIN_KEY
+const metrics = createMetrics(store);
+const ADMIN_KEY = process.env.ADMIN_KEY || '';
+/** 유입 경로 코드(?ref=). 영숫자·_- 1~24자, 소문자 정규화. 없거나 이상하면 '' */
+function sanitizeRef(v) {
+  if (typeof v !== 'string') return '';
+  const s = v.trim().toLowerCase();
+  return /^[a-z0-9_-]{1,24}$/.test(s) ? s : '';
+}
 
 /**
  * 방을 메모리에서 찾고, 없으면 저장소에서 "그 시점에" 복원한다 (lazy restore).
@@ -157,6 +179,7 @@ async function getOrRestoreRoom(code) {
     try {
       const room = Room.fromSnapshot(io, s);
       room.store = store;
+      room.metrics = metrics;
       room.onEmpty = deleteRoomIfEmpty;
       rooms.set(room.code, room);
       room.resumeAfterRestore();
@@ -258,6 +281,7 @@ function sanitizeChat(v) {
 /** 방이 비었으면 타이머 정리 후 레지스트리에서 삭제 */
 function deleteRoomIfEmpty(room) {
   if (room && room.isEmpty()) {
+    room.metric('room_closed', { gamesPlayed: room.gamesPlayed, peakPlayers: room.peakPlayers, lifetimeSec: Math.round((Date.now() - room.createdAt) / 1000), bytesOut: room.bytesOut });
     room.destroy();
     rooms.delete(room.code);
     store.delete(room.code).catch((err) => console.warn('[store] delete failed:', err.message));
@@ -363,7 +387,7 @@ io.on('connection', (socket) => {
     return [data && typeof data === 'object' ? data : {}, typeof ack === 'function' ? ack : () => {}];
   };
 
-  // room:create { name, avatar } → ack { ok, roomCode, playerId } | { ok:false, error }
+  // room:create { name, avatar, token?, ref? } → ack { ok, roomCode, playerId } | { ok:false, error }
   on('room:create', (rawData, rawAck) => {
     const [data, ack] = normalizeArgs(rawData, rawAck);
     const name = sanitizeName(data.name);
@@ -376,6 +400,7 @@ io.on('connection', (socket) => {
 
     const room = new Room(io, code);
     room.store = store;
+    room.metrics = metrics;
     room.onEmpty = deleteRoomIfEmpty; // 유예 시간 만료로 마지막 사람이 빠질 때 방 정리
     rooms.set(code, room);
     const token = sanitizeToken(data.token);
@@ -384,10 +409,11 @@ io.on('connection', (socket) => {
     socket.join(code);
     ack({ ok: true, roomCode: code, playerId: socket.id, token });
     room.addPlayer({ id: socket.id, name, avatar, token, socketId: socket.id, user: socket.data.user });
-    console.log(`[draw-guess] room ${code} created by ${name}. rooms=${rooms.size}`);
+    console.log(`[draw-guess] room ${code} created. rooms=${rooms.size}`);
+    room.metric('room_created', { ref: sanitizeRef(data.ref), loggedIn: !!socket.data.user });
   });
 
-  // room:join { roomCode, name, avatar } → ack 동일
+  // room:join { roomCode, name, avatar, token?, ref?, via? } → ack 동일
   on('room:join', async (rawData, rawAck) => {
     const [data, ack] = normalizeArgs(rawData, rawAck);
     const code = typeof data.roomCode === 'string' ? data.roomCode.trim().toUpperCase() : '';
@@ -409,17 +435,20 @@ io.on('connection', (socket) => {
       return;
     }
     if (room.players.length >= MAX_PLAYERS) {
+      room.metric('room_full_rejected', {});
       return ack({ ok: false, error: `방이 가득 찼습니다. (최대 ${MAX_PLAYERS}명)` });
     }
 
     leaveCurrentRoom(); // 다른 방에 있었다면 먼저 나간다
     if (!rooms.has(code)) return ack({ ok: false, error: '존재하지 않는 방입니다.' });
 
+    const midGame = room.phase !== 'lobby';
     socket.data.roomCode = code;
     socket.data.playerId = socket.id;
     socket.join(code);
     ack({ ok: true, roomCode: code, playerId: socket.id, token });
     room.addPlayer({ id: socket.id, name, avatar, token, socketId: socket.id, user: socket.data.user });
+    room.metric('player_joined', { via: data.via === 'link' ? 'link' : 'code', ref: sanitizeRef(data.ref), midGame, size: room.players.length });
   });
 
   // room:rejoin { roomCode, token } → ack { ok, roomCode, playerId, token } | { ok:false, error }

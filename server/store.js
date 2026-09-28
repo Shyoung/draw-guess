@@ -6,14 +6,38 @@
  *  - redis:// | rediss://  → Redis 호환 서버 (Render Key Value, Upstash, Railway, 자체 호스팅 등 무엇이든)
  *  - file:<경로>           → JSON 파일 하나 (로컬 개발/테스트, 디스크가 있는 호스팅)
  *
- * 모든 구현은 같은 인터페이스: { kind, save(code, snapshot), delete(code), load(code) → snapshot|null, loadAll() → snapshot[], close() }
+ * 모든 구현은 같은 인터페이스: { kind, save(code, snapshot), delete(code), load(code) → snapshot|null, loadAll() → snapshot[],
+ *   bumpStats(day, incr), loadStats(days) → [{ day, ...counters }], close() }
  * 저장 실패는 게임을 멈추지 않는다(로그만 남김).
+ * 일별 이용 통계(metrics.js)는 Redis 해시 `draw-guess:stats:YYYY-MM-DD` 에 누적하고 STATS_TTL_DAYS 뒤 지운다.
+ * 메모리/파일 저장소는 프로세스 안에서만 세고 재시작하면 사라진다.
  */
 const fs = require('fs');
 const path = require('path');
 
 const KEY_PREFIX = 'draw-guess:room:';
 const TTL_SEC = 3 * 60 * 60; // 방 스냅샷 보관 상한(3시간). 정상 종료된 방은 즉시 삭제된다.
+const STATS_PREFIX = 'draw-guess:stats:';
+const STATS_TTL_DAYS = 40;
+
+/** 오늘부터 days 일치 날짜 문자열(YYYY-MM-DD, 한국 시간, 최신순) */
+function recentDays(days, now = Date.now()) {
+  const out = [];
+  for (let i = 0; i < days; i++) out.push(new Date(now + 9 * 3600e3 - i * 86400e3).toISOString().slice(0, 10));
+  return out;
+}
+/** 메모리 통계(메모리/파일 저장소 공용) */
+function memoryStats() {
+  const days = new Map();
+  return {
+    async bumpStats(day, incr) {
+      const d = days.get(day) || {};
+      for (const [k, v] of Object.entries(incr)) d[k] = (d[k] || 0) + v;
+      days.set(day, d);
+    },
+    async loadStats(n) { return recentDays(n).filter((day) => days.has(day)).map((day) => ({ day, ...days.get(day) })); },
+  };
+}
 
 /** 저장 안 함 */
 function memoryStore() {
@@ -23,6 +47,7 @@ function memoryStore() {
     async delete() {},
     async load() { return null; },
     async loadAll() { return []; },
+    ...memoryStats(),
     async close() {},
   };
 }
@@ -45,6 +70,7 @@ function fileStore(filePath) {
     async delete(code) { const all = readAll(); if (code in all) { delete all[code]; writeAll(all); } },
     async load(code) { return readAll()[code] || null; },
     async loadAll() { return Object.values(readAll()); },
+    ...memoryStats(),
     async close() {},
   };
 }
@@ -91,6 +117,27 @@ function redisStore(url) {
       } while (cursor !== '0');
       return out;
     },
+    async bumpStats(day, incr) {
+      const key = STATS_PREFIX + day;
+      const pipe = client.pipeline();
+      for (const [k, v] of Object.entries(incr)) pipe.hincrby(key, k, v);
+      pipe.expire(key, STATS_TTL_DAYS * 86400);
+      await pipe.exec();
+    },
+    async loadStats(n) {
+      const days = recentDays(n);
+      const pipe = client.pipeline();
+      for (const day of days) pipe.hgetall(STATS_PREFIX + day);
+      const res = await pipe.exec();
+      const out = [];
+      res.forEach(([err, h], i) => {
+        if (err || !h || !Object.keys(h).length) return;
+        const row = { day: days[i] };
+        for (const [k, v] of Object.entries(h)) row[k] = Number(v) || 0;
+        out.push(row);
+      });
+      return out;
+    },
     async close() { try { await client.quit(); } catch (e) { /* ignore */ } },
   };
 }
@@ -108,4 +155,4 @@ function createStore(env = process.env) {
   return memoryStore();
 }
 
-module.exports = { createStore, KEY_PREFIX, TTL_SEC };
+module.exports = { createStore, KEY_PREFIX, TTL_SEC, STATS_PREFIX, recentDays };
