@@ -12,7 +12,8 @@ description: 이뭔그(draw-guess) 운영 사이클 한 바퀴. docs/ops/BOARD.m
 ## 0. 사전 점검 (여기서 멈출 수 있다)
 1. `git status --short`, `git branch --show-current`, `git fetch origin`. 커밋 안 된 변경이 있거나 브랜치가 `develop`이 아니면 **사이클을 돌리지 않는다**. "다른 세션이 작업 중"이라고 보고하고 끝낸다. 
 2. `docs/ops/BOARD.md`를 읽는다. "예정 일정"에 **지금부터 1시간 안**에 게시·방송이 있으면 이번 사이클에서는 main 머지를 하지 않는다(다른 일은 진행).
-3. `secret/admin-key.txt`가 있으면 키를 읽어 `curl -s "https://draw-guess-i927.onrender.com/admin/stats?key=<키>&days=14"`로 지표 JSON을 받아 둔다. 키 자체는 서브에이전트에 넘기지 않고 **JSON만** 넘긴다. 파일이 없으면 지표 없이 진행.
+3. `secret/admin-key.txt`가 있으면 키를 읽어 `curl -s -G "https://draw-guess-i927.onrender.com/admin/stats" --data-urlencode "key=<키>" --data "days=14"`로 지표 JSON을 받아 둔다(키에 `+`·`/`·`=`가 있어 반드시 URL 인코딩; 파일의 줄바꿈은 `tr -d '
+ '`로 제거). 키 자체는 서브에이전트에 넘기지 않고 **JSON만** 넘긴다. 파일이 없으면 지표 없이 진행.
 
 ## 1. 답 반영
 "결정 필요" 표에서 답이 채워진 줄을 처리한다. 사용자가 채팅으로 "n번 GO"라고 했으면 그것도 같은 답이다.
