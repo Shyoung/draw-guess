@@ -41,7 +41,7 @@
       var main = document.getElementById('main'), timerEl = document.getElementById('timer');
       if (!key || !window.BroadcastChannel) { main.innerHTML = '<p class="hint lost">게임 창에서 "단어 창 열기"로 열어 주세요.</p>'; return; }
       var chan = new BroadcastChannel('drawguess-word-' + key);
-      var last = null, lastAt = 0, timeLeft = null, tick = null, chosenLocal = null;
+      var last = null, lastAt = 0, timeLeft = null, tick = null, chosenLocal = null, lastOptsKey = '';
       function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
       function renderTimer() {
         var show = timeLeft != null && last && (last.phase === 'choosing' || last.phase === 'drawing');
@@ -81,7 +81,9 @@
       chan.onmessage = function (e) {
         var m = e.data; if (!m || typeof m !== 'object') return;
         if (m.type === 'state') {
-          if (!last || last.phase !== m.phase || last.word !== m.word) chosenLocal = null; // 새 턴
+          var optsKey = (m.options || []).join('');
+          if (!last || last.phase !== m.phase || last.word !== m.word || optsKey !== lastOptsKey) chosenLocal = null; // 새 턴·새 후보
+          lastOptsKey = optsKey;
           last = m; lastAt = Date.now(); timeLeft = m.timeLeft != null ? m.timeLeft : null;
           render(); renderTimer();
         } else if (m.type === 'bye') { last = { inRoom: false }; render(); renderTimer(); }

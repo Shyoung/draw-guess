@@ -146,26 +146,22 @@ async function say(page, text) {
     await host.locator('#set-customWords').blur();
     await host.check('#set-customWordsOnly');
     await sleep(500);
-    // 욕설 가리기: 세부 설정에 기본 켜짐, 끄면 비방장 요약 칩에 "욕설 가리기 끔"
-    check(await host.isChecked('#set-profanityFilter'), '욕설 가리기: 기본 켜짐');
-    check((await p2.locator('#settings-summary').textContent()).includes('욕설 가리기') && !(await p2.locator('#settings-summary').textContent()).includes('끔'), '비방장 요약: "욕설 가리기" 칩');
-    await host.uncheck('#set-profanityFilter');
-    await sleep(400);
-    check((await p2.locator('#settings-summary').textContent()).includes('욕설 가리기 끔'), '욕설 가리기 끄면 요약 칩 "욕설 가리기 끔"');
-    await host.check('#set-profanityFilter');
-    await sleep(400);
-    // 방송 모드: 켜면 모두의 방 코드가 •••• · 주소에서 ?room= 사라짐 · 칩을 누르면 잠깐 보임. 끄면 원래대로
-    await host.check('#set-streamerMode');
-    await sleep(500);
-    check((await p2.textContent('#room-code')).trim() === '••••' && (await host.textContent('#room-code')).trim() === '••••', '방송 모드: 방 코드 가림(모두)');
-    check(!p2.url().includes('room=') && !host.url().includes('room='), '방송 모드: 주소에서 ?room= 제거', p2.url());
-    check((await p2.locator('#settings-summary').textContent()).includes('방송 모드'), '비방장 요약: "방송 모드" 칩');
-    await p2.click('.room-code-chip');
-    await sleep(100);
-    check((await p2.textContent('#room-code')).trim() === code, '방송 모드: 칩을 누르면 코드가 보임', await p2.textContent('#room-code'));
-    await host.uncheck('#set-streamerMode');
-    await sleep(500);
-    check((await p2.textContent('#room-code')).trim() === code && p2.url().includes('room=' + code), '방송 모드 끄면 코드·주소 복원', p2.url());
+    // 방송 모드는 각자 설정(⚙ 설정 창): 방장이 켜도 다른 사람 화면은 그대로
+    await host.click('#btn-room-profile');
+    await host.waitForSelector('#room-settings-top:not([hidden])', { timeout: 3000 });
+    check((await host.locator('#room-settings-top .pref-switch').count()) === 2 && (await host.getAttribute('#room-settings-top .pref-switch[data-pref="profanityFilter"]', 'aria-checked')) === 'true' && (await host.getAttribute('#room-settings-top .pref-switch[data-pref="streamerMode"]', 'aria-checked')) === 'false', '설정 창: 욕설 가리기(켜짐) · 방송 모드(꺼짐) 스위치');
+    await host.click('#room-settings-top .pref-switch[data-pref="streamerMode"]');
+    await sleep(300);
+    check((await host.textContent('#room-code')).trim() === '••••' && !host.url().includes('room='), '방송 모드(내 설정): 내 방 코드 •••• · 주소에서 ?room= 제거', host.url());
+    check((await p2.textContent('#room-code')).trim() === code && p2.url().includes('room=' + code), '방송 모드는 내 화면만: 다른 사람은 코드·주소 그대로');
+    check(await host.evaluate(() => JSON.parse(localStorage.getItem('drawguess.prefs')).streamerMode === true), '설정이 이 기기에 저장됨');
+    await host.click('#room-settings-top .pref-switch[data-pref="streamerMode"]');
+    await sleep(300);
+    check((await host.textContent('#room-code')).trim() === code && host.url().includes('room=' + code), '방송 모드 끄면 코드·주소 복원', host.url());
+    await host.keyboard.press('Escape');
+    await host.waitForSelector('#room-settings-top', { state: 'hidden', timeout: 3000 }).catch(() => {});
+    if (await host.locator('#btn-room-profile-close').isVisible().catch(() => false)) await host.click('#btn-room-profile-close');
+    await sleep(200);
     check((await p2.inputValue('#set-rounds')) === '1', '설정 변경 동기화(rounds=1)', await p2.inputValue('#set-rounds'));
     check((await p2.inputValue('#set-drawTime')) === '30', '설정 변경 동기화(drawTime=30)', await p2.inputValue('#set-drawTime'));
     await p2.waitForFunction(() => document.querySelectorAll('#settings-summary .sum-word').length === 12, null, { timeout: 3000 }).catch(() => {});

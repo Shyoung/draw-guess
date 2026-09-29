@@ -19,11 +19,42 @@
   ];
   var SIZES = [4, 10, 20, 36];
   var SFX = window.SFX || { play: function () {}, isMuted: function () { return true; }, setMuted: function () {}, toggle: function () { return true; } };
-  var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null, profanityFilter: true, streamerMode: false };
+  var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null };
   var REASON_TEXT = { time: '시간 종료!', allGuessed: '모두 맞혔어요!', drawerLeft: '출제자가 나갔어요', notEnoughPlayers: '플레이어가 부족해요' };
   var STORAGE_KEY = 'drawguess.profile';
   var TOKEN_KEY = 'drawguess.token';      // 재접속용 토큰(브라우저별 1개)
   var LAST_ROOM_KEY = 'drawguess.lastRoom'; // 마지막으로 있던 방 { code, ts }
+  // 개인 설정(이 기기): 욕설 가리기 · 방송 모드. 방 설정이 아니라 각자 설정 창(⚙)·내 정보에서 바로 바꾼다
+  var PREFS_KEY = 'drawguess.prefs';
+  var prefs = { profanityFilter: true, streamerMode: false };
+  (function () {
+    try {
+      var v = JSON.parse(localStorage.getItem(PREFS_KEY) || '{}');
+      if (v && typeof v === 'object') Object.keys(prefs).forEach(function (k) { if (typeof v[k] === 'boolean') prefs[k] = v[k]; });
+    } catch (e) { /* ignore */ }
+  })();
+  function setPref(key, val) {
+    if (!(key in prefs)) return;
+    prefs[key] = !!val;
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* ignore */ }
+    renderPrefSwitches(); applyProfanityPref();
+    if (inRoom) renderAll();
+  }
+  /** 설정 창·내 정보의 스위치를 현재 값으로 */
+  function renderPrefSwitches() {
+    document.querySelectorAll('.pref-switch').forEach(function (b) {
+      var k = b.getAttribute('data-pref');
+      b.setAttribute('aria-checked', prefs[k] ? 'true' : 'false');
+    });
+  }
+  /** 이미 그려진 채팅에도 바로 적용(가린 판 ↔ 원문) */
+  function applyProfanityPref() {
+    document.querySelectorAll('#chat-list .msg-text[data-safe]').forEach(function (n) {
+      n.textContent = prefs.profanityFilter ? n.getAttribute('data-safe') : n.getAttribute('data-raw');
+    });
+    ui.recentChat.forEach(function (m) { if (m.safe) m.text = prefs.profanityFilter ? m.safe : m.raw; });
+    renderChatPeek(false);
+  }
   var REJOIN_WINDOW_MS = 90 * 1000;        // 새로고침 후 이 시간 안이면 자동 재접속 시도
 
   function $(id) { return document.getElementById(id); }
@@ -169,7 +200,7 @@
     wordMask: '', wordLength: 0, word: null, wordOptions: null, chosenWord: null, category: null,
     // 방송 모드: 방 코드 잠깐 보기 시각 · 내 단어/후보 보기 토글 · 주소 갱신용 이전 값
     codeRevealUntil: 0, wordPeek: false, optionsPeek: false, streamerWas: null,
-    wordWin: null, wordKey: '', wordChan: null, // 방송 모드 단어 창(팝업) — 방송 캡처 밖에서 후보·내 단어를 본다
+    wordWin: null, wordKey: '', wordChan: null, wordWatch: null, // 방송 모드 단어 창(팝업) — 방송 캡처 밖에서 후보·내 단어를 본다
     drawerName: '', timeLeft: null, turnEnd: null, ranking: null, optionsKey: '',
     gallery: null,      // 가장 최근 게임의 갤러리 [{ round, word, category, drawerName, guessed, ops }]
     galleryOpen: false,
@@ -1203,7 +1234,7 @@
 
   function canEndGame() { return inRoom && isHost() && (state.phase === 'choosing' || state.phase === 'drawing' || state.phase === 'turnEnd'); }
   /** 방송 모드(방장 설정): 방 코드·주소·출제자 단어를 화면에서 가린다. 눌러야 잠깐 보인다 */
-  function streamer() { return !!(state.settings && state.settings.streamerMode); }
+  function streamer() { return !!prefs.streamerMode; }
   function revealRoomCode() {
     if (!streamer()) return;
     ui.codeRevealUntil = Date.now() + 4000; renderTopbar();
@@ -1239,10 +1270,18 @@
       };
     }
     toast('단어 창을 열었어요. 방송 캡처 밖으로 옮겨 두세요', 'ok');
+    if (ui.wordWatch) clearInterval(ui.wordWatch);
+    ui.wordWatch = setInterval(function () {
+      if (wordWindowOpen()) return;
+      clearInterval(ui.wordWatch); ui.wordWatch = null;
+      ui.wordWin = null; ui.wordKey = ''; closeWordChannel();
+      renderAll(); // 후보 선택 중이었으면 "단어 창 열기" · "여기서 보기"가 다시 나온다
+    }, 500);
     renderAll();
   }
   function closeWordChannel() { if (ui.wordChan) { try { ui.wordChan.close(); } catch (e) { /* ignore */ } ui.wordChan = null; } }
   function closeWordWindow() {
+    if (ui.wordWatch) { clearInterval(ui.wordWatch); ui.wordWatch = null; }
     if (ui.wordChan) { try { ui.wordChan.postMessage({ type: 'bye' }); } catch (e) { /* ignore */ } }
     if (ui.wordWin && !ui.wordWin.closed) { try { ui.wordWin.close(); } catch (e) { /* ignore */ } }
     ui.wordWin = null; ui.wordKey = ''; closeWordChannel();
@@ -1478,7 +1517,6 @@
     setVal('set-rounds', s.rounds); setVal('set-drawTime', s.drawTime); setVal('set-wordCount', s.wordCount);
     setVal('set-hints', s.hints); setVal('set-hintEndAt', s.hintEndAt);
     setVal('set-customWords', s.customWords || ''); setVal('set-customWordsOnly', s.customWordsOnly);
-    setVal('set-profanityFilter', s.profanityFilter !== false); setVal('set-streamerMode', !!s.streamerMode);
     var fixed = s.mode === 'fixed';
     // 게임 길이 · 예상 시간 · 우리만의 단어 · 요약(방장이 아닌 사람)
     var preset = matchPreset(s), ps = presetsFor(s.mode), est = estimateGame(s);
@@ -1498,9 +1536,7 @@
       if (!sum.hidden) {
         var cw = parseWords(s.customWords || '').words.length;
         var chips = [[preset ? PRESET_NAMES[preset] : '직접 설정', 'sum-main'], [fixed ? s.rounds + '문제' : s.rounds + '라운드'], ['한 턴 ' + s.drawTime + '초'],
-          [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분'],
-          [s.profanityFilter === false ? '욕설 가리기 끔' : '욕설 가리기']];
-        if (s.streamerMode) chips.push(['방송 모드', 'sum-main']);
+          [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']];
         var cwList = cw ? parseWords(s.customWords || '').words : [];
         var skey = JSON.stringify([chips, cwList, !!s.customWordsOnly]);
         if (sum.getAttribute('data-key') !== skey) {
@@ -1545,7 +1581,7 @@
       }
       if (document.activeElement !== fsel) fsel.value = want || '';
     }
-    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWords', 'set-customWordsOnly', 'set-fixedDrawer', 'set-profanityFilter', 'set-streamerMode'].forEach(function (id) {
+    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWords', 'set-customWordsOnly', 'set-fixedDrawer'].forEach(function (id) {
       var n = $(id); if (n) n.disabled = !editable;
     });
     var btn = $('btn-start'), hint = $('start-hint');
@@ -1680,16 +1716,23 @@
   // Chat
   // ------------------------------------------------------------------
   /** 채팅 한 줄: 닉네임(위) · 내용(아래). 닉네임이 길어도 내용 폭이 줄지 않는다 */
-  function msgBody(name, text) {
+  function msgBody(name, text, safe) {
     var b = el('div', 'msg-body');
     if (name) b.appendChild(el('span', 'msg-name', String(name)));
-    b.appendChild(el('span', 'msg-text', text));
+    b.appendChild(msgText(text, safe));
     return b;
+  }
+  /** 본문 span. safe(가린 판)가 있으면 설정에 따라 고르고, 나중에 설정이 바뀌면 바꿔 끼울 수 있게 둘 다 붙여 둔다 */
+  function msgText(text, safe) {
+    var n = el('span', 'msg-text', safe && prefs.profanityFilter ? safe : text);
+    if (safe) { n.setAttribute('data-raw', text); n.setAttribute('data-safe', safe); }
+    return n;
   }
   function appendChat(m) {
     var list = $('chat-list'); if (!list) return;
     var kind = typeof m.kind === 'string' ? m.kind : 'chat';
     var text = m.text == null ? '' : String(m.text);
+    var safe = typeof m.textSafe === 'string' && m.textSafe !== text ? m.textSafe : null; // 서버가 욕설을 가린 판
     var atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     var node;
     if (kind === 'system') {
@@ -1700,22 +1743,22 @@
       node = el('div', 'msg msg-correct'); node.appendChild(el('span', 'msg-icon', '🎉')); node.appendChild(el('span', 'msg-text', text));
       SFX.play(m.id === myId ? 'correctSelf' : 'correctOther');
     } else if (kind === 'close') {
-      node = el('div', 'msg msg-close'); node.appendChild(el('span', 'msg-icon', '🔥')); node.appendChild(el('span', 'msg-text', text)); node.appendChild(el('span', 'msg-note', '거의 맞았어요!'));
+      node = el('div', 'msg msg-close'); node.appendChild(el('span', 'msg-icon', '🔥')); node.appendChild(msgText(text, safe)); node.appendChild(el('span', 'msg-note', '거의 맞았어요!'));
       SFX.play('close');
     }
     else if (kind === 'guessed-chat') {
       node = el('div', 'msg msg-guessed'); node.appendChild(el('span', 'msg-icon', '🔒'));
-      node.appendChild(msgBody(m.name, text));
+      node.appendChild(msgBody(m.name, text, safe));
     } else {
       node = el('div', 'msg msg-chat' + (m.id && m.id === myId ? ' msg-mine' : ''));
       node.appendChild(avatarNode(m.avatar));
-      node.appendChild(msgBody(m.name, text));
+      node.appendChild(msgBody(m.name, text, safe));
     }
     list.appendChild(node);
     while (list.children.length > 300) list.removeChild(list.firstChild);
     if (atBottom) list.scrollTop = list.scrollHeight;
     // 모바일 요약(티커 · 말풍선 · 접힌 채팅 바)용 최근 메시지
-    ui.recentChat.push({ kind: kind, name: m.name ? String(m.name) : '', text: text, mine: !!(m.id && m.id === myId) });
+    ui.recentChat.push({ kind: kind, name: m.name ? String(m.name) : '', text: safe && prefs.profanityFilter ? safe : text, raw: text, safe: safe, mine: !!(m.id && m.id === myId) });
     while (ui.recentChat.length > 3) ui.recentChat.shift();
     renderChatPeek(true);
   }
@@ -2389,8 +2432,6 @@
     if (g('set-hintEndAt')) s.hintEndAt = clamp(num(g('set-hintEndAt').value, 15), 5, 60);
     if (g('set-customWords')) s.customWords = String(g('set-customWords').value || '').slice(0, 2000);
     if (g('set-customWordsOnly')) s.customWordsOnly = !!g('set-customWordsOnly').checked;
-    if (g('set-profanityFilter')) s.profanityFilter = !!g('set-profanityFilter').checked;
-    if (g('set-streamerMode')) s.streamerMode = !!g('set-streamerMode').checked;
     if (s.mode === 'fixed' && g('set-fixedDrawer') && g('set-fixedDrawer').value) s.fixedDrawerId = g('set-fixedDrawer').value;
     return s;
   }
@@ -2410,7 +2451,7 @@
     fillSelect('set-hints', range(0, 5), function (v) { return v === 0 ? '없음' : v + '회'; });
     fillSelect('set-hintEndAt', [5, 10, 15, 20, 30, 45, 60], function (v) { return '종료 ' + v + '초 전'; });
 
-    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWordsOnly', 'set-fixedDrawer', 'set-profanityFilter', 'set-streamerMode'].forEach(function (id) {
+    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWordsOnly', 'set-fixedDrawer'].forEach(function (id) {
       var n = $(id); if (n) n.addEventListener('change', sendSettings);
     });
     document.querySelectorAll('#mode-panel .mode-card').forEach(function (b) {
@@ -2471,6 +2512,10 @@
     window.addEventListener('beforeunload', function () { closeWordWindow(); });
     var bl = $('btn-leave'); if (bl) bl.addEventListener('click', function () { resetToLanding(true); });
     var bs = $('btn-sound'); if (bs) { renderSoundButton(bs); bs.addEventListener('click', function () { SFX.toggle(); renderSoundButton(bs); }); }
+    document.querySelectorAll('.pref-switch').forEach(function (b) {
+      b.addEventListener('click', function () { setPref(b.getAttribute('data-pref'), b.getAttribute('aria-checked') !== 'true'); });
+    });
+    renderPrefSwitches();
     var go = $('btn-gallery-open'); if (go) go.addEventListener('click', openGallery);
     var rd = $('btn-results-done'); if (rd) rd.addEventListener('click', function () {
       ui.resultsPending = false; ui.ranking = null; emit('results:done'); renderAll();

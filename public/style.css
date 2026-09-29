@@ -1162,6 +1162,11 @@ img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cove
 .wordset-quick { display: flex; gap: 8px; align-items: center; flex: 1 1 100%; min-width: 0; }
 .wordset-quick input { flex: 1 1 auto; min-width: 0; padding: 8px 10px; font-size: 13px; }
 
+/* 내 정보 › 개인 설정(욕설 가리기 · 방송 모드) */
+.me-prefs { display: flex; flex-direction: column; gap: 12px; }
+.me-prefs .rs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.me-prefs .rs-label { display: flex; flex-direction: column; gap: 2px; font-size: 14px; font-weight: 800; min-width: 0; }
+.me-prefs .rs-label small { font-size: 12px; font-weight: 500; color: var(--muted); }
 /* ---------- 내 정보(/me): 랜딩 카드를 넓혀 쓴다 ---------- */
 .landing-card.is-wide { max-width: 680px; }
 .landing-card.is-wide .logo { display: none; }

@@ -962,6 +962,21 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await sm.click('.room-code-chip');
     await sleep(100);
     check((await txt(sm, '#room-code')) === 'MOCK', '방송 모드: 칩을 누르면 방 코드 4초 표시');
+    // 욕설 가리기(내 설정): 서버가 준 textSafe 를 보여 주다가, 설정 창에서 끄면 이미 그려진 말풍선도 바로 원문으로
+    await sm.evaluate(() => window.__mockFire('chat:message', { id: 'p3', name: '여우', avatar: { emoji: '🦊', color: '#ffdfba' }, text: '아 씨발 뭐야', textSafe: '아 ** 뭐야', kind: 'chat' }));
+    await sleep(150);
+    check((await sm.locator('#chat-list .msg-text').last().textContent()) === '아 ** 뭐야', '욕설 가리기 켜짐: 가린 판 표시');
+    await sm.click('#btn-room-profile');
+    await sm.waitForSelector('#room-settings-top:not([hidden])', { timeout: 3000 });
+    await sm.click('#room-settings-top .pref-switch[data-pref="profanityFilter"]');
+    await sleep(150);
+    check((await sm.locator('#chat-list .msg-text').last().textContent()) === '아 씨발 뭐야' && (await sm.getAttribute('#room-settings-top .pref-switch[data-pref="profanityFilter"]', 'aria-checked')) === 'false', '설정 창에서 끄면 이미 그려진 말풍선도 바로 원문');
+    await sm.click('#room-settings-top .pref-switch[data-pref="profanityFilter"]');
+    await sleep(150);
+    check((await sm.locator('#chat-list .msg-text').last().textContent()) === '아 ** 뭐야', '다시 켜면 바로 가림');
+    check((await sm.evaluate(() => document.querySelectorAll('#landing-step-me .pref-switch').length)) === 2, '내 정보 화면에도 같은 스위치 2개');
+    await sm.click('#btn-room-profile-close');
+    await sleep(200);
     // 단어 창(팝업): 열면 메인 화면에서 단어가 사라지고 팝업에 뜬다. 다음 턴 후보도 팝업에서 고른다
     const [pop] = await Promise.all([sm.waitForEvent('popup'), sm.click('#btn-word-window')]);
     await pop.waitForSelector('.word', { timeout: 5000 });
@@ -975,7 +990,16 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await pop.click('.opt >> nth=1');
     await sleep(300);
     check((await sm.evaluate(() => window.__dg.ui.chosenWord)) === '우산' && (await pop.locator('.opt.chosen').textContent()) === '우산', '팝업에서 고르면 게임 창이 word:choose 전송');
+    // 고르는 중에 팝업을 닫으면 메인 화면에 "단어 창 열기"·흐린 후보가 다시 나온다
+    await sm.evaluate(() => window.__mockFire('game:choosing', { drawerId: window.__dg.myId(), drawerName: '나', timeLeft: 15, wordOptions: ['기차', '수박', '안경'] }));
+    await pop.waitForSelector('.opt:not(:disabled)', { timeout: 5000 });
     await pop.close();
+    await sleep(900);
+    check(await sm.locator('#btn-choose-window').isVisible() && await sm.locator('#btn-peek-options').isVisible() && await sm.locator('#choosing-window-hint').isHidden() && await sm.locator('#word-options').isVisible() && await sm.locator('#word-options').evaluate((o) => o.classList.contains('blurred')), '고르는 중 팝업을 닫으면 "단어 창 열기"·"여기서 보기"·흐린 후보 복귀');
+    const [pop2] = await Promise.all([sm.waitForEvent('popup'), sm.click('#btn-choose-window')]);
+    await pop2.waitForSelector('.opt', { timeout: 5000 });
+    check((await pop2.locator('.opt').count()) === 3 && await sm.locator('#choosing-window-hint').isVisible(), '다시 열면 새 팝업에 후보가 뜨고 메인은 다시 숨김');
+    await pop2.close();
     await sm.context().close();
     // 가득 찬 방: 초대 링크로 들어온 사람은 카드 안에 안내가 남는다(토스트 대신)
     const fl = await newPage(browser, '가득참');

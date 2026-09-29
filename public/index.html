@@ -164,6 +164,17 @@
             <button id="btn-mp-profile" class="btn btn-ghost btn-sm" type="button">프로필 수정</button>
           </div>
         </div>
+        <!-- 개인 설정(이 기기) — 방 안 설정 창(⚙)과 같은 값 -->
+        <div class="me-card me-prefs" aria-label="설정">
+          <div class="rs-row">
+            <span class="rs-label">욕설 가리기<small>채팅의 욕설을 ***로 (내 화면만)</small></span>
+            <button class="switch pref-switch" type="button" role="switch" aria-checked="true" data-pref="profanityFilter" aria-label="욕설 가리기"><span class="switch-knob" aria-hidden="true"></span></button>
+          </div>
+          <div class="rs-row">
+            <span class="rs-label">방송 모드<small>방 코드·주소를 가리고 내 단어는 별도 창에서 (내 화면만)</small></span>
+            <button class="switch pref-switch" type="button" role="switch" aria-checked="false" data-pref="streamerMode" aria-label="방송 모드"><span class="switch-knob" aria-hidden="true"></span></button>
+          </div>
+        </div>
         <div class="seg me-tabs" role="tablist" aria-label="내 정보 메뉴">
           <button id="tab-sets" class="seg-btn" type="button" role="tab" aria-selected="true" aria-controls="me-panel-sets" data-tab="sets">단어 세트</button>
           <button id="tab-gallery" class="seg-btn" type="button" role="tab" aria-selected="false" aria-controls="me-panel-gallery" data-tab="gallery">그림</button>
@@ -243,7 +254,7 @@
         <div id="timer" class="timer" aria-label="남은 시간">–</div>
         <button id="btn-end-game" class="btn btn-ghost btn-sm btn-ico btn-ico-danger" type="button" aria-label="게임 끝내기" title="게임 끝내기(방장)" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg><span class="btn-label">게임 끝내기</span></button>
         <button id="btn-account-top" class="btn btn-ghost btn-sm btn-ico" type="button" aria-label="내 정보" title="내 정보" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.6-1.4 1.7-2 3-2s2.4.6 3 2"/><path d="M14.5 10h4M14.5 14h4"/></svg><span class="btn-label">내 정보</span></button>
-        <button id="btn-room-profile" class="btn btn-ghost btn-sm btn-ico" type="button" aria-label="설정" title="설정(효과음 · 프로필)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="btn-label">설정</span></button>
+        <button id="btn-room-profile" class="btn btn-ghost btn-sm btn-ico" type="button" aria-label="설정" title="설정(효과음 · 욕설 가리기 · 방송 모드 · 프로필)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="btn-label">설정</span></button>
         <button id="btn-leave" class="btn btn-ghost btn-sm btn-ico" type="button" aria-label="나가기" title="방 나가기"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/></svg><span class="btn-label">나가기</span></button>
         <!-- 모바일 전용: 방 코드·초대·효과음·나가기를 담는 메뉴 시트를 연다 (CSS 로 데스크톱에서는 숨김) -->
         <button id="btn-menu" class="btn btn-ghost btn-sm btn-icon btn-menu" type="button" aria-label="방 메뉴" aria-haspopup="dialog" aria-controls="sheet-menu">⋯</button>
@@ -370,14 +381,6 @@
                   <span>마지막 힌트 시점</span>
                   <select id="set-hintEndAt"></select>
                   <small class="setting-help">마지막 힌트를 끝나기 몇 초 전에 줄지</small>
-                </label>
-                <label class="check setting-wide">
-                  <input id="set-profanityFilter" type="checkbox" checked>
-                  <span>욕설 가리기 <small>채팅의 욕설을 ***로 바꿔요 (닉네임은 항상 검사)</small></span>
-                </label>
-                <label class="check setting-wide">
-                  <input id="set-streamerMode" type="checkbox">
-                  <span>방송 모드 <small>방 코드·주소를 가리고, 출제자 단어는 별도 "단어 창"에서만 보여요</small></span>
                 </label>
               </div>
             </details>
@@ -601,6 +604,14 @@
     <div class="rs-row">
       <span class="rs-label">효과음<small id="sound-state">켜짐</small></span>
       <button id="btn-sound" class="switch" type="button" role="switch" aria-checked="true" aria-label="효과음"><span class="switch-knob" aria-hidden="true"></span></button>
+    </div>
+    <div class="rs-row">
+      <span class="rs-label">욕설 가리기<small>채팅의 욕설을 ***로 (내 화면만)</small></span>
+      <button class="switch pref-switch" type="button" role="switch" aria-checked="true" data-pref="profanityFilter" aria-label="욕설 가리기"><span class="switch-knob" aria-hidden="true"></span></button>
+    </div>
+    <div class="rs-row">
+      <span class="rs-label">방송 모드<small>방 코드·주소·내 단어를 가려요 (내 화면만)</small></span>
+      <button class="switch pref-switch" type="button" role="switch" aria-checked="false" data-pref="streamerMode" aria-label="방송 모드"><span class="switch-knob" aria-hidden="true"></span></button>
     </div>
     <div class="rs-section-title">프로필</div>
     <p id="room-profile-locked" class="rs-note" hidden>닉네임과 아바타는 대기실에서 바꿀 수 있어요.</p>

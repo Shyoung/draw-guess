@@ -1,8 +1,8 @@
 /**
  * 욕설 필터
  *  - 단위: maskProfanity / containsProfanity — 우회(기호·대문자) 잡기, 보통 말은 안 건드리기
- *  - 소켓: 닉네임 거절(create·join·player:update) · 채팅 가림(chat · close · guessed-chat, 보낸 사람 포함)
- *          · 정답은 원문으로 판정 · 방장이 끄면 그대로
+ *  - 소켓: 닉네임 거절(create·join·player:update) · 채팅은 원문 text + 가린 판 textSafe(chat · guessed-chat, 보낸 사람 포함)
+ *          · 정답·근접은 원문으로 판정 · 욕설 없으면 textSafe 없음 · 방 설정에 개인 설정 키 없음
  *  node test/profanity.js
  */
 'use strict';
@@ -92,14 +92,14 @@ const chats = (c) => c.log.filter((x) => x.ev === 'chat:message').map((x) => x.p
   check('닉네임 욕설: player:update 거절', badUpd.ok === false && /닉네임/.test(badUpd.error), badUpd);
   await sleep(200);
   const st = c3.log.filter((x) => x.ev === 'room:state').pop().payload;
-  check('기본 설정 profanityFilter=true', st.settings.profanityFilter === true, st.settings);
+  check('room:state 설정에 개인 설정(profanityFilter/streamerMode)은 없다', !('profanityFilter' in st.settings) && !('streamerMode' in st.settings), st.settings);
 
   // 대기실 채팅: 모두에게(보낸 사람 포함) 가려서
   const p1 = waitNext(c1, 'chat:message', (x) => x.kind === 'chat' && x.id === c2.playerId, 3000, 'self');
   const p3 = waitNext(c3, 'chat:message', (x) => x.kind === 'chat' && x.id === c2.playerId, 3000, 'other');
   c2.emit('chat:message', { text: '아 씨발 왜 안 돼' });
   const [s1, s3] = await Promise.all([p1, p3]);
-  check('대기실 채팅: 욕설이 *** 로(보낸 사람 화면 포함)', s1.text === '아 ** 왜 안 돼' && s3.text === '아 ** 왜 안 돼', [s1.text, s3.text]);
+  check('대기실 채팅: text 원문 + textSafe 가린 판(보낸 사람 포함)', s1.text === '아 씨발 왜 안 돼' && s1.textSafe === '아 ** 왜 안 돼' && s3.text === '아 씨발 왜 안 돼' && s3.textSafe === '아 ** 왜 안 돼', [s1, s3]);
 
   // 게임 중: 정답에 욕이 섞여도 판정은 원문, 근접(close)·정답자 채팅도 가림
   c1.emit('room:settings', { settings: { mode: 'classic', rounds: 1, drawTime: 40, hints: 0, wordCount: 2, customWords: '해바라기,냉장고,자전거,고슴도치', customWordsOnly: true } });
@@ -115,7 +115,7 @@ const chats = (c) => c.log.filter((x) => x.ev === 'chat:message').map((x) => x.p
   const wrongP = waitNext(c3, 'chat:message', (x) => x.kind === 'chat' && x.id === c2.playerId, 3000, 'wrong guess');
   c2.emit('chat:message', { text: '병신 ' + word + '아니지' });
   const wrong = await wrongP;
-  check('게임 중 오답 채팅: 욕설만 가리고 나머지 그대로', wrong.text === '** ' + word + '아니지', wrong.text);
+  check('게임 중 오답 채팅: textSafe 는 욕설만 가림', wrong.text === '병신 ' + word + '아니지' && wrong.textSafe === '** ' + word + '아니지', wrong);
   const corrP = waitNext(c3, 'chat:message', (x) => x.kind === 'correct' && x.id === c2.playerId, 3000, 'correct');
   c2.emit('chat:message', { text: word });
   await corrP;
@@ -123,7 +123,7 @@ const chats = (c) => c.log.filter((x) => x.ev === 'chat:message').map((x) => x.p
   const gcP = waitNext(c1, 'chat:message', (x) => x.kind === 'guessed-chat' && x.id === c2.playerId, 3000, 'guessed-chat');
   c2.emit('chat:message', { text: '존나 쉽네 ㅋㅋ' });
   const gc = await gcP;
-  check('정답자 전용 채팅도 가림', gc.text === '** 쉽네 ㅋㅋ', gc.text);
+  check('정답자 전용 채팅도 textSafe', gc.text === '존나 쉽네 ㅋㅋ' && gc.textSafe === '** 쉽네 ㅋㅋ', gc);
   const c3sees = chats(c3).some((x) => x.kind === 'guessed-chat');
   check('정답자 채팅은 못 맞힌 사람에게 안 감(기존 동작 유지)', !c3sees);
   // 근접(close): 정답 3글자 이상 + 편집거리 1 → 보낸 사람에게 close 로, 욕은 가림
@@ -131,21 +131,20 @@ const chats = (c) => c.log.filter((x) => x.ev === 'chat:message').map((x) => x.p
   const closeP = waitNext(c3, 'chat:message', (x) => x.kind === 'close', 3000, 'close');
   c3.emit('chat:message', { text: near });
   const cl = await closeP;
-  check('근접 판정은 원문 기준(가리기와 무관)', cl.text === near, cl.text);
+  check('근접 판정은 원문 기준 · 욕설 없으면 textSafe 없음', cl.text === near && !('textSafe' in cl), cl);
 
-  // 방장이 끄면 그대로
+  // 욕설 없는 채팅에는 textSafe 가 붙지 않는다 · 옛 설정 키를 보내도 방 설정에 안 생긴다
   c1.emit('game:end'); await sleep(300);
-  const offP = waitNext(c3, 'room:state', (x) => x.settings.profanityFilter === false, 3000, 'filter off');
-  c1.emit('room:settings', { settings: { profanityFilter: false } });
-  await offP;
-  const rawP = waitNext(c3, 'chat:message', (x) => x.kind === 'chat' && x.id === c2.playerId, 3000, 'raw');
-  c2.emit('chat:message', { text: '아 씨발 왜 안 돼' });
-  check('방장이 끄면 채팅 그대로', (await rawP).text === '아 씨발 왜 안 돼');
+  const cleanP = waitNext(c3, 'chat:message', (x) => x.kind === 'chat' && x.id === c2.playerId, 3000, 'clean');
+  c2.emit('chat:message', { text: '다시 발로 차자' });
+  const clean = await cleanP;
+  check('보통 말: textSafe 없음', clean.text === '다시 발로 차자' && !('textSafe' in clean), clean);
+  const stP = waitNext(c3, 'room:state', (x) => x.settings.rounds === 2, 3000, 'settings');
+  c1.emit('room:settings', { settings: { rounds: 2, profanityFilter: false, streamerMode: true } });
+  const st2 = await stP;
+  check('옛 방 설정 키(profanityFilter/streamerMode)는 무시', !('profanityFilter' in st2.settings) && !('streamerMode' in st2.settings), st2.settings);
   const badUpd2 = await emitAck(c2, 'player:update', { name: '병신', avatar: {} });
-  check('꺼도 닉네임 검사는 항상', badUpd2.ok === false, badUpd2);
-  const nonHost = waitNext(c2, 'error:msg', undefined, 3000, 'non-host settings');
-  c2.emit('room:settings', { settings: { profanityFilter: true } });
-  check('비방장은 설정 못 바꿈', typeof (await nonHost).message === 'string');
+  check('닉네임 검사는 항상', badUpd2.ok === false, badUpd2);
 
   cleanup(failures ? 1 : 0);
 })().catch((err) => {
