@@ -425,6 +425,14 @@ for (const [name, list] of Object.entries(CATEGORIES)) {
   }
 }
 const ko = dedupe(KO_RAW);
+const CATEGORY_NAMES = Object.keys(CATEGORIES);
+
+/** 기본 단어 풀: settings.categories(카테고리 이름 배열). 비었거나 아는 이름이 하나도 없으면 전체(ko) */
+function baseWords(categories) {
+  const names = Array.isArray(categories) ? categories.filter((n) => Object.prototype.hasOwnProperty.call(CATEGORIES, n)) : [];
+  if (!names.length) return ko;
+  return dedupe([].concat(...names.map((n) => CATEGORIES[n])));
+}
 
 /** 단어의 카테고리 이름. 사전에 없는 단어(사용자 단어)는 null */
 function categoryOf(word) {
@@ -475,7 +483,7 @@ function pickWords(settings, exclude, count) {
   if (s.customWordsOnly && custom.length >= n) {
     pool = custom;
   } else {
-    pool = dedupe(ko.concat(custom));
+    pool = dedupe(baseWords(s.categories).concat(custom));
   }
 
   const unused = shuffle(pool.filter((w) => !ex.has(w)));
@@ -484,4 +492,4 @@ function pickWords(settings, exclude, count) {
   return unused.concat(used).slice(0, n);
 }
 
-module.exports = { ko, CATEGORIES, categoryOf, parseCustomWords, pickWords, shuffle, dedupe };
+module.exports = { ko, CATEGORIES, CATEGORY_NAMES, baseWords, categoryOf, parseCustomWords, pickWords, shuffle, dedupe };

@@ -133,6 +133,18 @@ async function say(page, text) {
     await host.click('#preset-row .preset-btn[data-preset="short"]');
     await p2.waitForFunction(() => window.__dg.state.settings.rounds === 2 && window.__dg.state.settings.drawTime === 60 && window.__dg.state.settings.hints === 1, null, { timeout: 3000 }).catch(() => {});
     check(await p2.evaluate(() => { const s = window.__dg.state.settings; return s.rounds === 2 && s.drawTime === 60 && s.hints === 1; }) && (await p2.textContent('#settings-summary')).includes('짧게'), '짧게: 2라운드 · 60초 · 힌트 1 동기화 · 요약 갱신', await p2.textContent('#settings-summary'));
+    // 기본 단어 카테고리: 처음엔 "전체", 하나 누르면 그것만 · 요약에 표시 · "전체"로 복귀
+    check((await host.locator('#cat-row .cat-chip').count()) === 14 && (await host.getAttribute('#cat-row .cat-chip[data-cat="*"]', 'aria-pressed')) === 'true' && (await host.textContent('#cat-note')).includes('전체'), '기본 단어 카테고리: 칩 13개 + "전체", 처음엔 전체');
+    await host.click('#cat-row .cat-chip[data-cat="동물"]');
+    await p2.waitForFunction(() => JSON.stringify(window.__dg.state.settings.categories) === '["동물"]', null, { timeout: 3000 }).catch(() => {});
+    check(await p2.evaluate(() => JSON.stringify(window.__dg.state.settings.categories) === '["동물"]') && (await p2.textContent('#settings-summary')).includes('동물') && (await host.getAttribute('#cat-row .cat-chip[data-cat="동물"]', 'aria-pressed')) === 'true' && (await host.getAttribute('#cat-row .cat-chip[data-cat="*"]', 'aria-pressed')) === 'false', '카테고리 "동물"만 고름 → 동기화 · 요약에 표시', await p2.textContent('#settings-summary'));
+    await host.screenshot({ path: path.join(SHOTS, 'e2e-settings-categories.png') });
+    await host.click('#cat-row .cat-chip[data-cat="동물"]');
+    await sleep(300);
+    check(await host.evaluate(() => JSON.stringify(window.__dg.state.settings.categories) === '["동물"]'), '마지막 하나는 못 끔(전체는 "전체" 버튼으로)');
+    await host.click('#cat-row .cat-chip[data-cat="*"]');
+    await p2.waitForFunction(() => window.__dg.state.settings.categories.length === 0, null, { timeout: 3000 }).catch(() => {});
+    check(await p2.evaluate(() => window.__dg.state.settings.categories.length === 0) && !(await p2.textContent('#settings-summary')).includes('동물'), '"전체" → categories [] 동기화 · 요약에서 사라짐');
     // 설정 변경 → 다른 클라이언트에 반영
     await host.click('#settings-details > summary');
     await host.selectOption('#set-rounds', '1');

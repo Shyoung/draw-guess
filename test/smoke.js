@@ -232,7 +232,7 @@ async function main() {
     st3,
   );
   check('room:state: name trimmed, avatar color normalized/defaulted', st3.players[0].name === '호스트' && st3.players[0].avatar.color === '#ff0000' && /^#[0-9a-f]{6}$/.test(st3.players[2].avatar.color));
-  check('room:state: default settings', JSON.stringify(st3.settings) === JSON.stringify({ rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null }), st3.settings);
+  check('room:state: default settings', JSON.stringify(st3.settings) === JSON.stringify({ rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, categories: [], mode: 'classic', fixedDrawerId: null }), st3.settings);
 
   const dj = await emitAck(c3, 'room:join', { roomCode: code, name: 'dup', avatar: {} });
   check('double join of same room rejected', dj && dj.ok === false, dj);
@@ -243,13 +243,24 @@ async function main() {
   check('non-host room:settings → error:msg', typeof (await errNonHost).message === 'string');
 
   const clampP = waitFor(c1, 'room:state', (s) => s.settings.drawTime === 180);
-  c1.emit('room:settings', { settings: { rounds: 0, drawTime: 999, wordCount: 9, hints: -3, language: 'xx', customWordsOnly: 1 } });
+  c1.emit('room:settings', { settings: { rounds: 0, drawTime: 999, wordCount: 9, hints: -3, language: 'xx', customWordsOnly: 1, categories: ['음식', '없는카테고리', '동물', '음식', 7] } });
   const cl = (await clampP).settings;
   check(
     'settings clamped (rounds 1, drawTime 180, wordCount 5, hints 0, unknown key ignored, customWordsOnly bool)',
     cl.rounds === 1 && cl.drawTime === 180 && cl.wordCount === 5 && cl.hints === 0 && cl.language === undefined && cl.customWordsOnly === true,
     cl,
   );
+  check('settings.categories: 아는 이름만 사전 순서로, 중복 제거', JSON.stringify(cl.categories) === JSON.stringify(['동물', '음식']), cl.categories);
+  const allCatP = waitFor(c1, 'room:state', (s) => Array.isArray(s.settings.categories) && s.settings.categories.length === 0);
+  c1.emit('room:settings', { settings: { categories: words.CATEGORY_NAMES.slice() } });
+  await allCatP;
+  check('settings.categories: 전부 고르면 [](전체)로 정규화', true);
+  // pickWords 단위 검사: 고른 카테고리의 단어만, 모르는 이름뿐이면 전체, 사용자 단어는 섞인다
+  const onlyAnimals = words.pickWords({ categories: ['동물'] }, new Set(), 30);
+  check('pickWords: categories=[동물] → 30개 모두 동물', onlyAnimals.length === 30 && onlyAnimals.every((w) => words.categoryOf(w) === '동물'), onlyAnimals.filter((w) => words.categoryOf(w) !== '동물'));
+  check('pickWords: 모르는 카테고리만 → 전체 풀', words.baseWords(['없음']) === words.ko && words.baseWords([]) === words.ko && words.baseWords(['동물', '음식']).length === words.CATEGORIES['동물'].length + words.CATEGORIES['음식'].length);
+  const mixed = words.pickWords({ categories: ['악기'], customWords: '우리집강아지' }, new Set(), 200);
+  check('pickWords: 카테고리 + 사용자 단어 섞임', mixed.includes('우리집강아지') && mixed.filter((w) => w !== '우리집강아지').every((w) => words.categoryOf(w) === '악기'));
 
   const setP = waitFor(c1, 'room:state', (s) => s.settings.drawTime === 30 && s.settings.hints === 1 && s.settings.customWordsOnly === true);
   c1.emit('room:settings', { settings: { rounds: 1, drawTime: 30, hints: 1, wordCount: 3, customWords: '자전거,냉장고,해바라기,고슴도치,아이스크림,선풍기,소방차,다람쥐,무지개,피라미드,헬리콥터,미끄럼틀', customWordsOnly: true } });

@@ -19,7 +19,9 @@
   ];
   var SIZES = [4, 10, 20, 36];
   var SFX = window.SFX || { play: function () {}, isMuted: function () { return true; }, setMuted: function () {}, toggle: function () { return true; } };
-  var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null };
+  var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, categories: [], mode: 'classic', fixedDrawerId: null };
+  // 기본 단어 카테고리 이름(server/words.js CATEGORIES 와 같은 순서). settings.categories 가 비어 있으면 전체
+  var CATEGORY_NAMES = ['동물', '음식', '탈것', '옷·장신구', '악기', '스포츠·운동', '사물', '장소·자연', '나라·도시·랜드마크', '직업·사람·캐릭터', '행동·놀이·행사', '신체·건강', '브랜드·캐릭터'];
   var REASON_TEXT = { time: '시간 종료!', allGuessed: '모두 맞혔어요!', drawerLeft: '출제자가 나갔어요', notEnoughPlayers: '플레이어가 부족해요' };
   var STORAGE_KEY = 'drawguess.profile';
   var TOKEN_KEY = 'drawguess.token';      // 재접속용 토큰(브라우저별 1개)
@@ -1560,6 +1562,8 @@
         var chips = [[preset ? PRESET_NAMES[preset] : '직접 설정', 'sum-main'], [fixed ? s.rounds + '문제' : s.rounds + '라운드'], ['한 턴 ' + s.drawTime + '초'],
           [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']];
         var cwList = cw ? parseWords(s.customWords || '').words : [];
+        var sumCats = Array.isArray(s.categories) ? s.categories : [];
+        if (sumCats.length && !(s.customWordsOnly && cwList.length)) chips.push([sumCats.length <= 3 ? sumCats.join(' · ') : '카테고리 ' + sumCats.length + '개']);
         var skey = JSON.stringify([chips, cwList, !!s.customWordsOnly]);
         if (sum.getAttribute('data-key') !== skey) {
           sum.setAttribute('data-key', skey); sum.innerHTML = '';
@@ -1581,6 +1585,17 @@
     var hasWords = !!String(s.customWords || '').trim();
     if (uc) { if (!ui.customOpen && hasWords) ui.customOpen = true; uc.checked = !!ui.customOpen; uc.disabled = !editable; }
     if (cb0) cb0.hidden = !ui.customOpen;
+    // 기본 단어 카테고리 칩. 우리 단어만 쓰면 기본 단어가 안 나오므로 숨긴다
+    var cats = Array.isArray(s.categories) ? s.categories : [], catBlock = $('cat-block');
+    if (catBlock) {
+      catBlock.hidden = !!(s.customWordsOnly && hasWords);
+      var cn = $('cat-note'); if (cn) cn.textContent = cats.length ? cats.length + '개 골라서 출제' : '전체 ' + CATEGORY_NAMES.length + '개';
+      document.querySelectorAll('#cat-row .cat-chip').forEach(function (b) {
+        var k = b.getAttribute('data-cat');
+        b.setAttribute('aria-pressed', (k === '*' ? !cats.length : cats.indexOf(k) !== -1) ? 'true' : 'false');
+        b.disabled = !editable;
+      });
+    }
     var rh = $('set-rounds-help'); if (rh) rh.textContent = fixed ? '출제자가 그릴 단어 개수' : '모두가 한 번씩 그리면 1라운드';
     var badge = $('mode-badge'); if (badge) badge.textContent = MODE_NAMES[s.mode] || s.mode;
     var back = $('btn-mode-back'); if (back) back.hidden = !isHost();
@@ -2494,6 +2509,28 @@
     });
     var cw = $('set-customWords');
     if (cw) { cw.addEventListener('input', sendSettingsDebounced); cw.addEventListener('blur', sendSettings); }
+    // 기본 단어 카테고리 칩: "전체"(=아무것도 안 고름) + 카테고리별 토글. 전체 상태에서 하나를 누르면 그것만 고른다
+    var catRow = $('cat-row');
+    if (catRow) {
+      var mkChip = function (name, key) { var b = el('button', 'cat-chip', name); b.type = 'button'; b.setAttribute('data-cat', key); b.setAttribute('aria-pressed', 'false'); catRow.appendChild(b); };
+      mkChip('전체', '*'); CATEGORY_NAMES.forEach(function (n) { mkChip(n, n); });
+      catRow.addEventListener('click', function (ev) {
+        var b = ev.target && ev.target.closest ? ev.target.closest('.cat-chip') : null; if (!b || b.disabled) return;
+        if (!isHost() || state.phase !== 'lobby') return;
+        var k = b.getAttribute('data-cat'), cur = Array.isArray(state.settings.categories) ? state.settings.categories : [], next;
+        if (k === '*') next = [];
+        else if (cur.indexOf(k) !== -1) {
+          next = cur.filter(function (x) { return x !== k; });
+          if (!next.length) { toast('카테고리는 하나는 골라야 해요. 전부 쓰려면 "전체"를 눌러요'); return; }
+        } else {
+          next = CATEGORY_NAMES.filter(function (n) { return n === k || cur.indexOf(n) !== -1; });
+          if (next.length === CATEGORY_NAMES.length) next = [];
+        }
+        state.settings = Object.assign({}, state.settings, { categories: next });
+        emit('room:settings', { settings: state.settings });
+        renderAll();
+      });
+    }
     document.querySelectorAll('#preset-row .preset-btn').forEach(function (b) {
       b.addEventListener('click', function () {
         if (!isHost() || state.phase !== 'lobby') return;

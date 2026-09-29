@@ -8,7 +8,7 @@
  *  - word / wordOptions 는 출제자에게만 보낸다
  */
 
-const { pickWords, categoryOf } = require('./words');
+const { pickWords, categoryOf, CATEGORY_NAMES } = require('./words');
 
 // ── 상수 ────────────────────────────────────────────────────────
 const CANVAS_W = 800;
@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   hintEndAt: 15, // 마지막 힌트가 뜨는 시점(종료 N초 전), 5..60
   customWords: '',
   customWordsOnly: false,
+  categories: [],       // 기본 단어 카테고리 이름 배열(words.CATEGORY_NAMES). 빈 배열 = 전체
   mode: 'classic',      // 'classic' 돌아가며 그리기 | 'fixed' 한 명이 계속 그리기(지정 출제자)
   fixedDrawerId: null,  // fixed 모드의 출제자. null 이면 호스트
 });
@@ -55,6 +56,13 @@ const LOBBY_STEPS = ['mode', 'settings'];
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 // ── 순수 헬퍼 ───────────────────────────────────────────────────
+
+/** 기본 단어 카테고리 선택: 아는 이름만 사전 순서대로, 중복 제거. 비었거나 전부 골랐으면 [](=전체) */
+function sanitizeCategories(v) {
+  const want = new Set(Array.isArray(v) ? v.filter((n) => typeof n === 'string') : []);
+  const names = CATEGORY_NAMES.filter((n) => want.has(n));
+  return names.length && names.length < CATEGORY_NAMES.length ? names : [];
+}
 
 /** 정수 clamp. 숫자가 아니면 fallback */
 function clampInt(v, min, max, fallback) {
@@ -843,6 +851,7 @@ class Room {
       s.customWords = raw.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').slice(0, MAX_CUSTOM_WORDS_LEN);
     }
     if ('customWordsOnly' in patch) s.customWordsOnly = Boolean(patch.customWordsOnly);
+    if ('categories' in patch) s.categories = sanitizeCategories(patch.categories);
     if ('mode' in patch && MODES.includes(patch.mode)) s.mode = patch.mode;
     if ('fixedDrawerId' in patch) {
       // 방에 있는 사람만 출제자로 지정 가능. 아니면 null(=호스트)
