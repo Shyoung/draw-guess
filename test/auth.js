@@ -947,10 +947,10 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await sm.waitForFunction(() => window.__dg && window.__dg.state.phase === 'choosing' && !document.getElementById('overlay-choosing').hidden, null, { timeout: 8000 });
     await sleep(300);
     check((await txt(sm, '#room-code')) === '••••' && !sm.url().includes('room='), '방송 모드: 방 코드 •••• · 주소에 room= 없음', sm.url());
-    check(await sm.locator('#btn-peek-options').isVisible() && await sm.locator('#word-options').evaluate((o) => o.classList.contains('blurred') && getComputedStyle(o.querySelector('.word-option')).filter.includes('blur')), '방송 모드: 단어 후보 흐림 + "후보 보기" 버튼');
+    check(await sm.locator('#btn-peek-options').isVisible() && await sm.locator('#btn-choose-window').isVisible() && await sm.locator('#word-options').evaluate((o) => o.classList.contains('blurred') && getComputedStyle(o.querySelector('.word-option')).filter.includes('blur')), '방송 모드: 단어 후보 흐림 + "단어 창 열기"·"여기서 보기" 버튼');
     await sm.click('#btn-peek-options');
     await sleep(100);
-    check(await sm.locator('#btn-peek-options').isHidden() && await sm.locator('#word-options').evaluate((o) => !o.classList.contains('blurred')), '"후보 보기" 누르면 후보가 보임');
+    check(await sm.locator('#btn-peek-options').isHidden() && await sm.locator('#word-options').evaluate((o) => !o.classList.contains('blurred')), '"여기서 보기" 누르면 후보가 보임');
     await sm.click('#word-options .word-option >> nth=0');
     await sm.waitForFunction(() => window.__dg.state.phase === 'drawing', null, { timeout: 5000 });
     await sleep(200);
@@ -962,6 +962,20 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await sm.click('.room-code-chip');
     await sleep(100);
     check((await txt(sm, '#room-code')) === 'MOCK', '방송 모드: 칩을 누르면 방 코드 4초 표시');
+    // 단어 창(팝업): 열면 메인 화면에서 단어가 사라지고 팝업에 뜬다. 다음 턴 후보도 팝업에서 고른다
+    const [pop] = await Promise.all([sm.waitForEvent('popup'), sm.click('#btn-word-window')]);
+    await pop.waitForSelector('.word', { timeout: 5000 });
+    const chosenWord = await sm.evaluate(() => window.__dg.ui.word);
+    check((await txt(pop, '.word')) === chosenWord && /단어 창/.test(await txt(pop, 'title')), '단어 창: 내 단어가 팝업에', await txt(pop, '.word'));
+    check((await sm.locator('#word-area .word-secret').count()) === 0 && (await txt(sm, '#word-area')).includes('단어 창') && !(await sm.locator('#word-area').textContent()).includes(chosenWord), '단어 창이 열리면 메인 화면에는 단어를 안 그림');
+    check(!pop.url().includes('room=') && !pop.url().includes('MOCK'), '단어 창 주소에 방 코드 없음', pop.url());
+    await sm.evaluate(() => window.__mockFire('game:choosing', { drawerId: window.__dg.myId(), drawerName: '나', timeLeft: 15, wordOptions: ['기린', '우산', '피아노'] }));
+    await pop.waitForSelector('.opt', { timeout: 5000 });
+    check((await pop.locator('.opt').count()) === 3 && await sm.locator('#word-options').isHidden() && await sm.locator('#choosing-window-hint').isVisible() && await sm.locator('#btn-peek-options').isHidden(), '내 차례: 후보는 팝업에만, 메인은 "단어 창에서 골라 주세요"');
+    await pop.click('.opt >> nth=1');
+    await sleep(300);
+    check((await sm.evaluate(() => window.__dg.ui.chosenWord)) === '우산' && (await pop.locator('.opt.chosen').textContent()) === '우산', '팝업에서 고르면 게임 창이 word:choose 전송');
+    await pop.close();
     await sm.context().close();
     // 가득 찬 방: 초대 링크로 들어온 사람은 카드 안에 안내가 남는다(토스트 대신)
     const fl = await newPage(browser, '가득참');

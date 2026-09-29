@@ -169,6 +169,7 @@
     wordMask: '', wordLength: 0, word: null, wordOptions: null, chosenWord: null, category: null,
     // 방송 모드: 방 코드 잠깐 보기 시각 · 내 단어/후보 보기 토글 · 주소 갱신용 이전 값
     codeRevealUntil: 0, wordPeek: false, optionsPeek: false, streamerWas: null,
+    wordWin: null, wordKey: '', wordChan: null, // 방송 모드 단어 창(팝업) — 방송 캡처 밖에서 후보·내 단어를 본다
     drawerName: '', timeLeft: null, turnEnd: null, ranking: null, optionsKey: '',
     gallery: null,      // 가장 최근 게임의 갤러리 [{ round, word, category, drawerName, guessed, ops }]
     galleryOpen: false,
@@ -1161,7 +1162,7 @@
     tickTimer = setTimeout(function () {
       tickTimer = null;
       if (ui.timeLeft == null || ui.timeLeft <= 0) return;
-      applyTimeLeft(ui.timeLeft - 1); renderTimers(); armLocalTick(1000);
+      applyTimeLeft(ui.timeLeft - 1); renderTimers(); pushWordState(); armLocalTick(1000);
     }, delay);
   }
   // 남은 시간이 실제로 바뀔 때만 갱신하고, choosing/drawing 중 5초 이하로 내려가면 째깍 소리를 낸다.
@@ -1196,6 +1197,7 @@
     placeMobileChrome();
     if (roomProfile.open && !roomProfile.formless && (!inRoom || state.phase !== 'lobby')) { closeRoomProfile(); if (inRoom) toast('게임이 시작돼 프로필 수정을 닫았어요'); }
     renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderResultsSave(); renderChatPeek(); renderAccount();
+    pushWordState();
     maybeReloadForUpdate();
   }
 
@@ -1207,12 +1209,62 @@
     ui.codeRevealUntil = Date.now() + 4000; renderTopbar();
     setTimeout(renderTopbar, 4100);
   }
+  // ---------- 방송 모드 단어 창: window.open + BroadcastChannel. 메인 화면에는 단어를 아예 그리지 않는다 ----------
+  function desktopStreamer() { return streamer() && !mobileMq.matches; }
+  function wordWindowOpen() { return !!(ui.wordWin && !ui.wordWin.closed); }
+  function wordWindowState() {
+    return {
+      type: 'state', inRoom: inRoom, streamer: streamer(), phase: state.phase, isDrawer: isDrawer(),
+      options: isDrawer() && state.phase === 'choosing' && ui.wordOptions ? ui.wordOptions.slice() : null,
+      chosen: ui.chosenWord || null, word: isDrawer() && state.phase === 'drawing' ? ui.word : null, category: ui.category || null,
+      answer: state.phase === 'turnEnd' && ui.turnEnd ? ui.turnEnd.word : null,
+      drawerName: playerName(state.drawerId, ui.drawerName || ''), timeLeft: ui.timeLeft,
+    };
+  }
+  function pushWordState() { if (ui.wordChan) { try { ui.wordChan.postMessage(wordWindowState()); } catch (e) { /* ignore */ } } }
+  function openWordWindow() {
+    if (wordWindowOpen()) { try { ui.wordWin.focus(); } catch (e) { /* ignore */ } return; }
+    var key = randomToken();
+    var win = null;
+    try { win = window.open('/word#' + key, 'dg-word', 'popup=yes,width=380,height=280'); } catch (e) { win = null; }
+    if (!win) { toast('팝업이 차단됐어요. 이 사이트의 팝업을 허용한 뒤 다시 눌러 주세요', 'error'); return; }
+    closeWordChannel();
+    ui.wordWin = win; ui.wordKey = key;
+    if (window.BroadcastChannel) {
+      ui.wordChan = new BroadcastChannel('drawguess-word-' + key);
+      ui.wordChan.onmessage = function (e) {
+        var m = e.data; if (!m || typeof m !== 'object') return;
+        if (m.type === 'hello') pushWordState();
+        else if (m.type === 'choose' && typeof m.word === 'string') chooseWord(m.word);
+      };
+    }
+    toast('단어 창을 열었어요. 방송 캡처 밖으로 옮겨 두세요', 'ok');
+    renderAll();
+  }
+  function closeWordChannel() { if (ui.wordChan) { try { ui.wordChan.close(); } catch (e) { /* ignore */ } ui.wordChan = null; } }
+  function closeWordWindow() {
+    if (ui.wordChan) { try { ui.wordChan.postMessage({ type: 'bye' }); } catch (e) { /* ignore */ } }
+    if (ui.wordWin && !ui.wordWin.closed) { try { ui.wordWin.close(); } catch (e) { /* ignore */ } }
+    ui.wordWin = null; ui.wordKey = ''; closeWordChannel();
+  }
+  /** 출제자가 단어를 고른다(메인 화면 버튼 · 단어 창 공용) */
+  function chooseWord(w) {
+    if (ui.chosenWord || !isDrawer() || state.phase !== 'choosing' || !ui.wordOptions || ui.wordOptions.indexOf(w) < 0) return;
+    ui.chosenWord = w; emit('word:choose', { word: w });
+    renderAll();
+  }
+  function wordWindowButton() {
+    var b = el('button', 'btn btn-sm ' + (wordWindowOpen() ? 'btn-ghost' : 'btn-secondary') + ' btn-word-window', wordWindowOpen() ? '단어 창 열림' : '단어 창 열기');
+    b.type = 'button'; b.id = 'btn-word-window'; b.title = '방송 캡처 밖에서 후보와 내 단어를 보는 작은 창';
+    b.addEventListener('click', openWordWindow);
+    return b;
+  }
   function renderTopbar() {
     var rc = $('room-code'), chip = rc ? rc.closest('.room-code-chip') : null;
     var hideCode = streamer() && Date.now() >= ui.codeRevealUntil;
     if (rc) rc.textContent = hideCode ? '••••' : (state.roomCode || '----');
     if (chip) { chip.classList.toggle('hidden-code', hideCode); chip.title = streamer() ? '방송 모드: 눌러서 4초 동안 방 코드 보기' : ''; }
-    if (inRoom && ui.streamerWas !== streamer()) { ui.streamerWas = streamer(); pushRoomEntry(); } // 방송 모드면 주소에서 ?room= 을 뺀다
+    if (inRoom && ui.streamerWas !== streamer()) { ui.streamerWas = streamer(); pushRoomEntry(); if (!streamer()) closeWordWindow(); } // 방송 모드면 주소에서 ?room= 을 뺀다
     var beg = $('btn-end-game'); if (beg) beg.hidden = !canEndGame();
     if (leaveDialogOpen() && leaveIntent === 'end' && !canEndGame()) closeLeaveDialog(); // 그 사이 게임이 끝났거나 방장이 바뀜
     var ri = $('round-indicator');
@@ -1231,7 +1283,11 @@
     if (ph === 'choosing') {
       wa.appendChild(el('span', 'word-hint', isDrawer() ? '단어를 골라주세요!' : '단어를 고르고 있어요…'));
     } else if (ph === 'drawing') {
-      if (isDrawer() && ui.word) {
+      if (isDrawer() && ui.word && desktopStreamer() && wordWindowOpen()) {
+        // 단어 창이 열려 있으면 메인 화면에는 단어를 아예 그리지 않는다(방송 캡처에 안 나가게)
+        wa.appendChild(el('span', 'word-hint', '내 단어는 단어 창에서'));
+        wa.appendChild(wordWindowButton());
+      } else if (isDrawer() && ui.word) {
         var s = el('span', 'word-secret'); s.appendChild(el('span', 'label', '내 단어')); s.appendChild(el('span', 'word', ui.word));
         if (ui.category) s.appendChild(el('span', 'word-category', ui.category));
         if (streamer()) {
@@ -1242,6 +1298,7 @@
           s.addEventListener('click', function () { ui.wordPeek = !ui.wordPeek; renderWordArea(); });
         }
         wa.appendChild(s);
+        if (desktopStreamer()) wa.appendChild(wordWindowButton());
       } else if (ui.wordMask) {
         var maskEl = maskNode(ui.wordMask, ui.wordLength);
         var me = findPlayer(myId);
@@ -1256,6 +1313,8 @@
       }
     } else if (ph === 'turnEnd' && ui.turnEnd) {
       wa.appendChild(el('span', 'word-answer', '정답: ' + ui.turnEnd.word));
+    } else if (ph === 'lobby' && desktopStreamer()) {
+      wa.appendChild(wordWindowButton()); // 게임 전에 미리 열어 두라고
     }
   }
 
@@ -1518,10 +1577,14 @@
         var dn = playerName(state.drawerId, ui.drawerName || '출제자');
         if (title) title.textContent = mine ? '단어를 골라주세요!' : dn + '님이 단어를 고르고 있어요';
         if (wait) wait.hidden = !!mine;
-        var peekBtn = $('btn-peek-options'), blurred = !!(mine && streamer() && !ui.optionsPeek);
+        var viaWindow = !!(mine && desktopStreamer() && wordWindowOpen()); // 단어 창에서 고른다: 메인에는 후보를 아예 안 그린다
+        var peekBtn = $('btn-peek-options'), blurred = !!(mine && streamer() && !ui.optionsPeek && !viaWindow);
         if (peekBtn) peekBtn.hidden = !blurred;
+        var winBtn = $('btn-choose-window'), winHint = $('choosing-window-hint');
+        if (winBtn) winBtn.hidden = !(mine && desktopStreamer() && !wordWindowOpen());
+        if (winHint) winHint.hidden = !viaWindow;
         if (opts) {
-          opts.hidden = !mine;
+          opts.hidden = !mine || viaWindow;
           opts.classList.toggle('blurred', blurred); // 방송 모드: 후보를 흐리게, "후보 보기"를 눌러야 고를 수 있다
           if (!mine && opts.childElementCount) opts.innerHTML = ''; // 이전 턴 후보 버튼 잔존 방지
           var key = mine ? ui.wordOptions.join('\u0001') : '';
@@ -1531,7 +1594,7 @@
               var b = el('button', 'word-option', w); b.type = 'button';
               b.addEventListener('click', function () {
                 if (ui.chosenWord) return;
-                ui.chosenWord = w; emit('word:choose', { word: w });
+                chooseWord(w);
                 opts.querySelectorAll('.word-option').forEach(function (x) { x.disabled = true; x.classList.toggle('chosen', x === b); });
               });
               opts.appendChild(b);
@@ -2169,6 +2232,7 @@
   function resetToLanding(sendLeave) {
     if (sendLeave) emit('room:leave');
     inRoom = false;
+    closeWordWindow(); ui.streamerWas = null;
     rejoinTarget = null;
     closeSheet(true);
     clearLastRoom();
@@ -2403,6 +2467,8 @@
     labelInviteButton();
     var chip = document.querySelector('.room-code-chip'); if (chip) chip.addEventListener('click', revealRoomCode);
     var pk = $('btn-peek-options'); if (pk) pk.addEventListener('click', function () { ui.optionsPeek = true; renderAll(); });
+    var cw = $('btn-choose-window'); if (cw) cw.addEventListener('click', openWordWindow);
+    window.addEventListener('beforeunload', function () { closeWordWindow(); });
     var bl = $('btn-leave'); if (bl) bl.addEventListener('click', function () { resetToLanding(true); });
     var bs = $('btn-sound'); if (bs) { renderSoundButton(bs); bs.addEventListener('click', function () { SFX.toggle(); renderSoundButton(bs); }); }
     var go = $('btn-gallery-open'); if (go) go.addEventListener('click', openGallery);

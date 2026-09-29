@@ -44,7 +44,7 @@
   mode: 'classic',    // 'classic' 돌아가며 그리기(기본) | 'fixed' 한 명이 계속 그리기(지정 출제자) | 'blitz' 속도전
   fixedDrawerId: null, // fixed 모드 출제자 id. 방에 없는 id/null 이면 호스트가 출제자
   profanityFilter: true, // 채팅 욕설을 '*' 로 가림(기본 켜짐). 닉네임 검사는 설정과 무관하게 항상
-  streamerMode: false   // 방송 모드. 서버는 값만 보관·전파하고, 클라이언트가 방 코드(••••, 누르면 4초)·주소의 ?room=·출제자 단어/후보(흐림, 눌러야 보임)를 가린다
+  streamerMode: false   // 방송 모드. 서버는 값만 보관·전파. 클라이언트는 방 코드(••••, 누르면 4초)·주소의 ?room= 을 가리고, 출제자 후보/단어는 별도 팝업 "단어 창"(/word, BroadcastChannel)에서만 보여 준다(팝업이 없으면 흐림 + 눌러서 보기)
 }
 ```
 서버는 범위를 벗어나면 clamp 한다.

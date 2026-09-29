@@ -84,6 +84,8 @@ app.get('/config.js', (req, res) => {
   res.type('application/javascript').send('window.APP_CONFIG = ' + JSON.stringify(auth.publicConfig()) + ';');
 });
 // 개인정보 처리방침 (소셜 로그인 심사에 URL 이 필요하다)
+// 방송 모드 단어 창(팝업). 상태는 BroadcastChannel 로 받으므로 서버는 정적 페이지만 준다
+app.get('/word', (req, res) => { res.set('Cache-Control', 'no-cache'); res.sendFile(path.join(PUBLIC_DIR, 'word.html')); });
 app.get('/privacy', (req, res) => { res.set('Cache-Control', 'no-cache'); res.sendFile(path.join(PUBLIC_DIR, 'privacy.html')); });
 
 // 회원 탈퇴: Authorization: Bearer <Supabase access token>. 쿠키를 쓰지 않으므로 CSRF 대상이 아니다

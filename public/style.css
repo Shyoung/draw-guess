@@ -258,8 +258,11 @@ textarea { resize: vertical; min-height: 64px; }
 .word-secret.peekable.peek .word, .word-secret.peekable.peek .word-category { filter: none; }
 .word-secret .peek-hint { font-size: 11px; font-weight: 700; color: var(--muted); margin-left: 4px; }
 .word-options.blurred .word-option { filter: blur(6px); pointer-events: none; user-select: none; }
-#btn-peek-options { align-self: center; margin-bottom: 10px; flex-direction: column; gap: 0; line-height: 1.2; }
-#btn-peek-options small { font-weight: 600; opacity: .85; }
+.choosing-stream { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 10px; }
+.choosing-stream:empty { display: none; }
+#btn-peek-options, #btn-choose-window { flex-direction: column; gap: 0; line-height: 1.2; }
+#btn-peek-options small, #btn-choose-window small { font-weight: 600; opacity: .85; }
+.btn-word-window { white-space: nowrap; }
 .word-answer { font-size: 20px; font-weight: 900; color: var(--green); }
 
 .timer {

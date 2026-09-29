@@ -377,7 +377,7 @@
                 </label>
                 <label class="check setting-wide">
                   <input id="set-streamerMode" type="checkbox">
-                  <span>방송 모드 <small>방 코드·주소·출제자 단어를 가려요 (눌러야 보임)</small></span>
+                  <span>방송 모드 <small>방 코드·주소를 가리고, 출제자 단어는 별도 "단어 창"에서만 보여요</small></span>
                 </label>
               </div>
             </details>
@@ -396,7 +396,11 @@
           <div id="overlay-choosing" class="overlay" hidden>
             <div class="card">
               <h3 id="choosing-title" class="card-title">단어를 골라주세요!</h3>
-              <button id="btn-peek-options" class="btn btn-secondary btn-sm" type="button" hidden>후보 보기 <small>방송 화면에 단어가 나가요</small></button>
+              <p id="choosing-window-hint" class="card-wait" hidden>단어 창에서 골라 주세요</p>
+              <div class="choosing-stream" >
+                <button id="btn-choose-window" class="btn btn-primary btn-sm" type="button" hidden>단어 창 열기 <small>방송 캡처 밖에서 보기</small></button>
+                <button id="btn-peek-options" class="btn btn-ghost btn-sm" type="button" hidden>여기서 보기 <small>방송 화면에 단어가 나가요</small></button>
+              </div>
               <div id="word-options" class="word-options"></div>
               <p id="choosing-wait" class="card-wait" hidden>
                 <span class="dots"><i></i><i></i><i></i></span>

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>이뭔그 — 단어 창</title>
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg">
+  <style>
+    /* 방송 모드 단어 창: 게임 창(BroadcastChannel)에서 상태를 받아 후보·내 단어만 보여 준다. 방송 캡처 밖에 두는 창이라 스타일은 안에 다 넣는다 */
+    :root { --bg: #fff8ec; --text: #2b2d42; --muted: #6c6f85; --primary: #ff6b4a; --primary-dark: #e5502f; --primary-soft: #ffe3db; --secondary: #3d7bf2; --line: #ece7f3; --amber-soft: #fff1d6; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body { font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif; background: var(--bg); color: var(--text); display: flex; flex-direction: column; min-height: 100%; word-break: keep-all; }
+    header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; font-size: 12px; font-weight: 800; color: var(--muted); border-bottom: 1px solid var(--line); background: #fff; }
+    header .t { color: var(--primary); }
+    header .timer { font-family: ui-monospace, Consolas, monospace; font-size: 14px; color: var(--text); }
+    header .timer.urgent { color: var(--primary-dark); }
+    main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 14px 16px; text-align: center; }
+    .hint { font-size: 13px; color: var(--muted); line-height: 1.5; }
+    .label { font-size: 12px; font-weight: 800; color: var(--muted); }
+    .word { font-size: 34px; font-weight: 900; color: var(--primary-dark); letter-spacing: .02em; line-height: 1.2; }
+    .cat { display: inline-block; margin-top: 2px; padding: 3px 10px; border-radius: 999px; background: var(--amber-soft); font-size: 12px; font-weight: 700; }
+    .opts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .opt { border: 2px solid var(--line); background: #fff; border-radius: 12px; padding: 10px 16px; font: inherit; font-size: 17px; font-weight: 800; color: var(--text); cursor: pointer; }
+    .opt:hover:not(:disabled) { border-color: var(--primary); background: var(--primary-soft); }
+    .opt:disabled { opacity: .5; cursor: default; }
+    .opt.chosen { border-color: #2ec27e; background: #dff8ec; }
+    .note { font-size: 11px; color: var(--muted); padding: 6px 12px 10px; text-align: center; line-height: 1.4; }
+    .lost { color: var(--primary-dark); font-weight: 800; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <header><span><span class="t">이뭔그</span> · 단어 창</span><span id="timer" class="timer"></span></header>
+  <main id="main"><p class="hint">게임 창과 연결하는 중…</p></main>
+  <p class="note">이 창은 방송 캡처 영역 밖(다른 모니터)에 두세요. 게임 창을 닫으면 같이 닫혀요.</p>
+  <script>
+    (function () {
+      var key = (location.hash || '').replace(/^#/, '').trim();
+      var main = document.getElementById('main'), timerEl = document.getElementById('timer');
+      if (!key || !window.BroadcastChannel) { main.innerHTML = '<p class="hint lost">게임 창에서 "단어 창 열기"로 열어 주세요.</p>'; return; }
+      var chan = new BroadcastChannel('drawguess-word-' + key);
+      var last = null, lastAt = 0, timeLeft = null, tick = null, chosenLocal = null;
+      function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+      function renderTimer() {
+        var show = timeLeft != null && last && (last.phase === 'choosing' || last.phase === 'drawing');
+        timerEl.textContent = show ? String(timeLeft) : '';
+        timerEl.classList.toggle('urgent', show && timeLeft < 10);
+      }
+      function render() {
+        main.innerHTML = '';
+        var s = last;
+        if (!s) { main.appendChild(el('p', 'hint', '게임 창과 연결하는 중…')); return; }
+        if (!s.inRoom) { main.appendChild(el('p', 'hint', '게임 창이 방을 나갔어요. 이 창을 닫아도 돼요.')); return; }
+        if (!s.streamer) { main.appendChild(el('p', 'hint', '방송 모드가 꺼져 있어요. 방장이 설정에서 켜면 여기에 단어가 떠요.')); return; }
+        if (s.phase === 'choosing' && s.isDrawer && s.options && s.options.length) {
+          main.appendChild(el('div', 'label', '내 차례! 단어를 골라 주세요'));
+          var box = el('div', 'opts');
+          var picked = s.chosen || chosenLocal;
+          s.options.forEach(function (w) {
+            var b = el('button', 'opt' + (picked === w ? ' chosen' : ''), w); b.type = 'button'; b.disabled = !!picked;
+            b.addEventListener('click', function () { if (picked) return; chosenLocal = w; chan.postMessage({ type: 'choose', word: w }); render(); });
+            box.appendChild(b);
+          });
+          main.appendChild(box);
+          if (picked) main.appendChild(el('p', 'hint', '골랐어요. 곧 그리기가 시작돼요'));
+          return;
+        }
+        if (s.phase === 'drawing' && s.isDrawer && s.word) {
+          main.appendChild(el('div', 'label', '내 단어'));
+          main.appendChild(el('div', 'word', s.word));
+          if (s.category) main.appendChild(el('span', 'cat', s.category));
+          return;
+        }
+        if (s.phase === 'turnEnd' && s.answer) { main.appendChild(el('div', 'label', '정답')); main.appendChild(el('div', 'word', s.answer)); return; }
+        if (s.phase === 'lobby') { main.appendChild(el('p', 'hint', '대기실이에요. 내 차례가 되면 여기에 단어 후보가 떠요.')); return; }
+        if (s.phase === 'gameOver') { main.appendChild(el('p', 'hint', '게임이 끝났어요.')); return; }
+        main.appendChild(el('p', 'hint', (s.drawerName ? s.drawerName + '님' : '다른 사람') + '이 그리는 중이에요. 내 차례가 되면 여기에 단어가 떠요.'));
+      }
+      chan.onmessage = function (e) {
+        var m = e.data; if (!m || typeof m !== 'object') return;
+        if (m.type === 'state') {
+          if (!last || last.phase !== m.phase || last.word !== m.word) chosenLocal = null; // 새 턴
+          last = m; lastAt = Date.now(); timeLeft = m.timeLeft != null ? m.timeLeft : null;
+          render(); renderTimer();
+        } else if (m.type === 'bye') { last = { inRoom: false }; render(); renderTimer(); }
+      };
+      chan.postMessage({ type: 'hello' });
+      // 게임 창이 1초마다 보내지만, 안 오는 사이에는 스스로 1초씩 줄인다
+      tick = setInterval(function () {
+        if (timeLeft != null && timeLeft > 0 && Date.now() - lastAt > 900) { timeLeft -= 1; renderTimer(); }
+        if (last && last.inRoom && Date.now() - lastAt > 8000) { main.innerHTML = '<p class="hint lost">게임 창과 연결이 끊겼어요. 게임 창에서 "단어 창 열기"를 다시 눌러 주세요.</p>'; last = null; timeLeft = null; renderTimer(); }
+      }, 1000);
+      window.addEventListener('beforeunload', function () { try { chan.close(); } catch (e) { /* ignore */ } });
+    })();
+  </script>
+</body>
+</html>
