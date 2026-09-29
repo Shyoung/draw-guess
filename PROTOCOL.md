@@ -26,7 +26,7 @@
 ## Identity
 - 플레이어 id = 최초 접속 시의 `socket.id`. 재접속(`room:rejoin`)해도 바뀌지 않는다(서버가 playerId→socketId를 매핑).
 - `avatar` = `{ emoji: string, color: string, img?: string }` (color는 `#rrggbb`). `img`(프로필 사진 URL)는 **로그인 사용자만** 허용되며 서버가 https + 허용 호스트(우리 Supabase Storage `avatars` 버킷, `*.googleusercontent.com`, `*.kakaocdn.net`)만 통과시킨다. 클라이언트는 `img` 가 있으면 사진을, 로드 실패 시 emoji+color 로 대체해 그린다.
-- 이름은 1~12자, trim 후 빈 문자열이면 서버가 거절.
+- 이름은 1~12자, trim 후 빈 문자열이면 서버가 거절. 욕설·비하어가 들어 있으면 `{ ok:false, error:'닉네임에 쓸 수 없는 말이 있어요.' }` (create · join · player:update 모두, 방 설정과 무관). 목록·규칙은 `server/profanity.js`.
 
 ## Phases
 `'lobby' | 'choosing' | 'drawing' | 'turnEnd' | 'gameOver'`
@@ -42,7 +42,8 @@
   customWords: '',    // 쉼표 구분 사용자 단어, 각 단어 1..20자
   customWordsOnly: false,
   mode: 'classic',    // 'classic' 돌아가며 그리기(기본) | 'fixed' 한 명이 계속 그리기(지정 출제자) | 'blitz' 속도전
-  fixedDrawerId: null // fixed 모드 출제자 id. 방에 없는 id/null 이면 호스트가 출제자
+  fixedDrawerId: null, // fixed 모드 출제자 id. 방에 없는 id/null 이면 호스트가 출제자
+  profanityFilter: true // 채팅 욕설을 '*' 로 가림(기본 켜짐). 닉네임 검사는 설정과 무관하게 항상
 }
 ```
 서버는 범위를 벗어나면 clamp 한다.
@@ -119,6 +120,7 @@
 - `kind`: `'chat'` (일반) | `'system'` (입장/퇴장/턴 안내) | `'correct'` ("○○님이 정답을 맞혔습니다!") | `'close'` (정답에 근접, **보낸 사람에게만**) | `'guessed-chat'` (정답자 전용 채팅)
 - 정답을 맞힌 사람과 출제자가 drawing 중에 보내는 메시지는 `'guessed-chat'`으로 **출제자 + 이미 맞힌 사람들에게만** 전달.
 - 정답 텍스트 자체는 절대 브로드캐스트하지 않는다.
+- `settings.profanityFilter` 가 켜져 있으면 `'chat'`·`'close'`·`'guessed-chat'` 의 `text` 에서 욕설 부분을 `*` 로 바꿔 보낸다(보낸 사람에게도). 정답·근접 판정은 가리기 전 원문으로 한다. 문장부호·숫자·이모지로 끊어 쓴 것("시.발")은 잡지만 띄어쓴 것("시 발")은 잡지 않는다.
 
 `player:guessed` `{ id }` — 누가 맞혔는지 (플레이어 목록 하이라이트용). 이후 `room:state`도 갱신됨.
 

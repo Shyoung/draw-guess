@@ -146,6 +146,14 @@ async function say(page, text) {
     await host.locator('#set-customWords').blur();
     await host.check('#set-customWordsOnly');
     await sleep(500);
+    // 욕설 가리기: 세부 설정에 기본 켜짐, 끄면 비방장 요약 칩에 "욕설 가리기 끔"
+    check(await host.isChecked('#set-profanityFilter'), '욕설 가리기: 기본 켜짐');
+    check((await p2.locator('#settings-summary').textContent()).includes('욕설 가리기') && !(await p2.locator('#settings-summary').textContent()).includes('끔'), '비방장 요약: "욕설 가리기" 칩');
+    await host.uncheck('#set-profanityFilter');
+    await sleep(400);
+    check((await p2.locator('#settings-summary').textContent()).includes('욕설 가리기 끔'), '욕설 가리기 끄면 요약 칩 "욕설 가리기 끔"');
+    await host.check('#set-profanityFilter');
+    await sleep(400);
     check((await p2.inputValue('#set-rounds')) === '1', '설정 변경 동기화(rounds=1)', await p2.inputValue('#set-rounds'));
     check((await p2.inputValue('#set-drawTime')) === '30', '설정 변경 동기화(drawTime=30)', await p2.inputValue('#set-drawTime'));
     await p2.waitForFunction(() => document.querySelectorAll('#settings-summary .sum-word').length === 12, null, { timeout: 3000 }).catch(() => {});

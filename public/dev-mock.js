@@ -197,7 +197,7 @@
     { id: 'p4', name: '판다판다판다판다', avatar: av('🐼', '#baffc9'), score: 0, isDrawing: false, hasGuessed: false }
   ];
   var room = { roomCode: 'MOCK', hostId: ME, phase: 'lobby', round: 0, totalRounds: 3, drawerId: null,
-    settings: { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null }, lobbyStep: 'settings' };
+    settings: { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null, profanityFilter: true }, lobbyStep: 'settings' };
   var timeLeft = 0, word = '';
   function st() {
     players.forEach(function (p) { p.isDrawing = p.id === room.drawerId; });

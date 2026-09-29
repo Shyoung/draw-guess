@@ -15,6 +15,7 @@ const { Server } = require('socket.io');
 const { Room } = require('./game');
 const { createStore } = require('./store');
 const { createMetrics } = require('./metrics');
+const { containsProfanity } = require('./profanity');
 const { createAuth } = require('./auth');
 
 const PORT = process.env.PORT || 3000;
@@ -229,6 +230,8 @@ function sanitizeName(v) {
   if (len < 1 || len > 12) return null;
   return name;
 }
+// 닉네임 욕설은 방 설정과 무관하게 항상 거절한다(방을 만들기 전이라 설정이 없고, 방송·학교에서 쓰려면 이름부터 안전해야 한다)
+const NAME_PROFANE = '닉네임에 쓸 수 없는 말이 있어요.';
 
 /** 아바타: { emoji, color:'#rrggbb' }. 형식이 틀리면 기본값으로 보정 */
 /**
@@ -392,6 +395,7 @@ io.on('connection', (socket) => {
     const [data, ack] = normalizeArgs(rawData, rawAck);
     const name = sanitizeName(data.name);
     if (!name) return ack({ ok: false, error: '이름은 1~12자여야 합니다.' });
+    if (containsProfanity(name)) return ack({ ok: false, error: NAME_PROFANE });
     const avatar = sanitizeAvatar(data.avatar, socket.data.user);
 
     leaveCurrentRoom();
@@ -420,6 +424,7 @@ io.on('connection', (socket) => {
     if (!CODE_RE.test(code)) return ack({ ok: false, error: '방 코드는 영문 4글자입니다.' });
     const name = sanitizeName(data.name);
     if (!name) return ack({ ok: false, error: '이름은 1~12자여야 합니다.' });
+    if (containsProfanity(name)) return ack({ ok: false, error: NAME_PROFANE });
     const avatar = sanitizeAvatar(data.avatar, socket.data.user);
 
     const room = await getOrRestoreRoom(code);
@@ -507,6 +512,7 @@ io.on('connection', (socket) => {
     if (!room) return reply({ ok: false, error: '방에 참가하지 않았습니다.' });
     const name = sanitizeName(data && data.name);
     if (!name) return reply({ ok: false, error: '닉네임은 1~12자예요' });
+    if (containsProfanity(name)) return reply({ ok: false, error: NAME_PROFANE });
     const avatar = sanitizeAvatar(data && data.avatar, socket.data.user);
     const err = room.updatePlayer(pid(), { name, avatar });
     reply(err ? { ok: false, error: err } : { ok: true });

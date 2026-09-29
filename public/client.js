@@ -19,7 +19,7 @@
   ];
   var SIZES = [4, 10, 20, 36];
   var SFX = window.SFX || { play: function () {}, isMuted: function () { return true; }, setMuted: function () {}, toggle: function () { return true; } };
-  var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null };
+  var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null, profanityFilter: true };
   var REASON_TEXT = { time: '시간 종료!', allGuessed: '모두 맞혔어요!', drawerLeft: '출제자가 나갔어요', notEnoughPlayers: '플레이어가 부족해요' };
   var STORAGE_KEY = 'drawguess.profile';
   var TOKEN_KEY = 'drawguess.token';      // 재접속용 토큰(브라우저별 1개)
@@ -1399,6 +1399,7 @@
     setVal('set-rounds', s.rounds); setVal('set-drawTime', s.drawTime); setVal('set-wordCount', s.wordCount);
     setVal('set-hints', s.hints); setVal('set-hintEndAt', s.hintEndAt);
     setVal('set-customWords', s.customWords || ''); setVal('set-customWordsOnly', s.customWordsOnly);
+    setVal('set-profanityFilter', s.profanityFilter !== false);
     var fixed = s.mode === 'fixed';
     // 게임 길이 · 예상 시간 · 우리만의 단어 · 요약(방장이 아닌 사람)
     var preset = matchPreset(s), ps = presetsFor(s.mode), est = estimateGame(s);
@@ -1418,7 +1419,8 @@
       if (!sum.hidden) {
         var cw = parseWords(s.customWords || '').words.length;
         var chips = [[preset ? PRESET_NAMES[preset] : '직접 설정', 'sum-main'], [fixed ? s.rounds + '문제' : s.rounds + '라운드'], ['한 턴 ' + s.drawTime + '초'],
-          [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']];
+          [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분'],
+          [s.profanityFilter === false ? '욕설 가리기 끔' : '욕설 가리기']];
         var cwList = cw ? parseWords(s.customWords || '').words : [];
         var skey = JSON.stringify([chips, cwList, !!s.customWordsOnly]);
         if (sum.getAttribute('data-key') !== skey) {
@@ -1463,7 +1465,7 @@
       }
       if (document.activeElement !== fsel) fsel.value = want || '';
     }
-    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWords', 'set-customWordsOnly', 'set-fixedDrawer'].forEach(function (id) {
+    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWords', 'set-customWordsOnly', 'set-fixedDrawer', 'set-profanityFilter'].forEach(function (id) {
       var n = $(id); if (n) n.disabled = !editable;
     });
     var btn = $('btn-start'), hint = $('start-hint');
@@ -2292,6 +2294,7 @@
     if (g('set-hintEndAt')) s.hintEndAt = clamp(num(g('set-hintEndAt').value, 15), 5, 60);
     if (g('set-customWords')) s.customWords = String(g('set-customWords').value || '').slice(0, 2000);
     if (g('set-customWordsOnly')) s.customWordsOnly = !!g('set-customWordsOnly').checked;
+    if (g('set-profanityFilter')) s.profanityFilter = !!g('set-profanityFilter').checked;
     if (s.mode === 'fixed' && g('set-fixedDrawer') && g('set-fixedDrawer').value) s.fixedDrawerId = g('set-fixedDrawer').value;
     return s;
   }
@@ -2311,7 +2314,7 @@
     fillSelect('set-hints', range(0, 5), function (v) { return v === 0 ? '없음' : v + '회'; });
     fillSelect('set-hintEndAt', [5, 10, 15, 20, 30, 45, 60], function (v) { return '종료 ' + v + '초 전'; });
 
-    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWordsOnly', 'set-fixedDrawer'].forEach(function (id) {
+    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWordsOnly', 'set-fixedDrawer', 'set-profanityFilter'].forEach(function (id) {
       var n = $(id); if (n) n.addEventListener('change', sendSettings);
     });
     document.querySelectorAll('#mode-panel .mode-card').forEach(function (b) {

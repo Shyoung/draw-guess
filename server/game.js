@@ -34,6 +34,8 @@ const MAX_STROKE_POINTS = 5000; // stroke 하나의 점 상한
 const MAX_MOVE_BATCH = 500; // draw:move 한 번의 점 상한
 const MAX_CUSTOM_WORDS_LEN = 2000; // customWords 원문 길이 상한
 
+const { maskProfanity } = require('./profanity');
+
 const DEFAULT_SETTINGS = Object.freeze({
   rounds: 3,
   drawTime: 80,
@@ -44,6 +46,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   customWordsOnly: false,
   mode: 'classic',      // 'classic' 돌아가며 그리기 | 'fixed' 한 명이 계속 그리기(지정 출제자)
   fixedDrawerId: null,  // fixed 모드의 출제자. null 이면 호스트
+  profanityFilter: true, // 채팅 욕설을 *** 로 가림. 방장이 끌 수 있다(닉네임 검사는 항상)
 });
 const MODES = ['classic', 'fixed', 'blitz'];
 // 속도전(blitz): 단어 후보 없이 자동 선택, 힌트 없음, 짧은 시간. 맞힌 순서로 점수(1등 400, 2등 300, 3등 200, 이후 100)
@@ -840,6 +843,7 @@ class Room {
       s.customWords = raw.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').slice(0, MAX_CUSTOM_WORDS_LEN);
     }
     if ('customWordsOnly' in patch) s.customWordsOnly = Boolean(patch.customWordsOnly);
+    if ('profanityFilter' in patch) s.profanityFilter = Boolean(patch.profanityFilter);
     if ('mode' in patch && MODES.includes(patch.mode)) s.mode = patch.mode;
     if ('fixedDrawerId' in patch) {
       // 방에 있는 사람만 출제자로 지정 가능. 아니면 null(=호스트)
@@ -1291,7 +1295,9 @@ class Room {
   handleChat(id, text) {
     const p = this.getPlayer(id);
     if (!p) return '방에 참가하지 않았습니다.';
-    const msg = { id: p.id, name: p.name, avatar: { ...p.avatar }, text };
+    // 보여 주는 글만 가린다(정답 판정은 아래에서 원문 text 로). 방장이 끄면 그대로
+    const shown = this.settings.profanityFilter ? maskProfanity(text).text : text;
+    const msg = { id: p.id, name: p.name, avatar: { ...p.avatar }, text: shown };
 
     if (this.phase === 'drawing' && this.word) {
       // 출제자 / 이미 맞힌 사람 → 정답자 전용 채팅
