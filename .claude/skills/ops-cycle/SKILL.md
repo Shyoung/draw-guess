@@ -5,6 +5,8 @@ description: 이뭔그(draw-guess) 운영 사이클 한 바퀴. docs/ops/BOARD.m
 
 # 운영 사이클
 
+**역할 이름 해석**: `subagent_type`에 `marketing-strategist`·`builder`·`qa-reviewer`·`fixer`를 쓴다. 이 이름이 "not found"로 뜨면(세션이 draw-guess 폴더 밖에서 시작된 경우) `general-purpose`를 쓰되 프롬프트 첫 줄에 "너는 <역할>이다. 먼저 `.claude/agents/<역할>.md`를 읽고 그 정의(도구 제한 포함)를 그대로 따르라"를 넣는다.
+
 너는 이번 세션에서 **조율자**다. 직접 코드를 짜거나 마케팅 문안을 쓰지 않고, 서브에이전트(Agent 도구, `subagent_type`에 역할 이름)를 시키고 결과를 `docs/ops/BOARD.md`에 옮겨 적는다. 운영자는 GO/STOP/보류와 방향 조정만 한다. 답변은 한국어.
 
 ## 0. 사전 점검 (여기서 멈출 수 있다)
