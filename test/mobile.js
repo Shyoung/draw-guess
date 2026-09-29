@@ -128,6 +128,28 @@ async function mainRun() {
       check((await m.locator('#btn-start').count()) === 1, '로비(설정): #btn-start 존재');
       check(mm.chatFont >= 16, '채팅 입력 font-size ≥ 16px', mm.chatFont);
       check(mm.sw <= VW, '로비(설정): 가로 스크롤 없음', mm.sw);
+      // 기본 단어 카테고리: 우리 단어가 wordCount 이상이면 블록 숨김, 아니면 13개 칩 전부 켜진 채 여러 줄로 접히고 "모두 선택 · 모두 해제"는 제목 줄 오른쪽
+      if (await m.locator('#cat-block').isHidden()) {
+        check(true, '로비(설정): 우리 단어만 쓰기(단어 충분) → 카테고리 블록 숨김');
+      } else {
+        const chips = await m.locator('#cat-row .cat-chip').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, on: e.getAttribute('aria-pressed') === 'true' }; }));
+        const rowsY = [...new Set(chips.map((c) => Math.round(c.y)))];
+        check(chips.length === 13 && chips.every((c) => c.on), '로비(설정): 카테고리 칩 13개 전부 켜짐', `${chips.length}/${chips.filter((c) => c.on).length}`);
+        check(rowsY.length >= 3 && chips.every((c) => c.x >= 0 && c.x + c.w <= VW + 0.5), '로비(설정): 칩이 화면 안에서 3줄 이상으로 접힘', `rows=${rowsY.length}`);
+        check(chips.every((c) => c.h >= 30), '로비(설정): 칩 높이 ≥ 30px(터치 목표)', Math.min(...chips.map((c) => c.h)));
+        const title = await box(m, '#cat-block .block-title'), tools = await box(m, '#cat-block .cat-tools'), all = await box(m, '#btn-cat-all'), none = await box(m, '#btn-cat-none'), row = await box(m, '#cat-row');
+        check(!!tools && tools.x + tools.width <= VW + 0.5 && tools.x + tools.width >= VW - 60, '로비(설정): "모두 선택 · 모두 해제"가 오른쪽 끝에 정렬', fmt(tools));
+        check(!!title && !!tools && !overlaps(title, tools) && !!row && tools.y + tools.height <= row.y + 0.5, '로비(설정): 버튼이 제목과 안 겹치고 칩 줄 위에 있음', `${fmt(title)} / ${fmt(tools)} / ${fmt(row)}`);
+        check(!!all && !!none && all.height >= 32 && none.height >= 32, '로비(설정): 모두 선택/해제 버튼 높이 ≥ 32px', `${fmt(all)} / ${fmt(none)}`);
+        check(await m.locator('#btn-cat-all').isDisabled() && await m.locator('#btn-cat-none').isEnabled(), '로비(설정): 전부 켜진 상태 → "모두 선택" 비활성 · "모두 해제" 활성');
+        // 칩 하나를 끄면 12개, 다시 켜면 전부([]) — 폰에서 탭이 먹는지
+        await m.locator('#cat-row .cat-chip[data-cat="동물"]').tap();
+        await m.waitForFunction(() => window.__dg.state.settings.categories.length === 12, null, { timeout: 3000 }).catch(() => {});
+        check((await m.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 12 && await m.locator('#btn-cat-all').isEnabled(), '로비(설정): 칩 탭으로 하나 끄기 → 12개 · "모두 선택" 활성');
+        await m.locator('#btn-cat-all').tap();
+        await m.waitForFunction(() => window.__dg.state.settings.categories.length === 0, null, { timeout: 3000 }).catch(() => {});
+        check((await m.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 13, '로비(설정): "모두 선택" 탭 → 13개 전부 켜짐');
+      }
       // 미니 채팅: 목록(최대 5줄) + 입력창이 보이고, 목록을 터치하면 시트
       const ml = await m.locator('#chat-panel #chat-list').evaluate((e) => ({ h: Math.round(e.getBoundingClientRect().height), maxH: getComputedStyle(e).maxHeight, vis: getComputedStyle(e).display !== 'none' }));
       check(ml.vis && ml.h <= 170, '로비: 미니 채팅 목록 표시(≤5줄, ≤170px)', JSON.stringify(ml));

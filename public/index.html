@@ -354,9 +354,16 @@
               </div>
             </div>
 
-            <!-- 기본 단어 카테고리 고르기(BACKLOG #9). 우리 단어만 쓰고 단어가 wordCount 이상이면 숨긴다 -->
+            <!-- 기본 단어 카테고리 고르기. 기본은 13개 전부 켜짐(빼는 식으로 씀). 우리 단어만 쓰고 단어가 wordCount 이상이면 숨긴다 -->
             <div id="cat-block" class="setting-block cat-block">
-              <div class="block-head"><span class="block-title">기본 단어 카테고리</span><span id="cat-note" class="settings-estimate"></span></div>
+              <div class="block-head cat-head">
+                <span class="block-title">기본 단어 카테고리 <span id="cat-note" class="settings-estimate"></span></span>
+                <span class="cat-tools">
+                  <button id="btn-cat-all" class="cat-tool" type="button">모두 선택</button>
+                  <span class="cat-tool-sep" aria-hidden="true">·</span>
+                  <button id="btn-cat-none" class="cat-tool" type="button">모두 해제</button>
+                </span>
+              </div>
               <div id="cat-row" class="cat-row" role="group" aria-label="기본 단어 카테고리"></div>
             </div>
 
