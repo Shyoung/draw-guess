@@ -1578,7 +1578,7 @@
           sum.appendChild(chipRow);
           if (cwList.length) {
             var box = el('div', 'sum-words');
-            box.appendChild(el('div', 'sum-words-title', '우리만의 단어 ' + cwList.length + '개' + (s.customWordsOnly ? ' · 이 단어로만 출제' : ' · 기본 단어와 섞어서 출제')));
+            box.appendChild(el('div', 'sum-words-title', '우리만의 단어 ' + cwList.length + '개' + (!s.customWordsOnly ? ' · 기본 단어와 섞어서 출제' : cwList.length >= s.wordCount ? ' · 우리 단어로만 출제' : ' · 우리 단어로 출제 · 모자라면 고른 카테고리에서 채워요')));
             var wl = el('div', 'sum-words-list');
             cwList.forEach(function (w) { wl.appendChild(el('span', 'sum-word', w)); });
             box.appendChild(wl);

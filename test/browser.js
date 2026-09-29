@@ -185,7 +185,7 @@ async function say(page, text) {
     check((await p2.inputValue('#set-rounds')) === '1', '설정 변경 동기화(rounds=1)', await p2.inputValue('#set-rounds'));
     check((await p2.inputValue('#set-drawTime')) === '30', '설정 변경 동기화(drawTime=30)', await p2.inputValue('#set-drawTime'));
     await p2.waitForFunction(() => document.querySelectorAll('#settings-summary .sum-word').length === 12, null, { timeout: 3000 }).catch(() => {});
-    check((await p2.locator('#settings-summary .sum-word').count()) === 12 && (await p2.textContent('#settings-summary .sum-words-title')).includes('이 단어로만'), '방장이 아닌 사람: 우리만의 단어 목록 12개 · "이 단어로만 출제"', await p2.locator('#settings-summary .sum-word').count());
+    check((await p2.locator('#settings-summary .sum-word').count()) === 12 && (await p2.textContent('#settings-summary .sum-words-title')).includes('우리 단어로만'), '방장이 아닌 사람: 우리만의 단어 목록 12개 · "우리 단어로만 출제"', await p2.locator('#settings-summary .sum-word').count());
     // 채팅: 닉네임 위 · 내용 아래
     await p2.fill('#chat-input', '긴 닉네임이어도 내용 폭이 줄지 않아요');
     await p2.press('#chat-input', 'Enter');
