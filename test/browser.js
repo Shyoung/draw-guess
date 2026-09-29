@@ -158,6 +158,7 @@ async function say(page, text) {
     await host.locator('#set-customWords').blur();
     await host.check('#set-customWordsOnly');
     await sleep(500);
+    check(await host.locator('#cat-block').isHidden(), '우리 단어만 쓰기 + 단어 12개(wordCount 이상) → 기본 단어 카테고리 블록 숨김');
     // 방송 모드는 각자 설정(⚙ 설정 창): 방장이 켜도 다른 사람 화면은 그대로
     await host.click('#btn-room-profile');
     await host.waitForSelector('#room-settings-top:not([hidden])', { timeout: 3000 });

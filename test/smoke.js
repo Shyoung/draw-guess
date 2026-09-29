@@ -261,6 +261,9 @@ async function main() {
   check('pickWords: 모르는 카테고리만 → 전체 풀', words.baseWords(['없음']) === words.ko && words.baseWords([]) === words.ko && words.baseWords(['동물', '음식']).length === words.CATEGORIES['동물'].length + words.CATEGORIES['음식'].length);
   const mixed = words.pickWords({ categories: ['악기'], customWords: '우리집강아지' }, new Set(), 200);
   check('pickWords: 카테고리 + 사용자 단어 섞임', mixed.includes('우리집강아지') && mixed.filter((w) => w !== '우리집강아지').every((w) => words.categoryOf(w) === '악기'));
+  const shortOnly = words.pickWords({ customWordsOnly: true, customWords: '우리집강아지', categories: ['악기'] }, new Set(), 3);
+  check('pickWords: customWordsOnly 인데 사용자 단어가 wordCount 미만 → 고른 카테고리 풀로 채움(PROTOCOL Settings.categories)', shortOnly.length === 3 && shortOnly.every((w) => w === '우리집강아지' || words.categoryOf(w) === '악기'), shortOnly);
+  check('pickWords: customWordsOnly 이고 사용자 단어가 충분하면 사용자 단어만', words.pickWords({ customWordsOnly: true, customWords: '가,나,다,라', categories: ['악기'] }, new Set(), 3).every((w) => ['가', '나', '다', '라'].includes(w)));
 
   const setP = waitFor(c1, 'room:state', (s) => s.settings.drawTime === 30 && s.settings.hints === 1 && s.settings.customWordsOnly === true);
   c1.emit('room:settings', { settings: { rounds: 1, drawTime: 30, hints: 1, wordCount: 3, customWords: '자전거,냉장고,해바라기,고슴도치,아이스크림,선풍기,소방차,다람쥐,무지개,피라미드,헬리콥터,미끄럼틀', customWordsOnly: true } });
@@ -544,8 +547,10 @@ async function main() {
   const goState = await waitFor(c1, 'room:state', (s) => s.phase === 'gameOver', 3000).catch(() => c1.log.map((e) => e.payload).filter((p) => p && p.phase === 'gameOver').pop());
   check('room:state phase gameOver with drawerId null, scores match ranking', goState && goState.drawerId === null && goState.players.every((p) => byId(ranking, p.id).score === p.score), goState);
 
-  // lobby 상태는 game:over 직후 동기적으로 오므로 이미 로그에 있을 수 있다 → 로그 우선, 없으면 대기
-  const lobbyLogged = c1.log.map((e) => e.ev === 'room:state' ? e.payload : null).filter((p) => p && p.phase === 'lobby' && p.round === 0).pop();
+  // lobby 상태는 game:over 직후 동기적으로 오므로 이미 로그에 있을 수 있다 → 로그 우선, 없으면 대기.
+  // 게임 전 lobby 상태를 집지 않도록 game:over 이후 수신분만 본다(T-20260930-3)
+  const overIdx = c1.log.map((e) => e.ev).lastIndexOf('game:over');
+  const lobbyLogged = c1.log.slice(overIdx + 1).map((e) => e.ev === 'room:state' ? e.payload : null).filter((p) => p && p.phase === 'lobby' && p.round === 0).pop();
   const lobby = lobbyLogged || await waitFor(c1, 'room:state', (s) => s.phase === 'lobby' && s.round === 0, 5000, 'lobby right after game:over');
   check('back to lobby immediately after game:over; scores retained; round 0; drawerId null; no isDrawing/hasGuessed', lobby.round === 0 && lobby.drawerId === null && lobby.players.some((p) => p.score > 0) && lobby.players.every((p) => p.score === byId(ranking, p.id).score && !p.isDrawing && !p.hasGuessed), lobby);
   check('everyone is atResults right after game over', lobby.players.every((p) => p.atResults === true), lobby.players.map((p) => p.atResults));

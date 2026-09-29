@@ -854,7 +854,7 @@
     var c2 = cv.getContext('2d');
     c2.fillStyle = PAPER; c2.fillRect(0, 0, cv.width, cv.height);
     c2.fillStyle = PENCIL; c2.font = 'bold 26px "Pretendard", "Malgun Gothic", sans-serif'; c2.textBaseline = 'middle';
-    c2.fillText('🖼 그림 갤러리 · 방 ' + (state.roomCode || '') + ' · ' + items.length + '장', pad, head / 2, cv.width - pad * 2);
+    c2.fillText('그림 갤러리 · 방 ' + (state.roomCode || '') + ' · ' + items.length + '장', pad, head / 2, cv.width - pad * 2);
     drawWordmark(c2, cv.width - pad, cv.height - foot / 2, 40);
     items.forEach(function (g, i) {
       var col = i % cols, row = Math.floor(i / cols);
@@ -1563,7 +1563,8 @@
           [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']];
         var cwList = cw ? parseWords(s.customWords || '').words : [];
         var sumCats = Array.isArray(s.categories) ? s.categories : [];
-        if (sumCats.length && !(s.customWordsOnly && cwList.length)) chips.push([sumCats.length <= 3 ? sumCats.join(' · ') : '카테고리 ' + sumCats.length + '개']);
+        // 우리 단어만 쓰기라도 단어가 wordCount 미만이면 고른 카테고리에서 채우므로(server/words.js pickWords) 칩을 보여준다
+        if (sumCats.length && !(s.customWordsOnly && cwList.length >= s.wordCount)) chips.push([sumCats.length <= 3 ? sumCats.join(' · ') : '카테고리 ' + sumCats.length + '개']);
         var skey = JSON.stringify([chips, cwList, !!s.customWordsOnly]);
         if (sum.getAttribute('data-key') !== skey) {
           sum.setAttribute('data-key', skey); sum.innerHTML = '';
@@ -1585,10 +1586,10 @@
     var hasWords = !!String(s.customWords || '').trim();
     if (uc) { if (!ui.customOpen && hasWords) ui.customOpen = true; uc.checked = !!ui.customOpen; uc.disabled = !editable; }
     if (cb0) cb0.hidden = !ui.customOpen;
-    // 기본 단어 카테고리 칩. 우리 단어만 쓰면 기본 단어가 안 나오므로 숨긴다
+    // 기본 단어 카테고리 칩. 우리 단어만 쓰고 단어가 wordCount 이상이면 기본 단어가 안 나오므로 숨긴다(모자라면 고른 카테고리에서 채우니 보여준다)
     var cats = Array.isArray(s.categories) ? s.categories : [], catBlock = $('cat-block');
     if (catBlock) {
-      catBlock.hidden = !!(s.customWordsOnly && hasWords);
+      catBlock.hidden = !!(s.customWordsOnly && hasWords && parseWords(s.customWords || '').words.length >= s.wordCount);
       var cn = $('cat-note'); if (cn) cn.textContent = cats.length ? cats.length + '개 골라서 출제' : '전체 ' + CATEGORY_NAMES.length + '개';
       document.querySelectorAll('#cat-row .cat-chip').forEach(function (b) {
         var k = b.getAttribute('data-cat');

@@ -41,7 +41,7 @@
   hintEndAt: 15,      // 마지막 힌트가 뜨는 시점(종료 N초 전), 5..60
   customWords: '',    // 쉼표 구분 사용자 단어, 각 단어 1..20자
   customWordsOnly: false,
-  categories: [],     // 기본 단어 카테고리 이름 배열(server/words.js CATEGORIES 의 키, 예: ['동물','음식']). 빈 배열 = 전체. 모르는 이름은 버리고, 전부 고르면 [] 로 정규화. customWordsOnly 면 영향 없음
+  categories: [],     // 기본 단어 카테고리 이름 배열(server/words.js CATEGORIES 의 키, 예: ['동물','음식']). 빈 배열 = 전체. 모르는 이름은 버리고, 전부 고르면 [] 로 정규화. customWordsOnly 이고 사용자 단어가 wordCount개 이상이면 영향 없음(사용자 단어만 출제). 사용자 단어가 모자라면 이 카테고리 풀에서 채움
   mode: 'classic',    // 'classic' 돌아가며 그리기(기본) | 'fixed' 한 명이 계속 그리기(지정 출제자) | 'blitz' 속도전
   fixedDrawerId: null // fixed 모드 출제자 id. 방에 없는 id/null 이면 호스트가 출제자
 }

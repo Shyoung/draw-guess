@@ -465,7 +465,7 @@ function parseCustomWords(str) {
 /**
  * 후보 단어 선택.
  *  - 한국어 기본 풀에 customWords 병합
- *  - customWordsOnly 이고 사용자 단어가 count개 이상이면 사용자 단어만 사용
+ *  - customWordsOnly 이고 사용자 단어가 count개 이상이면 사용자 단어만 사용(모자라면 categories 풀 + 사용자 단어)
  *  - exclude(이미 나온 단어)는 가능하면 피하고, 부족하면 사용한 단어로 채움
  *  - count개의 서로 다른 무작위 단어 반환 (풀이 부족하면 가능한 만큼)
  * @param {object} settings
