@@ -130,6 +130,7 @@
           <div class="invite-head">
             <span class="invite-label">초대받은 방</span>
             <strong id="invite-code" class="invite-code">----</strong>
+            <p id="invite-full" class="invite-full" role="status" hidden></p>
           </div>
         </div>
 
@@ -374,6 +375,10 @@
                   <input id="set-profanityFilter" type="checkbox" checked>
                   <span>욕설 가리기 <small>채팅의 욕설을 ***로 바꿔요 (닉네임은 항상 검사)</small></span>
                 </label>
+                <label class="check setting-wide">
+                  <input id="set-streamerMode" type="checkbox">
+                  <span>방송 모드 <small>방 코드·주소·출제자 단어를 가려요 (눌러야 보임)</small></span>
+                </label>
               </div>
             </details>
           </div>
@@ -391,6 +396,7 @@
           <div id="overlay-choosing" class="overlay" hidden>
             <div class="card">
               <h3 id="choosing-title" class="card-title">단어를 골라주세요!</h3>
+              <button id="btn-peek-options" class="btn btn-secondary btn-sm" type="button" hidden>후보 보기 <small>방송 화면에 단어가 나가요</small></button>
               <div id="word-options" class="word-options"></div>
               <p id="choosing-wait" class="card-wait" hidden>
                 <span class="dots"><i></i><i></i><i></i></span>

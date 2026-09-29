@@ -441,7 +441,7 @@ io.on('connection', (socket) => {
     }
     if (room.players.length >= MAX_PLAYERS) {
       room.metric('room_full_rejected', {});
-      return ack({ ok: false, error: `방이 가득 찼습니다. (최대 ${MAX_PLAYERS}명)` });
+      return ack({ ok: false, error: `방이 가득 찼어요 (최대 ${MAX_PLAYERS}명). 자리가 나면 다시 참가하기를 눌러 주세요.` });
     }
 
     leaveCurrentRoom(); // 다른 방에 있었다면 먼저 나간다

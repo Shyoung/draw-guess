@@ -154,6 +154,18 @@ async function say(page, text) {
     check((await p2.locator('#settings-summary').textContent()).includes('욕설 가리기 끔'), '욕설 가리기 끄면 요약 칩 "욕설 가리기 끔"');
     await host.check('#set-profanityFilter');
     await sleep(400);
+    // 방송 모드: 켜면 모두의 방 코드가 •••• · 주소에서 ?room= 사라짐 · 칩을 누르면 잠깐 보임. 끄면 원래대로
+    await host.check('#set-streamerMode');
+    await sleep(500);
+    check((await p2.textContent('#room-code')).trim() === '••••' && (await host.textContent('#room-code')).trim() === '••••', '방송 모드: 방 코드 가림(모두)');
+    check(!p2.url().includes('room=') && !host.url().includes('room='), '방송 모드: 주소에서 ?room= 제거', p2.url());
+    check((await p2.locator('#settings-summary').textContent()).includes('방송 모드'), '비방장 요약: "방송 모드" 칩');
+    await p2.click('.room-code-chip');
+    await sleep(100);
+    check((await p2.textContent('#room-code')).trim() === code, '방송 모드: 칩을 누르면 코드가 보임', await p2.textContent('#room-code'));
+    await host.uncheck('#set-streamerMode');
+    await sleep(500);
+    check((await p2.textContent('#room-code')).trim() === code && p2.url().includes('room=' + code), '방송 모드 끄면 코드·주소 복원', p2.url());
     check((await p2.inputValue('#set-rounds')) === '1', '설정 변경 동기화(rounds=1)', await p2.inputValue('#set-rounds'));
     check((await p2.inputValue('#set-drawTime')) === '30', '설정 변경 동기화(drawTime=30)', await p2.inputValue('#set-drawTime'));
     await p2.waitForFunction(() => document.querySelectorAll('#settings-summary .sum-word').length === 12, null, { timeout: 3000 }).catch(() => {});

@@ -197,7 +197,7 @@
     { id: 'p4', name: '판다판다판다판다', avatar: av('🐼', '#baffc9'), score: 0, isDrawing: false, hasGuessed: false }
   ];
   var room = { roomCode: 'MOCK', hostId: ME, phase: 'lobby', round: 0, totalRounds: 3, drawerId: null,
-    settings: { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null, profanityFilter: true }, lobbyStep: 'settings' };
+    settings: { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null, profanityFilter: true, streamerMode: qs.get('streamer') === '1' }, lobbyStep: 'settings' };
   var timeLeft = 0, word = '';
   function st() {
     players.forEach(function (p) { p.isDrawing = p.id === room.drawerId; });
@@ -292,6 +292,7 @@
     emit: function (ev, payload, ack) {
       if (typeof payload === 'function') { ack = payload; payload = undefined; }
       console.log('[mock] C→S', ev, payload === undefined ? '' : payload);
+      if (ev === 'room:join' && qs.get('full') === '1') { if (ack) ack({ ok: false, error: '방이 가득 찼어요 (최대 12명). 자리가 나면 다시 참가하기를 눌러 주세요.' }); return sock; }
       if (ev === 'room:create' || ev === 'room:join') {
         if (payload && payload.name) players[0].name = payload.name; if (payload && payload.avatar) players[0].avatar = payload.avatar;
         if (ack) ack({ ok: true, roomCode: 'MOCK', playerId: ME });

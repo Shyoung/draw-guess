@@ -19,7 +19,7 @@
   ];
   var SIZES = [4, 10, 20, 36];
   var SFX = window.SFX || { play: function () {}, isMuted: function () { return true; }, setMuted: function () {}, toggle: function () { return true; } };
-  var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null, profanityFilter: true };
+  var DEFAULT_SETTINGS = { rounds: 3, drawTime: 80, wordCount: 3, hints: 2, hintEndAt: 15, customWords: '', customWordsOnly: false, mode: 'classic', fixedDrawerId: null, profanityFilter: true, streamerMode: false };
   var REASON_TEXT = { time: '시간 종료!', allGuessed: '모두 맞혔어요!', drawerLeft: '출제자가 나갔어요', notEnoughPlayers: '플레이어가 부족해요' };
   var STORAGE_KEY = 'drawguess.profile';
   var TOKEN_KEY = 'drawguess.token';      // 재접속용 토큰(브라우저별 1개)
@@ -167,6 +167,8 @@
   // 최근 게임 이벤트에서 파생된 UI 데이터
   var ui = {
     wordMask: '', wordLength: 0, word: null, wordOptions: null, chosenWord: null, category: null,
+    // 방송 모드: 방 코드 잠깐 보기 시각 · 내 단어/후보 보기 토글 · 주소 갱신용 이전 값
+    codeRevealUntil: 0, wordPeek: false, optionsPeek: false, streamerWas: null,
     drawerName: '', timeLeft: null, turnEnd: null, ranking: null, optionsKey: '',
     gallery: null,      // 가장 최근 게임의 갤러리 [{ round, word, category, drawerName, guessed, ops }]
     galleryOpen: false,
@@ -638,7 +640,7 @@
     ui.drawerName = p.drawerName ? String(p.drawerName) : playerName(state.drawerId, '출제자');
     ui.wordOptions = Array.isArray(p.wordOptions) ? p.wordOptions.map(String) : null;
     if (ui.wordOptions && ui.wordOptions.length) SFX.play('myTurn');
-    ui.chosenWord = null;
+    ui.chosenWord = null; ui.optionsPeek = false; ui.wordPeek = false;
     ui.word = null; ui.wordMask = ''; ui.category = null; ui.turnEnd = null; ui.ranking = null;
     resetCanvasState();
     setTimeLeft(p.timeLeft != null ? num(p.timeLeft, 15) : 15, true);
@@ -655,7 +657,7 @@
     ui.category = typeof p.category === 'string' ? p.category : null;
     ui.wordLength = num(p.wordLength, 0);
     ui.word = typeof p.word === 'string' ? p.word : null;
-    ui.wordOptions = null; ui.chosenWord = null; ui.turnEnd = null;
+    ui.wordOptions = null; ui.chosenWord = null; ui.turnEnd = null; ui.wordPeek = false;
     ui.drawerName = playerName(state.drawerId, ui.drawerName);
     setTimeLeft(p.timeLeft != null ? num(p.timeLeft, 0) : num(state.settings.drawTime, 80), true);
     state.players.forEach(function (pl) { pl.hasGuessed = false; pl.isDrawing = pl.id === state.drawerId; });
@@ -1198,8 +1200,19 @@
   }
 
   function canEndGame() { return inRoom && isHost() && (state.phase === 'choosing' || state.phase === 'drawing' || state.phase === 'turnEnd'); }
+  /** 방송 모드(방장 설정): 방 코드·주소·출제자 단어를 화면에서 가린다. 눌러야 잠깐 보인다 */
+  function streamer() { return !!(state.settings && state.settings.streamerMode); }
+  function revealRoomCode() {
+    if (!streamer()) return;
+    ui.codeRevealUntil = Date.now() + 4000; renderTopbar();
+    setTimeout(renderTopbar, 4100);
+  }
   function renderTopbar() {
-    var rc = $('room-code'); if (rc) rc.textContent = state.roomCode || '----';
+    var rc = $('room-code'), chip = rc ? rc.closest('.room-code-chip') : null;
+    var hideCode = streamer() && Date.now() >= ui.codeRevealUntil;
+    if (rc) rc.textContent = hideCode ? '••••' : (state.roomCode || '----');
+    if (chip) { chip.classList.toggle('hidden-code', hideCode); chip.title = streamer() ? '방송 모드: 눌러서 4초 동안 방 코드 보기' : ''; }
+    if (inRoom && ui.streamerWas !== streamer()) { ui.streamerWas = streamer(); pushRoomEntry(); } // 방송 모드면 주소에서 ?room= 을 뺀다
     var beg = $('btn-end-game'); if (beg) beg.hidden = !canEndGame();
     if (leaveDialogOpen() && leaveIntent === 'end' && !canEndGame()) closeLeaveDialog(); // 그 사이 게임이 끝났거나 방장이 바뀜
     var ri = $('round-indicator');
@@ -1221,6 +1234,13 @@
       if (isDrawer() && ui.word) {
         var s = el('span', 'word-secret'); s.appendChild(el('span', 'label', '내 단어')); s.appendChild(el('span', 'word', ui.word));
         if (ui.category) s.appendChild(el('span', 'word-category', ui.category));
+        if (streamer()) {
+          // 방송 화면에 단어가 그대로 나가지 않게 흐리게. 누르면 보이고 다시 누르면 가린다
+          s.classList.add('peekable'); s.classList.toggle('peek', !!ui.wordPeek);
+          s.appendChild(el('span', 'peek-hint', ui.wordPeek ? '눌러서 가리기' : '눌러서 보기'));
+          s.setAttribute('role', 'button'); s.tabIndex = 0;
+          s.addEventListener('click', function () { ui.wordPeek = !ui.wordPeek; renderWordArea(); });
+        }
         wa.appendChild(s);
       } else if (ui.wordMask) {
         var maskEl = maskNode(ui.wordMask, ui.wordLength);
@@ -1399,7 +1419,7 @@
     setVal('set-rounds', s.rounds); setVal('set-drawTime', s.drawTime); setVal('set-wordCount', s.wordCount);
     setVal('set-hints', s.hints); setVal('set-hintEndAt', s.hintEndAt);
     setVal('set-customWords', s.customWords || ''); setVal('set-customWordsOnly', s.customWordsOnly);
-    setVal('set-profanityFilter', s.profanityFilter !== false);
+    setVal('set-profanityFilter', s.profanityFilter !== false); setVal('set-streamerMode', !!s.streamerMode);
     var fixed = s.mode === 'fixed';
     // 게임 길이 · 예상 시간 · 우리만의 단어 · 요약(방장이 아닌 사람)
     var preset = matchPreset(s), ps = presetsFor(s.mode), est = estimateGame(s);
@@ -1421,6 +1441,7 @@
         var chips = [[preset ? PRESET_NAMES[preset] : '직접 설정', 'sum-main'], [fixed ? s.rounds + '문제' : s.rounds + '라운드'], ['한 턴 ' + s.drawTime + '초'],
           [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분'],
           [s.profanityFilter === false ? '욕설 가리기 끔' : '욕설 가리기']];
+        if (s.streamerMode) chips.push(['방송 모드', 'sum-main']);
         var cwList = cw ? parseWords(s.customWords || '').words : [];
         var skey = JSON.stringify([chips, cwList, !!s.customWordsOnly]);
         if (sum.getAttribute('data-key') !== skey) {
@@ -1465,7 +1486,7 @@
       }
       if (document.activeElement !== fsel) fsel.value = want || '';
     }
-    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWords', 'set-customWordsOnly', 'set-fixedDrawer', 'set-profanityFilter'].forEach(function (id) {
+    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWords', 'set-customWordsOnly', 'set-fixedDrawer', 'set-profanityFilter', 'set-streamerMode'].forEach(function (id) {
       var n = $(id); if (n) n.disabled = !editable;
     });
     var btn = $('btn-start'), hint = $('start-hint');
@@ -1497,8 +1518,11 @@
         var dn = playerName(state.drawerId, ui.drawerName || '출제자');
         if (title) title.textContent = mine ? '단어를 골라주세요!' : dn + '님이 단어를 고르고 있어요';
         if (wait) wait.hidden = !!mine;
+        var peekBtn = $('btn-peek-options'), blurred = !!(mine && streamer() && !ui.optionsPeek);
+        if (peekBtn) peekBtn.hidden = !blurred;
         if (opts) {
           opts.hidden = !mine;
+          opts.classList.toggle('blurred', blurred); // 방송 모드: 후보를 흐리게, "후보 보기"를 눌러야 고를 수 있다
           if (!mine && opts.childElementCount) opts.innerHTML = ''; // 이전 턴 후보 버튼 잔존 방지
           var key = mine ? ui.wordOptions.join('\u0001') : '';
           if (key !== ui.optionsKey) {
@@ -1760,6 +1784,7 @@
     else { orderChildren(sr, [meCard, card, jr, dv, bc, dm]); }
     if (card) card.hidden = !inv;
     var ic = $('invite-code'); if (ic) ic.textContent = inv || '';
+    var full = $('invite-full'); if (full) { full.hidden = !(inv && landing.fullMsg); full.textContent = landing.fullMsg || ''; }
     if (sr) sr.classList.toggle('is-invite', !!inv);
     if (bj) { bj.textContent = inv ? '이 방에 참가하기' : '참가하기'; bj.className = 'btn btn-lg btn-primary' + (inv ? ' btn-block' : ''); }
     if (bc) { bc.textContent = inv ? '새 방 만들기' : '방 만들기'; bc.className = 'btn btn-lg btn-block btn-outline btn-plus'; }
@@ -1922,7 +1947,7 @@
     else if (!mobileMq.matches) focusNode($('room-code-input'));
   }
   function dismissInvite() {
-    landing.invite = null;
+    landing.invite = null; landing.fullMsg = null;
     try {
       var qs = new URLSearchParams(location.search);
       if (qs.has('room')) { qs.delete('room'); var q = qs.toString(); history.replaceState(history.state, '', location.pathname + (q ? '?' + q : '')); }
@@ -2079,7 +2104,12 @@
     syncAccountProfile(false);
     var payload = { roomCode: code, name: p.name, avatar: p.avatar, token: getToken(), via: landing.invite === code ? 'link' : 'code' };
     var ref = getRef(); if (ref) payload.ref = ref;
-    withAck('room:join', payload, function (ack) { setToken(ack.token); enterRoom(ack.roomCode || code, ack.playerId); });
+    landing.fullMsg = null; renderLanding();
+    withAck('room:join', payload, function (ack) { setToken(ack.token); enterRoom(ack.roomCode || code, ack.playerId); }, function (msg) {
+      // 가득 찬 방(방송·모임): 토스트 대신 초대 카드 안에 남겨 두어 잠시 후 다시 누를 수 있게
+      if (landing.invite === code && /가득/.test(msg)) { landing.fullMsg = msg; renderLanding(); return; }
+      toast(msg, 'error');
+    });
   }
 
   /** 끊긴 방에 같은 자리로 복귀 시도. 실패하면 랜딩으로. */
@@ -2173,8 +2203,9 @@
   function pushRoomEntry() {
     if (!inRoom || !state.roomCode) return;
     try {
-      var qs = new URLSearchParams(location.search); qs.set('room', state.roomCode);
-      var url = '/?' + qs.toString(), st = { inRoom: state.roomCode }, hs = history.state;
+      var qs = new URLSearchParams(location.search);
+      if (streamer()) qs.delete('room'); else qs.set('room', state.roomCode); // 방송 모드: 주소창에 방 코드가 안 보이게
+      var q = qs.toString(), url = q ? '/?' + q : '/', st = { inRoom: state.roomCode }, hs = history.state;
       if (hs && hs.inRoom) history.replaceState(st, '', url); else history.pushState(st, '', url);
     } catch (e) { /* file:// 등 */ }
   }
@@ -2295,6 +2326,7 @@
     if (g('set-customWords')) s.customWords = String(g('set-customWords').value || '').slice(0, 2000);
     if (g('set-customWordsOnly')) s.customWordsOnly = !!g('set-customWordsOnly').checked;
     if (g('set-profanityFilter')) s.profanityFilter = !!g('set-profanityFilter').checked;
+    if (g('set-streamerMode')) s.streamerMode = !!g('set-streamerMode').checked;
     if (s.mode === 'fixed' && g('set-fixedDrawer') && g('set-fixedDrawer').value) s.fixedDrawerId = g('set-fixedDrawer').value;
     return s;
   }
@@ -2314,7 +2346,7 @@
     fillSelect('set-hints', range(0, 5), function (v) { return v === 0 ? '없음' : v + '회'; });
     fillSelect('set-hintEndAt', [5, 10, 15, 20, 30, 45, 60], function (v) { return '종료 ' + v + '초 전'; });
 
-    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWordsOnly', 'set-fixedDrawer', 'set-profanityFilter'].forEach(function (id) {
+    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWordsOnly', 'set-fixedDrawer', 'set-profanityFilter', 'set-streamerMode'].forEach(function (id) {
       var n = $(id); if (n) n.addEventListener('change', sendSettings);
     });
     document.querySelectorAll('#mode-panel .mode-card').forEach(function (b) {
@@ -2369,6 +2401,8 @@
     });
     var bc = $('btn-copy'); if (bc) bc.addEventListener('click', copyInvite);
     labelInviteButton();
+    var chip = document.querySelector('.room-code-chip'); if (chip) chip.addEventListener('click', revealRoomCode);
+    var pk = $('btn-peek-options'); if (pk) pk.addEventListener('click', function () { ui.optionsPeek = true; renderAll(); });
     var bl = $('btn-leave'); if (bl) bl.addEventListener('click', function () { resetToLanding(true); });
     var bs = $('btn-sound'); if (bs) { renderSoundButton(bs); bs.addEventListener('click', function () { SFX.toggle(); renderSoundButton(bs); }); }
     var go = $('btn-gallery-open'); if (go) go.addEventListener('click', openGallery);

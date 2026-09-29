@@ -940,6 +940,41 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(dlNames.length === 1 && /사과.*\.webp$/.test(dlNames[0]) && (await ms.evaluate(() => window.__shared)) === 0, '모바일 내 정보 "모두 저장": 한 번 눌러 바로 내려받기(webp)', dlNames);
     await ms.context().close();
 
+    // ---------- 2-i2. 방송 모드(가짜 소켓): 단어 후보·내 단어 흐리게, 눌러야 보임 · 가득 찬 방 안내 ----------
+    console.log('\n== 방송 모드 (가짜 소켓) ==');
+    const sm = await newPage(browser, '방송모드');
+    await sm.goto(`${URL}/?mock=1&streamer=1&scene=drawer`);
+    await sm.waitForFunction(() => window.__dg && window.__dg.state.phase === 'choosing' && !document.getElementById('overlay-choosing').hidden, null, { timeout: 8000 });
+    await sleep(300);
+    check((await txt(sm, '#room-code')) === '••••' && !sm.url().includes('room='), '방송 모드: 방 코드 •••• · 주소에 room= 없음', sm.url());
+    check(await sm.locator('#btn-peek-options').isVisible() && await sm.locator('#word-options').evaluate((o) => o.classList.contains('blurred') && getComputedStyle(o.querySelector('.word-option')).filter.includes('blur')), '방송 모드: 단어 후보 흐림 + "후보 보기" 버튼');
+    await sm.click('#btn-peek-options');
+    await sleep(100);
+    check(await sm.locator('#btn-peek-options').isHidden() && await sm.locator('#word-options').evaluate((o) => !o.classList.contains('blurred')), '"후보 보기" 누르면 후보가 보임');
+    await sm.click('#word-options .word-option >> nth=0');
+    await sm.waitForFunction(() => window.__dg.state.phase === 'drawing', null, { timeout: 5000 });
+    await sleep(200);
+    const ws = await sm.locator('#word-area .word-secret').evaluate((s) => ({ peekable: s.classList.contains('peekable'), blur: getComputedStyle(s.querySelector('.word')).filter.includes('blur'), hint: s.querySelector('.peek-hint') && s.querySelector('.peek-hint').textContent }));
+    check(ws.peekable && ws.blur && ws.hint === '눌러서 보기', '방송 모드: 출제자 단어 흐림 + "눌러서 보기"', ws);
+    await sm.click('#word-area .word-secret');
+    const ws2 = await sm.locator('#word-area .word-secret').evaluate((s) => ({ blur: getComputedStyle(s.querySelector('.word')).filter.includes('blur'), hint: s.querySelector('.peek-hint').textContent }));
+    check(!ws2.blur && ws2.hint === '눌러서 가리기', '누르면 단어가 보이고 "눌러서 가리기"', ws2);
+    await sm.click('.room-code-chip');
+    await sleep(100);
+    check((await txt(sm, '#room-code')) === 'MOCK', '방송 모드: 칩을 누르면 방 코드 4초 표시');
+    await sm.context().close();
+    // 가득 찬 방: 초대 링크로 들어온 사람은 카드 안에 안내가 남는다(토스트 대신)
+    const fl = await newPage(browser, '가득참');
+    await fl.goto(`${URL}/?mock=1&room=FULL&full=1`);
+    await fl.waitForSelector('#landing-step-profile:not([hidden]), #landing-step-room:not([hidden])', { timeout: 5000 });
+    if (await fl.locator('#landing-step-profile').isVisible()) { await fl.fill('#nick', '늦둥이'); await fl.click('#btn-profile-next'); }
+    await fl.waitForSelector('#invite-card:not([hidden])', { timeout: 3000 });
+    await fl.click('#btn-join');
+    await sleep(300);
+    check(await fl.locator('#invite-full').isVisible() && (await txt(fl, '#invite-full')).includes('가득') && await fl.locator('#invite-card').isVisible() && (await txt(fl, '#invite-code')) === 'FULL', '가득 찬 방: 초대 카드 안에 안내 · 코드 유지', await txt(fl, '#invite-full'));
+    check(await fl.locator('#btn-join').isEnabled(), '가득 찬 방: "이 방에 참가하기" 다시 누를 수 있음');
+    await fl.context().close();
+
     // ---------- 2-j. 모바일: 키보드가 열린 채 채팅 입력 중 → 방장이 게임을 끝내면 키보드를 닫는다 ----------
     console.log('\n== 모바일 입력 중 게임 끝남 (가짜 소켓) ==');
     const mk = await newPage(browser, '모바일키보드', { ...devices['iPhone 13'] });

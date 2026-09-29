@@ -43,7 +43,8 @@
   customWordsOnly: false,
   mode: 'classic',    // 'classic' 돌아가며 그리기(기본) | 'fixed' 한 명이 계속 그리기(지정 출제자) | 'blitz' 속도전
   fixedDrawerId: null, // fixed 모드 출제자 id. 방에 없는 id/null 이면 호스트가 출제자
-  profanityFilter: true // 채팅 욕설을 '*' 로 가림(기본 켜짐). 닉네임 검사는 설정과 무관하게 항상
+  profanityFilter: true, // 채팅 욕설을 '*' 로 가림(기본 켜짐). 닉네임 검사는 설정과 무관하게 항상
+  streamerMode: false   // 방송 모드. 서버는 값만 보관·전파하고, 클라이언트가 방 코드(••••, 누르면 4초)·주소의 ?room=·출제자 단어/후보(흐림, 눌러야 보임)를 가린다
 }
 ```
 서버는 범위를 벗어나면 clamp 한다.
@@ -57,7 +58,7 @@
 | `room:create` | `{ name, avatar, token?, ref? }` | ack `{ ok:true, roomCode, playerId, token }` 또는 `{ ok:false, error }`. `token`(영숫자·`_-` 8~64자)은 재접속용이며 없으면 서버가 발급. `ref`(선택, 영숫자·`_-` 1~24자)는 유입 경로 코드 — 클라이언트가 `?ref=` 로 받아 sessionStorage 에 두었다가 보낸다. 지표에만 쓰고 방 상태에는 들어가지 않는다 |
 | `room:rejoin` | `{ roomCode, token }` | 같은 `token`을 가진 플레이어가 방에 있으면(연결 상태 무관) 그 자리로 복귀: 같은 `playerId`·점수·순서 유지. 옛 소켓이 아직 살아 있으면 그쪽에 `session:replaced`를 보내고 떼어낸다(새로고침 경합·다른 탭). 유예 시간(기본 60초, `RECONNECT_GRACE_MS`)이 지나 퇴장된 뒤에는 실패. ack 형식은 create와 동일. 성공 시 `room:state`와 진행 상황(catch-up)이 개별 전송된다 |
 | `react:send` | `{ kind:'up'\|'down' }` | drawing 중 비출제자. 기록되지 않고 방 전체에 `react:show`로 중계. 플레이어당 초당 8회 제한 |
-| `room:join` | `{ roomCode, name, avatar, token?, ref?, via? }` | `via`(선택) `'link'`(초대 링크 `?room=` 로 들어옴) \| `'code'`(코드 직접 입력, 기본). `ref` 는 create 와 같음. 둘 다 지표용. 같은 `token`이 이미 그 방에 있으면 새 자리를 만들지 않고 그 자리로 복귀(이름·아바타는 새 값으로 갱신, ack의 `playerId`는 기존 id). ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명. roomCode는 대문자 정규화 |
+| `room:join` | `{ roomCode, name, avatar, token?, ref?, via? }` | `via`(선택) `'link'`(초대 링크 `?room=` 로 들어옴) \| `'code'`(코드 직접 입력, 기본). `ref` 는 create 와 같음. 둘 다 지표용. 같은 `token`이 이미 그 방에 있으면 새 자리를 만들지 않고 그 자리로 복귀(이름·아바타는 새 값으로 갱신, ack의 `playerId`는 기존 id). ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명(가득 차면 `{ ok:false, error:'방이 가득 찼어요 (최대 12명). 자리가 나면 다시 참가하기를 눌러 주세요.' }`, 초대 링크로 온 클라이언트는 초대 카드 안에 이 안내를 남긴다). roomCode는 대문자 정규화 |
 | `room:leave` | – | 방 나가기 |
 | `room:settings` | `{ settings }` | 호스트, lobby에서만. 성공 시 모두에게 `room:state` |
 | `results:done` | – | 게임 종료 결과 화면을 닫음(본인). `players[].atResults` 가 false 로 바뀜 |

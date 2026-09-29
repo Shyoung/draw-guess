@@ -47,6 +47,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   mode: 'classic',      // 'classic' 돌아가며 그리기 | 'fixed' 한 명이 계속 그리기(지정 출제자)
   fixedDrawerId: null,  // fixed 모드의 출제자. null 이면 호스트
   profanityFilter: true, // 채팅 욕설을 *** 로 가림. 방장이 끌 수 있다(닉네임 검사는 항상)
+  streamerMode: false,   // 방송 모드: 클라이언트가 방 코드·주소·출제자 단어를 가린다(눌러야 보임). 서버는 값만 보관
 });
 const MODES = ['classic', 'fixed', 'blitz'];
 // 속도전(blitz): 단어 후보 없이 자동 선택, 힌트 없음, 짧은 시간. 맞힌 순서로 점수(1등 400, 2등 300, 3등 200, 이후 100)
@@ -844,6 +845,7 @@ class Room {
     }
     if ('customWordsOnly' in patch) s.customWordsOnly = Boolean(patch.customWordsOnly);
     if ('profanityFilter' in patch) s.profanityFilter = Boolean(patch.profanityFilter);
+    if ('streamerMode' in patch) s.streamerMode = Boolean(patch.streamerMode);
     if ('mode' in patch && MODES.includes(patch.mode)) s.mode = patch.mode;
     if ('fixedDrawerId' in patch) {
       // 방에 있는 사람만 출제자로 지정 가능. 아니면 null(=호스트)
