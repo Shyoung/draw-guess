@@ -449,10 +449,38 @@ async function say(page, text) {
     await host.locator('#gallery-grid .gallery-item .btn').first().click();
     const dl = await dlPromise;
     check(!!dl && /\.png$/.test(dl.suggestedFilename()), '개별 PNG 다운로드 파일명 .png', dl && dl.suggestedFilename());
+    // F5 워드마크: 내려받은 PNG 를 다시 읽어 픽셀을 본다. rect 의 음수 x·y 는 오른쪽·아래 끝 기준.
+    //   dark = 연필색(#2b2d42) 근처 픽셀 수, bg = 띠 배경 한 점의 색
+    async function pngProbe(d, rect, bgAt) {
+      const p = d && await d.path().catch(() => null); if (!p) return null;
+      const b64 = fs.readFileSync(p).toString('base64');
+      return host.evaluate(([b64, rect, bgAt]) => new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height;
+          const c = cv.getContext('2d'); c.drawImage(img, 0, 0);
+          const x = rect.x < 0 ? img.width + rect.x : rect.x, y = rect.y < 0 ? img.height + rect.y : rect.y;
+          const px = c.getImageData(x, y, rect.w, rect.h).data; let dark = 0;
+          for (let i = 0; i < px.length; i += 4) if (px[i] < 90 && px[i + 1] < 90 && px[i + 2] < 110) dark++;
+          const bx = bgAt.x < 0 ? img.width + bgAt.x : bgAt.x, by = bgAt.y < 0 ? img.height + bgAt.y : bgAt.y;
+          const b = c.getImageData(bx, by, 1, 1).data;
+          resolve({ w: img.width, h: img.height, dark, bg: [b[0], b[1], b[2]] });
+        };
+        img.onerror = () => resolve(null);
+        img.src = 'data:image/png;base64,' + b64;
+      }), [b64, rect, bgAt]);
+    }
+    const isPaper = (bg) => !!bg && bg[0] === 255 && bg[1] === 248 && bg[2] === 236;
+    if (dl) await dl.saveAs(path.join(SHOTS, 'e2e-gallery-item.png')).catch(() => {});
+    const wm1 = await pngProbe(dl, { x: -180, y: 608, w: 160, h: 56 }, { x: 400, y: 604 });
+    check(!!wm1 && wm1.w === 800 && wm1.h === 672 && wm1.dark > 60 && isPaper(wm1.bg), '개별 PNG: 캡션 띠(종이색) 오른쪽에 연필색 워드마크', wm1);
     const dlSheet = host.waitForEvent('download', { timeout: 5000 }).catch(() => null);
     await host.click('#btn-gallery-sheet');
     const ds = await dlSheet;
     check(!!ds && /전체\.png$/.test(ds.suggestedFilename()), '한 장으로 모아 저장: 시트 PNG 다운로드', ds && ds.suggestedFilename());
+    if (ds) await ds.saveAs(path.join(SHOTS, 'e2e-gallery-sheet.png')).catch(() => {});
+    const wm2 = await pngProbe(ds, { x: -200, y: -60, w: 180, h: 56 }, { x: 8, y: -8 });
+    check(!!wm2 && wm2.w === 1264 && wm2.dark > 60 && isPaper(wm2.bg), '시트 PNG: 아래 여백(종이색) 오른쪽에 연필색 워드마크', wm2);
     // 모두 저장(데스크톱): 그림마다 PNG 한 장씩 — 다운로드 3번
     const allNames = [];
     const onDl = (d) => allNames.push(d.suggestedFilename());

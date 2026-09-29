@@ -806,32 +806,54 @@
     var a = document.createElement('a'); a.href = dataUrl; a.download = filename;
     document.body.appendChild(a); a.click(); setTimeout(function () { a.remove(); }, 0);
   }
-  /** 그림 + 아래 캡션 띠를 합친 PNG */
+  // ---------- 저장 이미지의 브랜드 워드마크(F5) ----------
+  //   참가자가 올리는 이미지가 유일한 시각 광고. 종이색 바탕에 연필색 "이뭔그"(로고 글꼴), 그림을 가리지 않는 여백에만. 끄는 옵션 없음.
+  //   주소는 도메인이 정해진 뒤 워드마크 옆에 굽는다(BACKLOG #2).
+  var PAPER = '#fff8ec', PENCIL = '#2b2d42', WORDMARK = '이뭔그';
+  function wordmarkFont(px) { return '700 ' + px + 'px "Gaegu", "Pretendard", "Malgun Gothic", sans-serif'; }
+  /** 오른쪽 끝(right)·세로 중심(midY)에 맞춰 워드마크를 그리고 너비를 돌려준다 */
+  function drawWordmark(c2, right, midY, px) {
+    c2.save();
+    c2.font = wordmarkFont(px); c2.textAlign = 'right'; c2.textBaseline = 'middle'; c2.fillStyle = PENCIL;
+    c2.fillText(WORDMARK, right, midY);
+    var w = c2.measureText(WORDMARK).width;
+    c2.restore();
+    return w;
+  }
+  /** 로고 글꼴(Gaegu)은 첫 화면에서 쓰여 보통 이미 있지만, 캔버스에 쓰기 전에 한 번 더 요청해 둔다 */
+  function preloadWordmarkFont() {
+    try { if (document.fonts && document.fonts.load) document.fonts.load(wordmarkFont(40), WORDMARK); } catch (e) { /* ignore */ }
+  }
+  /** 그림 + 아래 캡션 띠(종이색, 오른쪽에 워드마크)를 합친 PNG */
   function galleryItemPng(i) {
     var g = ui.gallery[i];
     var src = renderOpsToCanvas(g.ops);
-    var cv = document.createElement('canvas'); cv.width = W; cv.height = H + 72;
+    var band = 72;
+    var cv = document.createElement('canvas'); cv.width = W; cv.height = H + band;
     var c2 = cv.getContext('2d');
     c2.fillStyle = '#ffffff'; c2.fillRect(0, 0, cv.width, cv.height);
     c2.drawImage(src, 0, 0);
-    c2.fillStyle = '#fff1d6'; c2.fillRect(0, H, W, 72);
-    c2.fillStyle = '#2b2d42'; c2.font = 'bold 26px "Pretendard", "Malgun Gothic", sans-serif'; c2.textBaseline = 'middle';
-    c2.fillText(g.word + (g.category ? '  (' + g.category + ')' : ''), 20, H + 26);
+    c2.fillStyle = PAPER; c2.fillRect(0, H, W, band);
+    var wmW = drawWordmark(c2, W - 20, H + band / 2, 40);
+    var textMax = W - 20 - wmW - 40; // 캡션이 워드마크를 덮지 않도록
+    c2.fillStyle = PENCIL; c2.font = 'bold 26px "Pretendard", "Malgun Gothic", sans-serif'; c2.textBaseline = 'middle';
+    c2.fillText(g.word + (g.category ? '  (' + g.category + ')' : ''), 20, H + 26, textMax);
     c2.fillStyle = '#6c6f85'; c2.font = '16px "Pretendard", "Malgun Gothic", sans-serif';
-    c2.fillText('✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘 · ' + (g.round ? g.round + '라운드 · ' : '') + '이뭔그 — 이게 뭔 그림인데?', 20, H + 54);
+    c2.fillText('✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘' + (g.round ? ' · ' + g.round + '라운드' : '') + ' · 이게 뭔 그림인데?', 20, H + 54, textMax);
     return cv.toDataURL('image/png');
   }
-  /** 전체를 한 장에 모은 시트 PNG (3열) */
+  /** 전체를 한 장에 모은 시트 PNG (3열). 아래 여백에 워드마크 */
   function gallerySheetPng() {
     var items = ui.gallery || [];
-    var cols = Math.min(3, Math.max(1, items.length)), cellW = 400, cellH = 300, cap = 44, pad = 16, head = 64;
+    var cols = Math.min(3, Math.max(1, items.length)), cellW = 400, cellH = 300, cap = 44, pad = 16, head = 64, foot = 64;
     var rows = Math.ceil(items.length / cols);
     var cv = document.createElement('canvas');
-    cv.width = pad + cols * (cellW + pad); cv.height = head + rows * (cellH + cap + pad) + pad;
+    cv.width = pad + cols * (cellW + pad); cv.height = head + rows * (cellH + cap + pad) + foot;
     var c2 = cv.getContext('2d');
-    c2.fillStyle = '#fff8ec'; c2.fillRect(0, 0, cv.width, cv.height);
-    c2.fillStyle = '#2b2d42'; c2.font = 'bold 26px "Pretendard", "Malgun Gothic", sans-serif'; c2.textBaseline = 'middle';
-    c2.fillText('🖼 그림 갤러리 · 방 ' + (state.roomCode || '') + ' · ' + items.length + '장', pad, head / 2);
+    c2.fillStyle = PAPER; c2.fillRect(0, 0, cv.width, cv.height);
+    c2.fillStyle = PENCIL; c2.font = 'bold 26px "Pretendard", "Malgun Gothic", sans-serif'; c2.textBaseline = 'middle';
+    c2.fillText('🖼 그림 갤러리 · 방 ' + (state.roomCode || '') + ' · ' + items.length + '장', pad, head / 2, cv.width - pad * 2);
+    drawWordmark(c2, cv.width - pad, cv.height - foot / 2, 40);
     items.forEach(function (g, i) {
       var col = i % cols, row = Math.floor(i / cols);
       var x = pad + col * (cellW + pad), y = head + row * (cellH + cap + pad);
@@ -880,7 +902,7 @@
     if (!list.length) { toast('저장할 그림이 없어요', 'error'); return; }
     saveManyFiles(list).then(function () { toast('그림 ' + list.length + '장을 한 장씩 저장했어요', 'ok'); });
   }
-  function openGallery() { if (!ui.gallery || !ui.gallery.length) { toast('아직 갤러리에 담을 그림이 없어요'); return; } ui.galleryOpen = true; renderGallery(); }
+  function openGallery() { if (!ui.gallery || !ui.gallery.length) { toast('아직 갤러리에 담을 그림이 없어요'); return; } preloadWordmarkFont(); ui.galleryOpen = true; renderGallery(); }
   function closeGallery() { ui.galleryOpen = false; renderGallery(); }
   function renderGallery() {
     var m = $('overlay-gallery'); if (!m) return;
