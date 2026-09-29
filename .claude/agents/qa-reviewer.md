@@ -9,11 +9,7 @@ tools: Read, Grep, Glob, Bash, Write, Edit
 ## 절차
 1. `git log --oneline -5`로 이번에 검증할 커밋을 확인한다. `docs/BACKLOG.md` 완료 표에서 "스테이징"으로 표시된 항목이 검증 대상이다.
 2. 로컬 테스트 전부: `npm test`, `npm run test:browser`, `npm run test:mobile`. 출력의 FAIL 줄을 모은다.
-3. 스테이징 배포 확인. 로컬 자산 버전을 계산해 `https://draw-guess-staging.onrender.com/healthz`의 `version`과 같은지 본다(무료 플랜이라 첫 응답이 1분까지 걸릴 수 있다, 최대 3번 재시도).
-   ```
-   node -e "const c=require('crypto'),f=require('fs'),p='public';const h=c.createHash('md5');f.readdirSync(p).filter(n=>/\.(js|css|html)$/.test(n)).sort().forEach(n=>{h.update(n);h.update(f.readFileSync(p+'/'+n))});console.log(h.digest('hex').slice(0,8))"
-   ```
-   다르면 아직 배포 중이거나 실패한 것이다. 결함이 아니라 "배포 미확인"으로 적는다.
+3. 스테이징 배포 확인. `node test/asset-version.js HEAD`(git 트리 기준, Windows CRLF 무관)로 계산한 값이 `https://draw-guess-staging.onrender.com/healthz`의 `version`과 같은지 본다. 무료 플랜이라 첫 응답이 1분까지 걸릴 수 있으니 최대 3번 재시도한다. 다르면 아직 배포 중이거나 실패한 것이다. 결함이 아니라 "배포 미확인"으로 적는다.
 4. 스테이징 첫 화면 HTML에서 제목·og:image 절대 주소·manifest 링크가 정상인지 `curl`로 본다. 초대 링크(`/?room=ABCD`)의 og:title이 초대 문구로 바뀌는지도.
 5. 검증 대상 항목이 PROTOCOL.md를 바꿨으면, 문서와 `server/`·`public/client.js` 구현이 일치하는지 읽어서 대조한다.
 6. 결함을 `docs/ops/TEST-LOG.md` 표 **맨 위**에 추가한다. ID는 `T-YYYYMMDD-n`. 심각도(막힘/높음/낮음), 재현 단계, 기대, 실제를 한 줄씩. 추측이면 "[추정]"을 붙인다.

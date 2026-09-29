@@ -14,7 +14,7 @@ description: 이뭔그(draw-guess) 운영 사이클 한 바퀴. docs/ops/BOARD.m
 
 ## 1. 답 반영
 "결정 필요" 표에서 답이 채워진 줄을 처리한다. 사용자가 채팅으로 "n번 GO"라고 했으면 그것도 같은 답이다.
-- **GO — main 머지**: 최근 QA 보고가 "가능"일 때만. `git checkout main && git merge develop && git push origin main && git checkout develop`. 2~3분 뒤 `https://draw-guess-i927.onrender.com/healthz`의 `version`이 로컬 자산 버전(qa-reviewer 정의의 node 한 줄 명령)과 같은지 확인. 확인되면 BACKLOG 완료 표의 해당 항목을 `— 프로덕션`으로 바꾼다. QA 보고가 없거나 "불가"면 머지하지 않고 그 이유를 결정 필요 줄에 적는다.
+- **GO — main 머지**: 최근 QA 보고가 "가능"일 때만. `git checkout main && git merge develop && git push origin main && git checkout develop`. 2~3분 뒤 `https://draw-guess-i927.onrender.com/healthz`의 `version`이 `node test/asset-version.js origin/main` 값과 같은지 확인. 확인되면 BACKLOG 완료 표의 해당 항목을 `— 프로덕션`으로 바꾼다. QA 보고가 없거나 "불가"면 머지하지 않고 그 이유를 결정 필요 줄에 적는다.
 - **GO — 그 외**(돈·범위·정책): 관련 BACKLOG 조건을 "충족"으로 바꾸거나 BOARD 방향 메모에 한 줄 남긴다.
 - **STOP**: 관련 BACKLOG 항목을 "보류" 섹션(없으면 만든다)으로 옮기고 이유를 적는다.
 - **보류**: 그대로 두고 답 칸에 날짜를 덧붙인다.
