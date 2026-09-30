@@ -52,6 +52,7 @@ Supabase 무료 티어로 Google·카카오 로그인, 프로필, 사용자 단�
 server/index.js   Express 정적 서빙 + Socket.IO 핸들러, 방 레지스트리
 server/game.js    방/게임 상태 머신 (턴, 타이머, 힌트, 점수, 드로잉 op 기록)
 server/words.js   한국어 단어 사전(동물·음식·탈것·옷·악기·스포츠·사물·장소·나라·직업·행동·신체·브랜드 13개 분류)과 후보 선택
+server/textmatch.js 마스크(_ _ _)·초성 힌트·정답 정규화·편집 거리 헬퍼 (game.js·words.js 공용)
 public/           클라이언트 (index.html, style.css, client.js)
 test/smoke.js     socket.io-client 기반 E2E 스모크 테스트 (npm test)
 PROTOCOL.md       서버-클라이언트 이벤트 계약
