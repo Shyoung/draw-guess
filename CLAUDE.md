@@ -18,6 +18,7 @@
 - 조율: `docs/ops/BOARD.md` (결정 필요 · 방향 메모 · 예정 일정 · 역할 상태 · 사이클 로그). 실행은 `/ops-cycle`.
 - 개발 목록: `docs/BACKLOG.md`(승인된 것만 "다음" 표) · 결함: `docs/ops/TEST-LOG.md` · 큰 그림: `docs/ROADMAP.md`
 - 역할(`.claude/agents/`): marketing-strategist · product-planner · builder · qa-reviewer · fixer. 이 세션이 draw-guess 폴더에서 열려야 역할 이름이 잡힌다.
+- **기획 세션**: 새 모드·기능 아이디어를 운영자와 대화로 뽑을 때는 `/product-session`. 제품 문서(`docs/GAME-MODES.md`, `docs/PRD-PLATFORM.md`, `docs/product/`, 로드맵 제품 줄)의 주인은 product-planner다. 대화에서 나온 아이디어는 세션이 끝나기 전에 문서에 남긴다.
 - **GO 없이 하지 않는 것**: main 머지, 외부 게시·DM·메일, 돈 쓰는 결정, 신규 기능·모드(설계 문서 승인 전), 개인정보 처리방침 변경, 데이터 삭제.
 
 ## 마케팅 원칙
