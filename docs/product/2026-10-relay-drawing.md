@@ -76,7 +76,7 @@
 |---|---|---|---|
 | R0 ✅ 09-30 0b743e1 | **조합 제시어**(`server/words.js`): 템플릿·`pickCombos`·요소 마스크·`matchParts`. `categories`·`customWords`·`customWordsOnly` 반영. 단위 테스트 | 작음 | 후보 3개가 서로 다른 카테고리 요소로 나오고, "바다에서 고양이가 축구해"가 정답, "고양이"만은 1/3 |
 | R1 ✅ 09-30 0294fce | **relay 코어**(PROTOCOL 갱신 → `relay` 모드·순서 밀기·n문제 종료·첫 주자 선택·구간 타이머·`game:baton`·제시어 공개 범위·툴바 권한(`draw:*`는 현재 주자만)·구간 보호). 소켓 테스트(순서·권한·공개 대상·undo 범위) | 중간 | 3명 방에서 1번 문제 A→B가 그리고 C가 맞힘, 2번은 B→C/A. B는 자기 구간 전엔 마스크만 |
-| R2 | **맞히기**: 요소 판정·부분 정답 피드백·`hint:request`·점수(맞히는 사람 감점·주자 200)·정답 시 즉시 종료·`guesserLeft`·`game:over` 갤러리 `drawerIds`·`guesserId` | 중간 | 힌트 2회 뒤 정답이면 점수 ×0.5, 아직 안 그린 주자는 0점 |
+| R2 ✅ 09-30 cff9969 | **맞히기**: 요소 판정·부분 정답 피드백·`hint:request`·점수(맞히는 사람 감점·주자 200)·정답 시 즉시 종료·`guesserLeft`·`game:over` 갤러리 `drawerIds`·`guesserId` | 중간 | 힌트 2회 뒤 정답이면 점수 ×0.5, 아직 안 그린 주자는 0점 |
 | R3 | **끊김·복원**: 주자 끊김 유예·구간 건너뜀·맞히는 사람 끊김·`notEnoughPlayers`·스냅샷 저장/복원·catch-up(`game:drawing`+`baton` 상태+마스크·힌트 수) | 중간 | 서버 재시작 뒤 같은 구간·같은 마스크로 이어짐(`test/persist.js`·`reconnect.js` 패턴) |
 | R4 | **클라이언트 A(주자)**: 모드 카드(3명 미만 비활성)·설정 화면·상단 띠·내 차례 배너(진동)·툴바 잠금·제시어/마스크 표시·주자 채팅 | 중간 | `test:browser` 통과, 폰에서 구간 전환 시 배치 깜빡임 없음 |
 | R5 | **클라이언트 B(맞히는 사람·결과)**: 힌트 버튼(남은 횟수·감점 표시)·부분 정답 표시·맞히기 배치·결과 갤러리 공동 작가 캡션·그림 보관(`drawerIds`) | 중간 | `test:mobile` 통과, 갤러리 PNG 캡션에 "A·B·C" |
@@ -114,6 +114,7 @@
 | 09-30 | 주자 끊김은 문제를 끝내지 않는다: 구간 타이머는 계속 가고 경계에서 다음 주자로 넘어간다(기존 `DRAWER_GRACE_MS` → `drawerLeft` 경로는 relay에서 쓰지 않음). 방을 완전히 나간 주자의 구간은 건너뛴다 | 설계 §3-2 참가·이탈 규칙을 서버 흐름으로 옮김 |
 | 09-30 | 요소 수를 `max(2, min(주자 수, 3))`로 — 주자 1명(ALLOW_SOLO 2명 방)도 요소 2개 | R-20260930-1. 요소 1개는 조합이 아니고 로컬 확인용 경로에 코드를 더 두지 않으려고 |
 | 09-30 | R1 builder 보고 반영: `game:drawing.relay`에 `legTimeLeft` 추가 · 주자 채널은 choosing 단계에도 적용(첫 주자 후보 스포 방지) · 차례 전 주자가 완전히 나가면 `legCount`·`totalTime`·`timeLeft`를 한 구간만큼 줄임 · 현재 주자가 나가면 남은 구간 시간을 빼고 즉시 다음 구간 · choosing 중 첫 주자가 나가면 다음 주자가 새 후보로 선택 · 문제 중 인원 부족 기준 3명(`notEnoughPlayers`) | 구현하며 드러난 빈칸을 채움. 시간 불변식 `timeLeft = legTimeLeft + legTime × (legCount−1−legIndex)` 유지 |
+| 09-30 | R2 builder 보고 반영: `gallery[].guessed`는 기존처럼 숫자(relay 0/1) · 맞히는 사람 퇴장은 인원 검사보다 먼저 봐서 `guesserLeft` → 다음 문제에서 `notEnoughPlayers` · 정답 때 본인 마스크는 요소 형식(`고 양 이 · 축 구`) · `game:baton`에 `hintsUsed` · `hint:request`는 ack 없음 · 요소가 다른 요소를 품으면 한 문장으로 둘 다 맞을 수 있음(판정 규칙대로, 막지 않음) | 기존 클라이언트·그림 보관 코드와 형식을 맞춤 |
 
 | ID | 심각도 | 재현 | 상태 |
 |---|---|---|---|
