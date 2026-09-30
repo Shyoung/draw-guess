@@ -63,7 +63,7 @@ const overallTimer = setTimeout(() => {
   cleanup(1);
 }, OVERALL_TIMEOUT_MS);
 
-function startServer() {
+function startServer(attemptsLeft = 3) {
   return new Promise((resolve, reject) => {
     serverProc = spawn(process.execPath, ['server/index.js'], {
       cwd: ROOT,
@@ -71,21 +71,37 @@ function startServer() {
       env: { ...process.env, PORT: String(PORT), RECONNECT_GRACE_MS: '0' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const timer = setTimeout(() => reject(new Error('server did not start within 15s')), 15000);
+    let addrInUse = false;
+    let settled = false;
+    const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error('server did not start within 15s')); } }, 15000);
     serverProc.stdout.on('data', (d) => {
       const s = d.toString();
       process.stdout.write(`[server] ${s}`);
-      if (s.includes('http://')) {
+      if (!settled && s.includes('http://')) {
+        settled = true;
         clearTimeout(timer);
         resolve();
       }
     });
-    serverProc.stderr.on('data', (d) => process.stderr.write(`[server:err] ${d}`));
+    serverProc.stderr.on('data', (d) => {
+      if (String(d).includes('EADDRINUSE')) addrInUse = true;
+      process.stderr.write(`[server:err] ${d}`);
+    });
+    // 직전 프로세스가 방금 닫은 포트가 (Windows TIME_WAIT 등으로) 아직 안 풀렸을 때 짧게 재시도
     serverProc.on('exit', (code, sig) => {
       serverExited = true;
-      if (!shuttingDown) check('server process stays alive', false, `exited code=${code} sig=${sig}`);
+      if (settled) return;
+      if (addrInUse && attemptsLeft > 1) {
+        settled = true;
+        clearTimeout(timer);
+        setTimeout(() => { startServer(attemptsLeft - 1).then(resolve, reject); }, 300);
+      } else if (!shuttingDown) {
+        check('server process stays alive', false, `exited code=${code} sig=${sig}`);
+      }
     });
     serverProc.on('error', (err) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       reject(err);
     });
