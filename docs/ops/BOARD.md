@@ -1,7 +1,7 @@
 # 운영 보드 (BOARD)
 
 갱신 2026-09-30 (프로덕션 6128c47d) · 세션(에이전트)들이 서로의 상태를 보는 유일한 칠판. 사람이 쓰는 칸은 **"답"**과 **"방향 메모"** 두 곳뿐이고, 나머지는 `/ops-cycle`이 갱신한다.
-개발 할 일의 단일 목록은 [../BACKLOG.md](../BACKLOG.md), 마케팅 근거는 [../marketing/2026-10-growth-plan.md](../marketing/2026-10-growth-plan.md), 결함은 [TEST-LOG.md](TEST-LOG.md).
+큰 그림은 [../ROADMAP.md](../ROADMAP.md), 개발 할 일의 단일 목록은 [../BACKLOG.md](../BACKLOG.md), 마케팅 근거는 [../marketing/2026-10-growth-plan.md](../marketing/2026-10-growth-plan.md), 결함은 [TEST-LOG.md](TEST-LOG.md).
 
 ## 규칙
 - **알아서 한다**: develop 커밋·push(스테이징 배포), 테스트, BACKLOG·TEST-LOG·문서 갱신, 마케팅 제안·문구 초안, 성장 계획서 수정.
