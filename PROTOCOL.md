@@ -161,7 +161,7 @@
 ## 턴/라운드 흐름
 1. `game:start` → phase `choosing`. 출제 순서는 참가 순서 (players 배열 순). 각 라운드마다 모든 플레이어가 1회씩 출제.
 2. choosing: 15초. 시간 초과 시 첫 후보를 자동 선택. 단어 후보는 한국어 기본 사전 + customWords에서 중복 없이 선택. 한 게임 내 이미 나온 단어는 피한다(가능하면).
-3. drawing: `drawTime`초. 모두 맞히면 즉시 종료(`allGuessed`). 출제자가 나가면 `drawerLeft`. 인원이 2명 미만이 되면 `notEnoughPlayers` 후 game over 처리(lobby 복귀).
+3. drawing: `drawTime`초. 모두 맞히면 즉시 종료(`allGuessed`). 출제자가 나가면(끊김은 `DRAWER_GRACE_MS` 유예 뒤) `drawerLeft`. 인원이 2명 미만이 되면 `notEnoughPlayers` 후 game over 처리(lobby 복귀).
 4. turnEnd: 5초. 다음 출제자로. 마지막 라운드의 마지막 턴 후 `game:over` → 방은 바로 lobby(자동 복귀 10초 없음). 결과 화면은 각자 `results:done` 으로 닫는다.
 5. 중간 참가자는 현재 턴에는 정답 맞히기 참여 가능, 출제는 다음 라운드부터(현재 라운드 출제 순서에 끼워 넣지 않는다).
 6. 게임 종료 후 lobby로 돌아가도 점수는 다음 `game:start` 때까지 유지 표시, `game:start` 시 0으로 초기화.
@@ -175,7 +175,7 @@
 ## 방 관리
 - roomCode: 대문자 A-Z 4글자, 충돌 없게 생성. 
 - 호스트가 나가면 참가 순서상 다음 사람이 호스트. 마지막 사람이 나가면 방 삭제.
-- 연결 끊김 = 유예 시간(`RECONNECT_GRACE_MS`, 기본 60초) 동안 자리·점수 유지(`connected:false`). 그 안에 `room:rejoin` 하면 복귀, 지나면 퇴장 처리. 끊긴 사람이 출제자였으면 턴은 즉시 `drawerLeft`로 끝나고, 호스트였으면 `HOST_RETURN_MS`(기본 10초) 안에 돌아오지 않을 때 접속 중인 다음 사람이 호스트가 된다(넘어간 뒤에는 복귀해도 돌려받지 않음). 끊긴 사람은 정답 대기 인원·다음 출제자 계산에서 제외된다. 명시적 `room:leave`/강퇴는 즉시 퇴장.
+- 연결 끊김 = 유예 시간(`RECONNECT_GRACE_MS`, 기본 60초) 동안 자리·점수 유지(`connected:false`). 그 안에 `room:rejoin` 하면 복귀, 지나면 퇴장 처리. 끊긴 사람이 choosing/drawing 중인 출제자였으면 `DRAWER_GRACE_MS`(기본 15초, `RECONNECT_GRACE_MS` 이하, 0이면 즉시) 동안 턴을 끝내지 않고 기다린다 — 턴 타이머·힌트는 계속 흐르고, 그리던 획은 서버가 닫아 관전자에게 `draw:end` 를 보낸다. 그 안에 돌아오면 catch-up(`game:choosing` 후보 또는 `game:drawing` 단어 + `draw:sync`)으로 이어서 하고, 안 돌아오면 시스템 메시지 후 `drawerLeft`로 끝난다. 관전자 화면은 `room:state` 의 출제자 `connected:false` 로 "연결을 기다리고 있어요"를 표시한다. 호스트였으면 `HOST_RETURN_MS`(기본 10초) 안에 돌아오지 않을 때 접속 중인 다음 사람이 호스트가 된다(넘어간 뒤에는 복귀해도 돌려받지 않음). 끊긴 사람은 정답 대기 인원·다음 출제자 계산에서 제외된다. 명시적 `room:leave`/강퇴는 즉시 퇴장.
 - 호스트가 오프라인인데 접속 중인 사람이 있으면(끊김 · 새로고침 · 서버 재시작 복원 직후) `HOST_RETURN_MS`(기본 10초) 기다렸다가 접속 중인 첫 사람에게 호스트를 넘기고 시스템 메시지("방장이 돌아오지 않아 …")를 보낸다. 그 안에 돌아오면 그대로. `hostId` 가 목록에 없는 사람을 가리키면 즉시 바로잡는다.
 - URL `?room=CODE` 로 접속하면 클라이언트는 방 코드 입력란을 자동으로 채운다.
 - URL `?ref=코드` 는 유입 경로(홍보 채널) 표시. 클라이언트가 sessionStorage 에 기억하고 주소에서 지운 뒤 `room:create`/`room:join` 에 `ref` 로 실어 보낸다.

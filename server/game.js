@@ -25,6 +25,14 @@ const HOST_RETURN_MS = process.env.HOST_RETURN_MS != null ? Math.max(0, Number(p
 const RECONNECT_GRACE_MS = process.env.RECONNECT_GRACE_MS != null
   ? Math.max(0, Number(process.env.RECONNECT_GRACE_MS) || 0)
   : 60000;
+/**
+ * 출제자가 choosing/drawing 중에 끊겼을 때 턴을 끝내지 않고 기다리는 시간(ms). 모바일에서 앱 전환·터널 등으로 잠깐 끊겨도
+ * 그리던 그림과 턴이 날아가지 않게 한다. 타이머는 멈추지 않고 계속 흐른다. RECONNECT_GRACE_MS 보다 길 수 없고, 0이면 예전처럼 즉시 drawerLeft.
+ */
+const DRAWER_GRACE_MS = Math.min(
+  RECONNECT_GRACE_MS,
+  process.env.DRAWER_GRACE_MS != null ? Math.max(0, Number(process.env.DRAWER_GRACE_MS) || 0) : 15000,
+);
 // 게임을 시작/진행하는 데 필요한 최소 접속 인원. ALLOW_SOLO=1 (스테이징·개발 서버) 이면 혼자서도 시작해 화면을 확인할 수 있다.
 const ALLOW_SOLO = process.env.ALLOW_SOLO === '1';
 const MIN_PLAYERS = ALLOW_SOLO ? 1 : 2;
@@ -259,6 +267,7 @@ class Room {
 
     this._interval = null;
     this._timeout = null;
+    this._drawerWaitTimer = null; // 끊긴 출제자를 기다리는 타이머(DRAWER_GRACE_MS). 턴이 끝나면 정리
     this.destroyed = false;
 
     /** 상태 저장소 (index.js가 주입). 없으면 저장하지 않는다 */
@@ -501,6 +510,7 @@ class Room {
   destroy() {
     this.clearTimers();
     this.clearHostTimer();
+    this.clearDrawerWait();
     for (const p of this.players) this.clearGrace(p);
     if (this._persistTimer) { clearTimeout(this._persistTimer); this._persistTimer = null; }
     this.destroyed = true;
@@ -508,6 +518,33 @@ class Room {
 
   clearGrace(p) {
     if (p && p._graceTimer) { clearTimeout(p._graceTimer); p._graceTimer = null; }
+  }
+
+  clearDrawerWait() {
+    if (this._drawerWaitTimer) { clearTimeout(this._drawerWaitTimer); this._drawerWaitTimer = null; }
+  }
+
+  /**
+   * 끊긴 출제자를 DRAWER_GRACE_MS 동안 기다린다. 턴 타이머(choosing/drawing)는 그대로 흐르고,
+   * 그 안에 돌아오면(reconnect) 이어서 그리고, 안 돌아오면 drawerLeft 로 턴을 끝낸다.
+   */
+  startDrawerWait(p) {
+    this.clearDrawerWait();
+    // 그리던 획은 여기서 마감한다(돌아온 출제자는 새 획부터). 관전자 화면의 열린 획도 닫아 준다
+    if (this.currentStroke) {
+      this.currentStroke = null;
+      this.emitExcept(p.id, 'draw:end');
+    }
+    const id = p.id;
+    this._drawerWaitTimer = setTimeout(() => {
+      this._drawerWaitTimer = null;
+      if (this.destroyed || this.drawerId !== id) return;
+      if (this.phase !== 'choosing' && this.phase !== 'drawing') return;
+      const d = this.getPlayer(id);
+      if (d && d.connected) return;
+      if (d) this.systemMessage(`출제자 ${d.name}님이 돌아오지 않아 이번 턴을 넘겨요.`);
+      this.endTurn('drawerLeft');
+    }, DRAWER_GRACE_MS);
   }
 
   /** 현재 연결된 플레이어 */
@@ -624,7 +661,7 @@ class Room {
 
   /**
    * 연결 끊김 처리. RECONNECT_GRACE_MS 동안 자리를 비워두고(점수 유지) 기다린다.
-   * 출제자였다면 턴은 즉시 끝내고(drawerLeft), 호스트였다면 접속 중인 다음 사람에게 넘긴다.
+   * 출제자였다면 DRAWER_GRACE_MS 동안 턴을 유지한 채 기다리고(그 뒤 drawerLeft), 호스트였다면 HOST_RETURN_MS 뒤 접속 중인 다음 사람에게 넘긴다.
    * @returns {boolean} 처리 여부
    */
   markDisconnected(id) {
@@ -636,7 +673,14 @@ class Room {
     p.socketId = null;
     this.clearGrace(p);
     const secs = Math.round(RECONNECT_GRACE_MS / 1000);
-    this.systemMessage(`${p.name}님의 연결이 끊어졌습니다. ${secs}초 안에 돌아오면 이어서 할 수 있어요.`);
+    const turnLive = this.phase === 'choosing' || this.phase === 'drawing';
+    const drawerWaits = turnLive && id === this.drawerId && DRAWER_GRACE_MS > 0;
+    if (drawerWaits) {
+      const ds = Math.max(1, Math.round(DRAWER_GRACE_MS / 1000));
+      this.systemMessage(`출제자 ${p.name}님의 연결이 끊어졌습니다. ${ds}초 안에 돌아오면 이어서 그려요.`);
+    } else {
+      this.systemMessage(`${p.name}님의 연결이 끊어졌습니다. ${secs}초 안에 돌아오면 이어서 할 수 있어요.`);
+    }
 
     // 방장이 끊겨도 바로 넘기지 않는다: 새로고침·배포 뒤 재접속처럼 곧 돌아오는 경우가 대부분이라,
     // broadcastState → checkHost() 가 HOST_RETURN_MS 동안 기다렸다가 그래도 없으면 접속 중인 사람에게 넘긴다.
@@ -644,8 +688,9 @@ class Room {
 
     // 인원 부족은 여기서 바로 끝내지 않는다: 유예 시간 안에 돌아올 수 있으므로 턴은 계속 진행하고,
     // 다음 턴으로 넘어갈 때(nextTurn) 접속 인원이 2명 미만이면 그때 게임을 끝낸다.
-    if (this.phase === 'choosing' || this.phase === 'drawing') {
-      if (id === this.drawerId) this.endTurn('drawerLeft');
+    if (turnLive) {
+      if (drawerWaits) { this.startDrawerWait(p); this.broadcastState(); } // 출제자는 DRAWER_GRACE_MS 동안 턴을 유지한 채 기다린다
+      else if (id === this.drawerId) this.endTurn('drawerLeft');
       else if (this.phase === 'drawing' && this.allGuessed()) this.endTurn('allGuessed');
       else this.broadcastState();
     } else {
@@ -669,6 +714,7 @@ class Room {
     if (avatar) p.avatar = avatar;
     if (arguments[2] && arguments[2].user !== undefined) p.userId = arguments[2].user && arguments[2].user.userId ? arguments[2].user.userId : p.userId;
     // 이미 연결돼 있던 자리를 새 소켓이 넘겨받는 경우(새로고침 경합, 다른 탭)에는 "다시 연결" 안내를 내지 않는다
+    if (id === this.drawerId) this.clearDrawerWait(); // 끊겼던 출제자가 돌아옴 → 턴을 그대로 이어간다
     if (!wasConnected) this.systemMessage(`${p.name}님이 다시 연결되었습니다.`);
     this.broadcastState();
     this.sendCatchUp(id);
@@ -1144,6 +1190,7 @@ class Room {
   endTurn(reason) {
     if (this.phase !== 'choosing' && this.phase !== 'drawing') return;
     this.clearTimers();
+    this.clearDrawerWait();
 
     // 출제자 점수: round(300 * guessedCount / (playerCount - 1)), 최대 300
     const drawer = this.getPlayer(this.drawerId);
@@ -1272,6 +1319,7 @@ class Room {
   /** lobby 복귀 (점수는 다음 game:start 까지 유지). message: 대기실로 돌아올 때 알릴 시스템 메시지 */
   backToLobby(message = '게임이 끝났어요. 결과를 확인한 뒤 대기실로 돌아와 주세요.') {
     this.clearTimers();
+    this.clearDrawerWait();
     this.phase = 'lobby';
     this.lobbyStep = 'settings'; // 게임이 끝나고 돌아오면 모드는 그대로, 설정 화면으로
     this.round = 0;
@@ -1439,6 +1487,7 @@ module.exports = {
   HOST_RETURN_MS,
   GAME_OVER_TIME,
   RECONNECT_GRACE_MS,
+  DRAWER_GRACE_MS,
   MIN_PLAYERS,
   ALLOW_SOLO,
   // 테스트/재사용을 위한 순수 헬퍼

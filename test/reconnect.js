@@ -4,6 +4,7 @@
  *  - room:rejoin 으로 같은 playerId로 복귀하고 catch-up(game:drawing, draw:sync, 전체 공개)을 받는지
  *  - 복귀 후 정답을 맞혀 점수가 누적되는지
  *  - 유예 시간이 지나면 퇴장 처리되는지 (RECONNECT_GRACE_MS=2500 으로 짧게)
+ *  - 출제자가 잠깐 끊겨도 턴이 이어지고(DRAWER_GRACE_MS=1500 안에 복귀 → 단어·그림 복원), 안 돌아오면 drawerLeft 로 넘어가는지
  *  - react:send → react:show 중계, 출제자/비-drawing 단계에서는 무시되는지
  *  node test/reconnect.js
  */
@@ -16,6 +17,7 @@ const PORT = 3125;
 const URL = `http://localhost:${PORT}`;
 const ROOT = path.resolve(__dirname, '..');
 const GRACE_MS = 2500;
+const DRAWER_GRACE = 1500; // 출제자 끊김 유예 (DRAWER_GRACE_MS)
 
 let passes = 0, failures = 0;
 function check(name, cond, detail) {
@@ -35,13 +37,13 @@ function cleanup(code) {
   console.log(`\n${passes} passed, ${failures} failed`);
   setTimeout(() => process.exit(code), 300);
 }
-setTimeout(() => { console.log('FAIL - overall timeout'); cleanup(2); }, 90000);
+setTimeout(() => { console.log('FAIL - overall timeout'); cleanup(2); }, 120000);
 
 function startServer() {
   return new Promise((resolve, reject) => {
     serverProc = spawn(process.execPath, ['server/index.js'], {
       cwd: ROOT,
-      env: { ...process.env, PORT: String(PORT), RECONNECT_GRACE_MS: String(GRACE_MS), HOST_RETURN_MS: '800' },
+      env: { ...process.env, PORT: String(PORT), RECONNECT_GRACE_MS: String(GRACE_MS), DRAWER_GRACE_MS: String(DRAWER_GRACE), HOST_RETURN_MS: '800' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     serverProc.stdout.on('data', (d) => { if (String(d).includes('listening')) resolve(); });
@@ -207,6 +209,39 @@ const byId = (list, id) => list.find((p) => p.id === id);
   const p1DrawingP = waitNext(c1, 'game:drawing', undefined, 5000, 'P1 guessing');
   c2b.emit('word:choose', { word: ch2.wordOptions[0] });
   await p1DrawingP;
+
+  // ── 출제자 짧은 끊김 유예: 그리던 중 끊겨도 DRAWER_GRACE_MS 안에 돌아오면 턴·그림이 이어진다 ──
+  c2b.emit('draw:start', { tool: 'pen', color: '#000000', size: 5, x: 100, y: 100 });
+  c2b.emit('draw:move', { pts: [[120, 120], [140, 140]] }); // draw:end 없이 끊김 → 서버가 획을 닫아 준다
+  await waitFor(c1, 'draw:move', (p) => p.pts && p.pts.some((pt) => pt[0] === 140), 3000, 'drawer stroke relayed');
+  const turnEndsBefore = c1.log.filter((e) => e.ev === 'game:turnEnd').length;
+  const strokeEndP = waitNext(c1, 'draw:end', undefined, 3000, 'server closes open stroke');
+  const drawerOffP = waitNext(c1, 'room:state', (s) => byId(s.players, p2Id) && byId(s.players, p2Id).connected === false, 3000, 'drawer offline');
+  const tDrawerOff = Date.now();
+  c2b.disconnect();
+  const drawerOff = await drawerOffP;
+  check('drawer disconnect mid-drawing → turn keeps going (phase drawing, drawer still drawerId)', drawerOff.phase === 'drawing' && drawerOff.drawerId === p2Id, drawerOff);
+  check('open stroke is closed for viewers (draw:end relayed)', await strokeEndP.then(() => true).catch(() => false));
+  check('system message says drawer is awaited with DRAWER_GRACE seconds', c1.log.some((e) => e.ev === 'chat:message' && e.payload.kind === 'system' && /출제자 둘째개명님의 연결이 끊어졌습니다\. 2초 안에/.test(e.payload.text)));
+  await sleep(700);
+  check('no game:turnEnd while drawer is within grace', c1.log.filter((e) => e.ev === 'game:turnEnd').length === turnEndsBefore);
+  const c2c = await connect('P2-drawer-back');
+  const rjDrawer = await emitAck(c2c, 'room:rejoin', { roomCode: code, token: TOKEN2 });
+  check('drawer rejoins within grace with same playerId', rjDrawer.ok === true && rjDrawer.playerId === p2Id, rjDrawer);
+  const dDrawerBack = await waitFor(c2c, 'game:drawing', undefined, 3000, 'drawer catch-up');
+  check('returning drawer gets game:drawing WITH the word', dDrawerBack.drawerId === p2Id && dDrawerBack.word === ch2.wordOptions[0], dDrawerBack);
+  const syncBack = await waitFor(c2c, 'draw:sync', undefined, 3000, 'drawer catch-up sync');
+  check('returning drawer gets their drawing back via draw:sync', Array.isArray(syncBack.ops) && syncBack.ops.length === 1 && syncBack.ops[0].points.length === 3, syncBack.ops);
+  await sleep(Math.max(0, DRAWER_GRACE + 600 - (Date.now() - tDrawerOff)));
+  check('after drawer came back, the drawer-grace timer does not end the turn', c1.log.filter((e) => e.ev === 'game:turnEnd').length === turnEndsBefore);
+  const stillP = await waitNext(c1, 'game:timer', undefined, 3000, 'timer still ticking');
+  check('turn timer kept running', stillP.timeLeft > 0 && stillP.timeLeft < 60, stillP);
+  c2c.emit('draw:start', { tool: 'pen', color: '#ff0000', size: 5, x: 300, y: 300 });
+  const drawAgain = await waitFor(c1, 'draw:start', (p) => p.x === 300, 3000, 'drawer draws again').then(() => true).catch(() => false);
+  check('returning drawer can keep drawing', drawAgain);
+  c2c.emit('draw:end');
+  const p2sock = c2c;
+
   const overP = waitNext(c1, 'game:over', undefined, 15000, 'game over');
   c1.emit('chat:message', { text: ch2.wordOptions[0] });
   const over = await overP;
@@ -216,7 +251,7 @@ const byId = (list, id) => list.find((p) => p.id === id);
   await waitNext(c1, 'room:state', (s) => s.phase === 'lobby', 20000, 'back to lobby');
   const leftP = waitNext(c1, 'chat:message', (m) => m.kind === 'system' && /둘째개명님이 나갔습니다/.test(m.text), GRACE_MS + 4000, 'grace expiry');
   const goneP = waitNext(c1, 'room:state', (s) => s.players.length === 1, GRACE_MS + 4000, 'P2 removed');
-  c2b.disconnect();
+  p2sock.disconnect();
   const t0 = Date.now();
   await leftP;
   const elapsed = Date.now() - t0;
@@ -255,6 +290,25 @@ const byId = (list, id) => list.find((p) => p.id === id);
   const rj1 = await emitAck(c1b, 'room:rejoin', { roomCode: code, token: P1_TOKEN });
   const afterBack = await afterBackP;
   check('P1 rejoins with same id but host stays with P4', rj1.ok && rj1.playerId === created.playerId && afterBack.hostId === c4.playerId, afterBack);
+
+  // ── 출제자가 유예 안에 안 돌아오면 → drawerLeft 로 턴을 넘긴다 (choosing 중 끊김) ──
+  const x1 = await connect('X1'), x2 = await connect('X2'), x3 = await connect('X3');
+  const xc = await emitAck(x1, 'room:create', { name: '엑스일', avatar: {}, token: 'tok-x1-drawer-00001' });
+  await emitAck(x2, 'room:join', { roomCode: xc.roomCode, name: '엑스이', avatar: {}, token: 'tok-x2-drawer-00002' });
+  await emitAck(x3, 'room:join', { roomCode: xc.roomCode, name: '엑스삼', avatar: {}, token: 'tok-x3-drawer-00003' });
+  x1.emit('room:settings', { settings: { rounds: 1, drawTime: 60, hints: 0, wordCount: 2, customWords: '자전거,냉장고,해바라기,고슴도치', customWordsOnly: true } });
+  await waitFor(x2, 'room:state', (s) => s.settings.customWordsOnly === true && s.players.length === 3, 3000, 'x settings');
+  x1.emit('game:start');
+  await waitFor(x1, 'game:choosing', (p) => Array.isArray(p.wordOptions), 5000, 'X1 choosing');
+  const xEndP = waitNext(x2, 'game:turnEnd', undefined, DRAWER_GRACE + 4000, 'drawerLeft after grace');
+  const tX = Date.now();
+  x1.disconnect();
+  const xEnd = await xEndP;
+  const xElapsed = Date.now() - tX;
+  check(`drawer away past DRAWER_GRACE → turnEnd drawerLeft after ~${DRAWER_GRACE}ms (took ${xElapsed}ms)`, xEnd.reason === 'drawerLeft' && xElapsed >= DRAWER_GRACE - 200 && xElapsed < DRAWER_GRACE + 1500, { xEnd, xElapsed });
+  check('system message says the turn is passed because the drawer did not return', x2.log.some((e) => e.ev === 'chat:message' && e.payload.kind === 'system' && /엑스일님이 돌아오지 않아 이번 턴을 넘겨요/.test(e.payload.text)));
+  const xNext = await waitNext(x2, 'game:choosing', undefined, 8000, 'next drawer after drawerLeft');
+  check('after drawerLeft the next connected player (X2) draws', xNext.drawerId === x2.id, xNext);
 
   cleanup(failures ? 1 : 0);
 })().catch((err) => {

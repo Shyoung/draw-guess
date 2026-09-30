@@ -589,6 +589,8 @@
     on('disconnect', function () {
       // 방 안에서 끊기면 화면을 유지한 채 재접속을 기다린다 (서버가 유예 시간 동안 자리를 비워둔다)
       if (inRoom && state.roomCode) { rejoinTarget = state.roomCode; toast('연결이 끊어졌어요. 다시 연결 중…', 'error'); }
+      // 그리던 획은 버린다(끊긴 동안 쌓인 점을 재접속 뒤 보내지 않게). 돌아오면 draw:sync 로 서버 그림과 맞춰진다
+      pending = []; cancelLocalStroke(false);
     });
     on('react:show', onReactShow);
     // 같은 브라우저(토큰)의 다른 탭/새로고침이 이 자리를 넘겨받았다 → 이 화면은 조용히 물러난다(재접속 시도 금지)
@@ -1502,7 +1504,10 @@
       ds.hidden = lobby || drawer || state.phase === 'gameOver';
       if (!ds.hidden) {
         var dn = playerName(state.drawerId, ui.drawerName || '출제자');
-        var txt = state.phase === 'drawing' ? '✏️ ' + dn + '님이 그리고 있어요'
+        var dp = findPlayer(state.drawerId);
+        var drawerAway = dp && dp.connected === false && (state.phase === 'drawing' || state.phase === 'choosing');
+        var txt = drawerAway ? '📶 ' + dn + '님 연결을 기다리고 있어요'
+          : state.phase === 'drawing' ? '✏️ ' + dn + '님이 그리고 있어요'
           : state.phase === 'choosing' ? '✏️ ' + dn + '님의 차례예요'
           : '⏳ 다음 턴을 준비하고 있어요';
         // 자식은 정적(#draw-status-text, #react-bar [+ 모바일에서 옮겨 온 #btn-chat-expand]) — innerHTML 로 갈아엎지 않는다
