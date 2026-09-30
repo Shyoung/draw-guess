@@ -7,11 +7,12 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node test/words.js && node test/smoke.js && node test/reconnect.js && node test/persist.js && node test/modes.js && node test/metrics.js && node test/profanity.js",
+    "test": "node test/words.js && node test/smoke.js && node test/reconnect.js && node test/persist.js && node test/modes.js && node test/relay.js && node test/metrics.js && node test/profanity.js",
     "test:words": "node test/words.js",
     "test:profanity": "node test/profanity.js",
     "test:metrics": "node test/metrics.js",
     "test:modes": "node test/modes.js",
+    "test:relay": "node test/relay.js",
     "test:mobile": "node test/mobile.js",
     "test:auth": "node test/auth.js",
     "shots:mobile": "node test/mobile-shots.js",
