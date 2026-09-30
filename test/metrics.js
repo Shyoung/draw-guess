@@ -37,11 +37,12 @@ function cleanup(code) {
 }
 setTimeout(() => { console.log('FAIL - overall timeout'); cleanup(2); }, 90000);
 
-function startServer(env, port) {
+function startServer(env, port, attemptsLeft = 3) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['server/index.js'], {
       cwd: ROOT, env: { ...process.env, PORT: String(port), RECONNECT_GRACE_MS: '0', ...env }, stdio: ['ignore', 'pipe', 'pipe'],
     });
+    let addrInUse = false;
     child.stdout.on('data', (d) => {
       const s = String(d);
       serverLog.push(s);
@@ -51,8 +52,18 @@ function startServer(env, port) {
       }
       if (s.includes('listening')) resolve(child);
     });
-    child.stderr.on('data', (d) => process.stderr.write('[server:err] ' + d));
-    child.on('exit', () => reject(new Error('server exited')));
+    child.stderr.on('data', (d) => {
+      if (String(d).includes('EADDRINUSE')) addrInUse = true;
+      process.stderr.write('[server:err] ' + d);
+    });
+    // 직전 프로세스가 방금 닫은 포트가 (Windows TIME_WAIT 등으로) 아직 안 풀렸을 때 짧게 재시도
+    child.on('exit', () => {
+      if (addrInUse && attemptsLeft > 1) {
+        setTimeout(() => { startServer(env, port, attemptsLeft - 1).then(resolve, reject); }, 300);
+      } else {
+        reject(new Error('server exited'));
+      }
+    });
   });
 }
 function connect() {

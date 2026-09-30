@@ -39,7 +39,7 @@ function cleanup(code) {
 }
 setTimeout(() => { console.log('FAIL - overall timeout'); cleanup(2); }, 90000);
 
-function startServer(label) {
+function startServer(label, attemptsLeft = 3) {
   return new Promise((resolve, reject) => {
     const proc = spawn(process.execPath, ['server/index.js'], {
       cwd: ROOT,
@@ -47,10 +47,26 @@ function startServer(label) {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     proc.logs = '';
-    proc.stdout.on('data', (d) => { proc.logs += String(d); if (String(d).includes('listening')) resolve(proc); });
-    proc.stderr.on('data', (d) => { proc.logs += String(d); process.stderr.write(`[${label}:err] ` + d); });
-    proc.on('exit', (code, sig) => { proc.exited = { code, sig }; });
-    setTimeout(() => reject(new Error(label + ' did not start')), 10000);
+    let addrInUse = false;
+    let settled = false;
+    const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error(label + ' did not start')); } }, 10000);
+    proc.stdout.on('data', (d) => {
+      proc.logs += String(d);
+      if (!settled && String(d).includes('listening')) { settled = true; clearTimeout(timer); resolve(proc); }
+    });
+    proc.stderr.on('data', (d) => {
+      proc.logs += String(d);
+      if (String(d).includes('EADDRINUSE')) addrInUse = true;
+      process.stderr.write(`[${label}:err] ` + d);
+    });
+    // 직전 프로세스가 방금 닫은 포트가 (Windows TIME_WAIT 등으로) 아직 안 풀렸을 때 짧게 재시도
+    proc.on('exit', (code, sig) => {
+      proc.exited = { code, sig };
+      if (!settled && addrInUse && attemptsLeft > 1) {
+        settled = true; clearTimeout(timer);
+        setTimeout(() => { startServer(label, attemptsLeft - 1).then(resolve, reject); }, 300);
+      }
+    });
   });
 }
 function stopServer(proc) {

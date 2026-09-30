@@ -34,14 +34,25 @@ function cleanup(code) {
 }
 setTimeout(() => { console.log('FAIL - overall timeout'); cleanup(2); }, 60000);
 
-function startServer() {
+function startServer(attemptsLeft = 3) {
   return new Promise((resolve, reject) => {
     serverProc = spawn(process.execPath, ['server/index.js'], {
       cwd: ROOT, env: { ...process.env, PORT: String(PORT), RECONNECT_GRACE_MS: '0' }, stdio: ['ignore', 'pipe', 'pipe'],
     });
+    let addrInUse = false;
     serverProc.stdout.on('data', (d) => { if (String(d).includes('listening')) resolve(); });
-    serverProc.stderr.on('data', (d) => process.stderr.write('[server:err] ' + d));
-    serverProc.on('exit', () => reject(new Error('server exited')));
+    serverProc.stderr.on('data', (d) => {
+      if (String(d).includes('EADDRINUSE')) addrInUse = true;
+      process.stderr.write('[server:err] ' + d);
+    });
+    // 직전 프로세스가 방금 닫은 포트가 (Windows TIME_WAIT 등으로) 아직 안 풀렸을 때 짧게 재시도
+    serverProc.on('exit', () => {
+      if (addrInUse && attemptsLeft > 1) {
+        setTimeout(() => { startServer(attemptsLeft - 1).then(resolve, reject); }, 300);
+      } else {
+        reject(new Error('server exited'));
+      }
+    });
   });
 }
 function connect() {

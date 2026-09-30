@@ -115,6 +115,7 @@
 | 09-30 | 요소 수를 `max(2, min(주자 수, 3))`로 — 주자 1명(ALLOW_SOLO 2명 방)도 요소 2개 | R-20260930-1. 요소 1개는 조합이 아니고 로컬 확인용 경로에 코드를 더 두지 않으려고 |
 | 09-30 | R1 builder 보고 반영: `game:drawing.relay`에 `legTimeLeft` 추가 · 주자 채널은 choosing 단계에도 적용(첫 주자 후보 스포 방지) · 차례 전 주자가 완전히 나가면 `legCount`·`totalTime`·`timeLeft`를 한 구간만큼 줄임 · 현재 주자가 나가면 남은 구간 시간을 빼고 즉시 다음 구간 · choosing 중 첫 주자가 나가면 다음 주자가 새 후보로 선택 · 문제 중 인원 부족 기준 3명(`notEnoughPlayers`) | 구현하며 드러난 빈칸을 채움. 시간 불변식 `timeLeft = legTimeLeft + legTime × (legCount−1−legIndex)` 유지 |
 | 09-30 | R2 builder 보고 반영: `gallery[].guessed`는 기존처럼 숫자(relay 0/1) · 맞히는 사람 퇴장은 인원 검사보다 먼저 봐서 `guesserLeft` → 다음 문제에서 `notEnoughPlayers` · 정답 때 본인 마스크는 요소 형식(`고 양 이 · 축 구`) · `game:baton`에 `hintsUsed` · `hint:request`는 ack 없음 · 요소가 다른 요소를 품으면 한 문장으로 둘 다 맞을 수 있음(판정 규칙대로, 막지 않음) | 기존 클라이언트·그림 보관 코드와 형식을 맞춤 |
+| 09-30 | **항목 순서 변경: R4·R5(클라이언트)를 R3(끊김·복원)보다 먼저** 한다. R3는 그 뒤 | 운영자 지시 "여러 기기로 로컬에서 확인하게 해 줘" — 화면이 있어야 확인할 수 있다. R3 없이도 정상 흐름(끊김 없는 게임)은 돈다 |
 
 | ID | 심각도 | 재현 | 상태 |
 |---|---|---|---|
