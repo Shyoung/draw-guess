@@ -16,7 +16,7 @@
 
 ## 동시 작업 규칙 (세션이 겹쳐도 충돌하지 않게)
 - **메인 체크아웃(`draw-guess` 폴더)은 사이클 전용이다.** 코드 수정·테스트·서버 실행은 여기서 `/ops-cycle`만 한다(builder·fixer·qa는 한 번에 하나씩 순서대로).
-- **큰 작업(신규 모드·큰 기능)은 개발 세션(`/dev-session <기능>`)이 전용 워크트리 `draw-guess-work/feature-<이름>`과 브랜치 `feature/<이름>`에서 맡는다.** 이 워크트리에서는 코드 수정과 로컬 테스트(`npm ci`로 node_modules 설치)가 허용된다. 큰 작업은 **동시에 하나만** 진행하고, 완성되면 develop에 머지해 스테이징으로 넘긴다(main 머지는 GO 뒤). 일상 사이클과 병행한다.
+- **큰 작업(신규 모드·큰 기능)은 기능 세션(`/feature <기능>`)이 전용 워크트리 `draw-guess-work/feature-<이름>`과 브랜치 `feature/<이름>`에서 맡는다.** 이 워크트리에서는 코드 수정과 로컬 테스트(`npm ci`로 node_modules 설치)가 허용된다. 큰 작업은 **동시에 하나만** 진행하고, 완성되면 develop에 머지해 스테이징으로 넘긴다(main 머지는 GO 뒤). 일상 사이클과 병행한다.
 - **그 밖의 세션(기획 세션·관리자 세션·수동 작업)은 메인 체크아웃을 쓰지 않고 자기 워크트리에서 문서만 고친다.**
   ```
   git fetch origin
@@ -31,11 +31,11 @@
 
   | 파일 | 쓰는 쪽 |
   |---|---|
-  | `server/` `public/` `test/` `PROTOCOL.md` `README.md` | 사이클의 builder·fixer(develop, 작은 항목) · 개발 세션의 builder·fixer(feature 브랜치, 큰 기능). 서로 다른 항목을 맡고 같은 파일은 rebase로 합친다 |
+  | `server/` `public/` `test/` `PROTOCOL.md` `README.md` | 사이클의 builder·fixer(develop, 작은 항목) · 기능 세션의 builder·fixer(feature 브랜치, 큰 기능). 서로 다른 항목을 맡고 같은 파일은 rebase로 합친다 |
   | `docs/ops/BOARD.md` | 사이클 조율자. 다른 세션은 "방향 메모"에 한 줄 추가만 |
   | `docs/ops/TEST-LOG.md` | qa(추가) · fixer(상태). feature 브랜치 기간에는 쓰지 않는다(설계 문서 "진행 중 결함" 표를 쓴다) |
   | `docs/BACKLOG.md` | 제안됨: 사이클·제품 / 다음: 제품(승인분 추가)·builder(완료로 이동) / 완료: builder |
-  | `docs/GAME-MODES.md` `docs/PRD-PLATFORM.md` `docs/product/` `docs/ROADMAP.md` 제품 줄 | product-planner·기획 세션. **예외: 설계 문서의 ✅ 완료 표시·"변경 이력" 표·"진행 중 결함" 표와 ROADMAP 진행률 한 줄(`진행 (feature/…, n/m)`)은 dev-session이 쓴다.** 머지 뒤 `문서 정리 필요` 표시는 dev-session이 붙이고 기획 세션이 지운다 |
+  | `docs/GAME-MODES.md` `docs/PRD-PLATFORM.md` `docs/product/` `docs/ROADMAP.md` 제품 줄 | product-planner·기획 세션. **예외: 설계 문서의 ✅ 완료 표시·"변경 이력" 표·"진행 중 결함" 표와 ROADMAP 진행률 한 줄(`진행 (feature/…, n/m)`)은 feature이 쓴다.** 머지 뒤 `문서 정리 필요` 표시는 feature이 붙이고 기획 세션이 지운다 |
   | `docs/marketing/` | marketing-strategist |
   | `docs/ROADMAP.md` 마케팅·개발 줄 | 사이클 조율자 |
   | `.claude/` `CLAUDE.md` | 관리자 세션 |
@@ -44,7 +44,7 @@
 - 조율: `docs/ops/BOARD.md` (결정 필요 · 방향 메모 · 예정 일정 · 역할 상태 · 사이클 로그). 실행은 `/ops-cycle`.
 - 개발 목록: `docs/BACKLOG.md`(승인된 것만 "다음" 표) · 결함: `docs/ops/TEST-LOG.md` · 큰 그림: `docs/ROADMAP.md`
 - 역할(`.claude/agents/`): marketing-strategist · product-planner · builder · qa-reviewer · fixer. 이 세션이 draw-guess 폴더에서 열려야 역할 이름이 잡힌다.
-- **개발 세션**: 기획 세션에서 설계가 승인된 큰 기능은 `/dev-session <기능>`. 사이클의 builder는 크기 작음·중간 항목만 고른다.
+- **기능 세션**: 큰 기능·신규 모드 하나를 기획부터 머지까지 한 세션에서 만든다. `/feature <기능>`(Opus 권장, 신규 모드 초기 설계는 Fable). 운영자와 직접 대화해 설계 문서를 쓰고 GO를 받은 뒤 feature 브랜치에서 builder로 개발하며, 개발 중 피드백은 이 세션이 설계 문서에 반영한 뒤 구현한다. 사이클의 builder는 크기 작음·중간 항목만 고른다.
 - **기획 세션**: 새 모드·기능 아이디어를 운영자와 대화로 뽑을 때는 `/product-session`. 제품 문서(`docs/GAME-MODES.md`, `docs/PRD-PLATFORM.md`, `docs/product/`, 로드맵 제품 줄)의 주인은 product-planner다. 대화에서 나온 아이디어는 세션이 끝나기 전에 문서에 남긴다.
 - **GO 없이 하지 않는 것**: main 머지, 외부 게시·DM·메일, 돈 쓰는 결정, 신규 기능·모드(설계 문서 승인 전), 개인정보 처리방침 변경, 데이터 삭제.
 

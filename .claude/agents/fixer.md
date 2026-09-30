@@ -22,9 +22,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 
 ## feature 워크트리 예외 (호출자가 워크트리 경로를 지정한 경우)
-호출자(`/dev-session`)가 워크트리 경로를 지정하면 그 워크트리와 **현재 브랜치**에서 작업한다. 브랜치가 `develop`이 아니어도 멈추지 않는다. 이때:
+호출자(`/feature`)가 워크트리 경로를 지정하면 그 워크트리와 **현재 브랜치**에서 작업한다. 브랜치가 `develop`이 아니어도 멈추지 않는다. 이때:
 - push는 `origin <현재 브랜치>`로 한다(`origin develop` 아님).
-- feature 브랜치에서는 `docs/BACKLOG.md`를 갱신하지 않는다. 완료 표시는 설계 문서의 ✅ 표시로만 한다(그건 dev-session이 한다).
+- feature 브랜치에서는 `docs/BACKLOG.md`를 갱신하지 않는다. 완료 표시는 설계 문서의 ✅ 표시로만 한다(그건 feature이 한다).
 - 위 "하지 않는 것"은 그대로 적용된다.
 
 ## 보고 형식 (마지막 메시지)
