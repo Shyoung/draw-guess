@@ -67,6 +67,7 @@
 | `game:start` | – | 호스트, lobby, 접속 플레이어 ≥ 2. fixed 모드는 출제자가 접속 중이어야 함. relay 는 접속 3명 이상 6명 이하(`ALLOW_SOLO` 서버는 2명 이상 — 1명은 주자가 없어 불가). 벗어나면 `error:msg` `'이어 그리기는 3명부터 6명까지 할 수 있어요.'`(`ALLOW_SOLO` 면 "2명부터") |
 | `game:end` | – | 호스트, 게임 중(choosing / drawing / turnEnd). 즉시 끝내고 모두 lobby 로 — 결과 화면·갤러리 없음(점수는 다음 `game:start` 까지 표시만). 방 전체에 `game:aborted` → `room:state` → 시스템 메시지 |
 | `word:choose` | `{ word }` | 출제자, choosing 단계, 제시된 후보 중 하나여야 함 |
+| `hint:request` | – | relay 전용. **맞히는 사람(`relay.guesserId`)만**, drawing 중, `hintsUsed < hintsMax` 일 때. 위반은 조용히 무시. 아직 맞히지 못한 요소들의 미공개 글자 중 무작위 1개의 초성을 공개한다(요소마다 기존 힌트 규칙: 한글만이면 모든 글자, 영문·숫자가 섞이면 글자 수−1까지). 공개할 글자가 하나도 없으면 `hintsUsed` 를 올리지 않고 무시. 응답은 `game:hint { wordMask, hintsUsed }` 를 **마스크를 보는 사람 전원**(맞히는 사람 + 아직 제시어를 못 받은 주자 + 관전자)에게 — 맞히는 사람의 `wordMask` 는 이미 맞힌 요소가 글자로 보이는 판. 힌트 1회마다 정답 점수 −25%(점수 절) |
 | `draw:start` | `{ tool:'pen'\|'eraser', color:'#rrggbb', size:number, x, y }` | 출제자, drawing 단계 |
 | `draw:move` | `{ pts: [[x,y], ...] }` | 배치(≈16~30ms 단위) |
 | `draw:end` | – | |
@@ -99,13 +100,13 @@ relay 에서: `round` = 문제 번호(1..n), `totalRounds` = n. `relay.order` = 
 | event | payload | 비고 |
 |---|---|---|
 | `game:choosing` | `{ drawerId, drawerName, timeLeft, wordOptions? }` | `wordOptions`(string[])는 **출제자에게만** 포함. 나머지는 없음(undefined). relay 는 첫 주자가 출제자이고 후보는 조합 표시 문자열(예 `"고양이 · 축구"`) |
-| `game:drawing` | `{ drawerId, round, totalRounds, timeLeft, wordMask, wordLength, word?, category?, relay? }` | `word`·`category`는 출제자에게만(catch-up 시 이미 공개된 카테고리는 비출제자에게도). `wordMask` 형식은 아래 참고. **relay**: `relay: { order, guesserId, legIndex, legCount, legTime, legTimeLeft, totalTime, hintsUsed, hintsMax }` 가 붙고, `timeLeft` = 문제 전체 남은 시간(시작 때 `legTime × legCount`). `word`(조합 표시 문자열)는 **현재 주자에게만**(catch-up 은 현재·지난 주자에게), 나머지는 `wordMask`(요소별 마스크를 ` · ` 로 이은 것, 예 `_ _ _ · _ _`). `category` 는 없다. `wordLength` = 표시 문자열 `word` 의 글자 수 |
-| `game:baton` | `{ legIndex, legCount, drawerId, drawerName, legTimeLeft, word? }` | relay 전용. 구간이 넘어갈 때 방 전체. `word` 는 새 주자에게만. 서버는 앞 주자의 열린 획을 닫아 `draw:end` 를 중계한 뒤 `drawerId` 를 바꾸고 `game:baton` → `room:state` 순서로 보낸다 |
-| `game:hint` | `{ wordMask, category? }` | 초성 공개 갱신 (출제자·이미 정답을 맞힌 사람 제외). 누군가 정답을 맞히면 그 사람에게만 별도로 `wordMask`가 실제 글자로 전체 공개된 `game:hint`가 온다(초성이 아님) |
+| `game:drawing` | `{ drawerId, round, totalRounds, timeLeft, wordMask, wordLength, word?, category?, relay? }` | `word`·`category`는 출제자에게만(catch-up 시 이미 공개된 카테고리는 비출제자에게도). `wordMask` 형식은 아래 참고. **relay**: `relay: { order, guesserId, legIndex, legCount, legTime, legTimeLeft, totalTime, hintsUsed, hintsMax }` 가 붙고, `timeLeft` = 문제 전체 남은 시간(시작 때 `legTime × legCount`). `word`(조합 표시 문자열)는 **현재 주자에게만**(catch-up 은 현재·지난 주자에게), 나머지는 `wordMask`(요소별 마스크를 ` · ` 로 이은 것, 예 `_ _ _ · _ _`, 힌트로 공개된 초성 포함 — catch-up 의 맞히는 사람에게는 이미 맞힌 요소가 글자로 보이는 판). `relay.hintsUsed` 는 지금까지 쓴 힌트 수(catch-up 포함). `category` 는 없다. `wordLength` = 표시 문자열 `word` 의 글자 수 |
+| `game:baton` | `{ legIndex, legCount, drawerId, drawerName, legTimeLeft, hintsUsed, word? }` | relay 전용. 구간이 넘어갈 때 방 전체. `word` 는 새 주자에게만. `hintsUsed` = 지금까지 쓴 힌트 수. 서버는 앞 주자의 열린 획을 닫아 `draw:end` 를 중계한 뒤 `drawerId` 를 바꾸고 `game:baton` → `room:state` 순서로 보낸다 |
+| `game:hint` | `{ wordMask, category?, hintsUsed? }` | 초성 공개 갱신 (출제자·이미 정답을 맞힌 사람 제외). 누군가 정답을 맞히면 그 사람에게만 별도로 `wordMask`가 실제 글자로 전체 공개된 `game:hint`가 온다(초성이 아님). **relay**: 자동 힌트는 없고 `hint:request` 응답으로만 온다(`hintsUsed` 포함, `category` 없음). 맞히는 사람에게는 부분 정답 때(본인만, 맞힌 요소가 글자로)와 정답 때(본인만, 전체 공개 — 요소 마스크와 같은 ` · ` 형식, 예 `고 양 이 · 축 구`)에도 온다 |
 | `game:timer` | `{ timeLeft, legTimeLeft? }` | 매 1초 (choosing / drawing 단계). relay drawing 중이면 `legTimeLeft`(현재 구간 남은 시간)도 |
-| `game:turnEnd` | `{ word, reason:'time'\|'allGuessed'\|'drawerLeft'\|'notEnoughPlayers', deltas:[{ id, delta }], timeLeft }` | 5초간 표시. `deltas`에는 이번 턴 획득 점수(0 포함 전원). relay 의 `reason` 은 현재 `'time'`·`'notEnoughPlayers'` 만, `deltas` 는 전원 0(정답 판정·점수는 아직 없음) |
+| `game:turnEnd` | `{ word, reason:'time'\|'allGuessed'\|'drawerLeft'\|'guesserLeft'\|'notEnoughPlayers', deltas:[{ id, delta }], timeLeft }` | 5초간 표시. `deltas`에는 이번 턴 획득 점수(0 포함 전원). relay 의 `reason` 은 `'time'`(아무도 못 맞힘) · `'allGuessed'`(맞히는 사람이 정답) · `'guesserLeft'`(맞히는 사람이 방을 완전히 나감, 점수 없음) · `'notEnoughPlayers'`. relay 에는 `'drawerLeft'` 가 없다 |
 | `game:aborted` | `{ by }` | 방장(`by` = 이름)이 `game:end` 로 게임을 끝냄. 클라이언트는 턴/단어/오버레이를 지우고 대기실을 그린다(결과 화면 없음) |
-| `game:over` | `{ ranking:[{ id, name, avatar, score }], mode, drawer?:{ id, name, avatar }, gallery:[{ round, word, category, drawerId, drawerIds, drawerName, guesserId, guessed, ops, trimmed? }] }` | 점수 내림차순. 갤러리 항목의 `drawerIds` = 그 그림을 그린 주자 순서(relay 가 아니면 `[drawerId]`), `guesserId` = relay 의 맞히는 사람(아니면 null), `drawerId`·`drawerName` = 첫 주자(하위 호환). relay 의 `word` 는 조합 표시 문자열이고 `category` 는 null. 이후 방은 **즉시** lobby 로 돌아가지만 모든 플레이어의 `atResults` 가 true 로 설정되어 각자 `results:done` 을 보낼 때까지 결과 화면을 유지한다. 접속 중인 누군가가 `atResults` 이면 `game:start` 는 거부된다. `gallery`는 이 게임에서 실제로 그린 턴들의 (제시어, 그림 ops) 기록 — 클라이언트가 갤러리로 렌더링하고 PNG로 저장. 전체가 약 1.5MB를 넘으면 오래된 턴의 `ops`를 비우고 `trimmed:true`. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
+| `game:over` | `{ ranking:[{ id, name, avatar, score }], mode, drawer?:{ id, name, avatar }, gallery:[{ round, word, category, drawerId, drawerIds, drawerName, guesserId, guessed, ops, trimmed? }] }` | 점수 내림차순. 갤러리 항목의 `drawerIds` = 그 그림을 그린 주자 순서(relay 가 아니면 `[drawerId]`), `guesserId` = relay 의 맞히는 사람(아니면 null), `drawerId`·`drawerName` = 첫 주자(하위 호환). `guessed` = 그 그림을 맞힌 사람 수(relay 는 맞히는 사람이 맞혔으면 1, 아니면 0). relay 의 `word` 는 조합 표시 문자열이고 `category` 는 null. 이후 방은 **즉시** lobby 로 돌아가지만 모든 플레이어의 `atResults` 가 true 로 설정되어 각자 `results:done` 을 보낼 때까지 결과 화면을 유지한다. 접속 중인 누군가가 `atResults` 이면 `game:start` 는 거부된다. `gallery`는 이 게임에서 실제로 그린 턴들의 (제시어, 그림 ops) 기록 — 클라이언트가 갤러리로 렌더링하고 PNG로 저장. 전체가 약 1.5MB를 넘으면 오래된 턴의 `ops`를 비우고 `trimmed:true`. 10초 후 서버가 lobby로 복귀시키고 `room:state` 전송 |
 
 ### 드로잉 (출제자를 제외한 방 전체에 그대로 중계)
 `draw:start`, `draw:move`, `draw:end`, `draw:fill`, `draw:clear`, `draw:undo` — 페이로드는 C→S와 동일.
@@ -128,7 +129,11 @@ relay 에서: `round` = 문제 번호(1..n), `totalRounds` = n. `relay.order` = 
 `chat:message` `{ id?, name?, avatar?, text, kind }`
 - `kind`: `'chat'` (일반) | `'system'` (입장/퇴장/턴 안내) | `'correct'` ("○○님이 정답을 맞혔습니다!") | `'close'` (정답에 근접, **보낸 사람에게만**) | `'guessed-chat'` (정답자 전용 채팅)
 - 정답을 맞힌 사람과 출제자가 drawing 중에 보내는 메시지는 `'guessed-chat'`으로 **출제자 + 이미 맞힌 사람들에게만** 전달.
-- relay 의 choosing·drawing 중: **이번 문제의 주자(`relay.order` 에 든 사람 전원)** 의 메시지는 `'guessed-chat'` 으로 주자들에게만. 맞히는 사람·관전자(중간 참가자 등 order 에도 guesser 에도 없는 사람)의 메시지는 방 전체에 `'chat'`. 정답 판정은 아직 하지 않는다(조합 문자열을 그대로 쳐도 `'correct'` 없음).
+- relay 의 choosing·drawing 중: **이번 문제의 주자(`relay.order` 에 든 사람 전원)** 의 메시지는 `'guessed-chat'` 으로 주자들에게만. 관전자(중간 참가자 등 order 에도 guesser 에도 없는 사람)의 메시지는 판정 없이 방 전체에 `'chat'`. 맞히는 사람의 메시지는 choosing 중엔 판정 없이 방 전체 `'chat'`, **drawing 중엔 요소 판정**(아래 "정답 판정" 절 relay):
+  - 누적으로 **모든 요소**를 맞힘 → 정답. 전원에게 `'correct'`, `player:guessed`, 본인에게 전체 공개 `game:hint` → 즉시 `game:turnEnd { reason:'allGuessed' }`. 보낸 문장은 브로드캐스트하지 않는다.
+  - **새로 맞힌 요소가 있지만 전부는 아님** → 보낸 사람에게만 `{ ...메시지, kind:'close', partial:{ solved, total } }`(`solved` = 지금까지 맞힌 요소 수, `total` = 요소 수. 클라이언트 문구 "3개 중 1개 맞았어요!") + 본인에게만 `game:hint { wordMask, hintsUsed }`(맞힌 요소는 글자로, 나머지는 초성 힌트 포함 마스크). 나머지 전원에게는 같은 `text` 의 `'chat'`.
+  - 새로 맞힌 요소는 없고 못 맞힌 요소 중 하나가 근접 → 보낸 사람에게 `'close'`(`partial` 없음), 나머지에게 `'chat'`.
+  - 그 밖 → 방 전체 `'chat'`.
 - 정답 텍스트 자체는 절대 브로드캐스트하지 않는다.
 - `'chat'`·`'close'`·`'guessed-chat'` 의 `text` 는 원문이고, 욕설이 들어 있으면 `textSafe`(욕설 부분을 `*` 로 바꾼 판)를 같이 보낸다(보낸 사람에게도). 클라이언트는 각자의 "욕설 가리기" 설정(기기별, 기본 켜짐)에 따라 둘 중 하나를 보여 주고, 설정을 바꾸면 이미 그려진 메시지도 바꿔 끼운다. 정답·근접 판정은 원문으로. 문장부호·숫자·이모지로 끊어 쓴 것("시.발")은 잡지만 띄어쓴 것("시 발")은 잡지 않는다.
 - 방송 모드도 기기별 설정이다(서버 무관): 방 코드(••••, 누르면 4초)·주소의 `?room=` 을 가리고, 출제자 후보/단어는 별도 팝업 "단어 창"(`/word`, BroadcastChannel)에서만 보여 준다(팝업이 없거나 폰이면 흐림 + 눌러서 보기).
@@ -157,16 +162,18 @@ relay 에서: `round` = 문제 번호(1..n), `totalRounds` = n. `relay.order` = 
 - 정규화: trim, 소문자화, 연속 공백 1개로. 한글은 그대로 비교(NFC).
 - 완전 일치 → 정답. Levenshtein 거리 ≤ 1 (길이 ≥ 3인 경우) → `'close'` 를 보낸 사람에게만.
 - 출제자 및 이미 맞힌 사람의 채팅은 판정하지 않는다.
+- **relay**: 맞히는 사람의 채팅을 요소별로 판정한다(`server/words.js` `matchParts`). 정규화한 채팅에 요소가 부분 문자열로 들어 있으면 그 요소를 맞힌 것(순서·조사 무관, 공백을 뺀 판끼리도 비교 — 예 "바다에서 고양이가 축구해" 는 `고양이 · 축구 · 바다` 정답). 맞힌 요소는 문제 안에서 **누적**되어 여러 번에 나눠 맞혀도 된다. 못 맞힌 요소 중 3글자 이상이고 채팅 전체나 공백으로 나눈 토큰 하나와 Levenshtein ≤ 1 이면 근접.
 
 ## 점수
 - 정답자: `Math.round(100 + 300 * timeLeft / drawTime)` (최소 100), 먼저 맞힐수록 높음. 
 - 출제자: 턴 종료 시 `Math.round(300 * guessedCount / (playerCount - 1))` (모두 맞히면 300). 아무도 못 맞히면 0.
 - `game:turnEnd.deltas` 에 위 값을 담는다.
+- **relay**: 맞히는 사람 `max(50, round((100 + 300 × timeLeft / totalTime) × (1 − 0.25 × hintsUsed)))`(`timeLeft` = 문제 전체 남은 시간, `totalTime` = `relay.totalTime`). 주자는 정답 시점까지 **구간을 가진 주자**(`order[0..legIndex]`, 현재 주자 포함) 각 200, 아직 안 그린 주자 0. 못 맞히면(`time`·`guesserLeft`) 전원 0. 출제자 공식은 쓰지 않는다.
 
 ## 게임 모드
 - **classic (돌아가며 그리기)**: 아래 턴/라운드 흐름 그대로. 라운드마다 모든 플레이어가 한 번씩 출제.
 - **blitz (속도전)**: 출제 순서는 classic 과 같지만 `choosing` 단계가 없다 — 서버가 단어 1개를 자동 선택해 곧바로 `game:drawing`. 힌트는 설정과 무관하게 없다. 정답 점수는 맞힌 순서로 1등 400 · 2등 300 · 3등 200 · 이후 100(시간 무관). 출제자 점수는 classic 과 동일. 클라이언트는 카드 선택 시 프리셋(drawTime 25, hints 0, rounds 5)을 함께 보낸다.
-- **relay (이어 그리기)**: 게임 시작 때 접속한 사람들의 참가 순서가 고정된다(n명, 3~6명 · `ALLOW_SOLO` 서버는 2명부터). 문제는 n개(`totalRounds` = n)이고 `rounds` 는 쓰지 않는다. 문제 i(0부터)는 시작 순서를 i칸 회전한 뒤 앞 n−1명이 주자(구간 순서), 마지막 한 명이 맞히는 사람이다(예 A,B,C → A→B/C, B→C/A, C→A/B). 첫 주자만 조합 제시어를 고른다(choosing 15초, 시간 초과면 첫 후보). 요소 수 = `min(주자 수, 3)`. 구간 시간 = `drawTime`, 문제 전체 시간 = `drawTime × 구간 수`. 구간 경계는 고정이고 타이머는 끊기지 않는다(구간이 끝나면 `game:baton` 으로 다음 주자). 자동 힌트는 없다. 주자가 끊겨도 문제는 끝나지 않는다(`DRAWER_GRACE_MS`·`drawerLeft` 없음) — 구간 타이머는 계속 흐르고 경계에서 다음 주자로 넘어간다. 방을 완전히 나간(`room:leave`·강퇴·유예 만료) 주자는: 현재 주자면 그 자리에서 다음 구간으로(남은 구간 시간만큼 문제 시간이 줄고, 다음 구간이 없으면 `time` 으로 끝), 아직 차례 전이면 order 에서 빠진다(문제 시간이 한 구간만큼 준다). 다음 문제를 시작할 때도 나간 사람은 주자에서 빠지고, 맞히는 사람이 나간 문제는 건너뛴다. 접속 인원이 최소 인원(3, `ALLOW_SOLO` 2) 미만이면 `notEnoughPlayers`. 중간 참가자는 관전(판정 없음)하고 다음 게임부터 참여.
+- **relay (이어 그리기)**: 게임 시작 때 접속한 사람들의 참가 순서가 고정된다(n명, 3~6명 · `ALLOW_SOLO` 서버는 2명부터). 문제는 n개(`totalRounds` = n)이고 `rounds` 는 쓰지 않는다. 문제 i(0부터)는 시작 순서를 i칸 회전한 뒤 앞 n−1명이 주자(구간 순서), 마지막 한 명이 맞히는 사람이다(예 A,B,C → A→B/C, B→C/A, C→A/B). 첫 주자만 조합 제시어를 고른다(choosing 15초, 시간 초과면 첫 후보). 요소 수 = `max(2, min(주자 수, 3))`(3명 방 2개, 4명 이상 3개, `ALLOW_SOLO` 2명 방도 2개). 구간 시간 = `drawTime`, 문제 전체 시간 = `drawTime × 구간 수`. 구간 경계는 고정이고 타이머는 끊기지 않는다(구간이 끝나면 `game:baton` 으로 다음 주자). 자동 힌트는 없고 맞히는 사람이 `hint:request` 로 최대 `hints` 번 초성을 연다. 맞히는 사람은 첫 구간부터 마지막 구간이 끝날 때까지 언제든 채팅으로 맞히고, 정답이면 남은 구간은 건너뛰고 문제가 끝난다. 주자가 끊겨도 문제는 끝나지 않는다(`DRAWER_GRACE_MS`·`drawerLeft` 없음) — 구간 타이머는 계속 흐르고 경계에서 다음 주자로 넘어간다. 방을 완전히 나간(`room:leave`·강퇴·유예 만료) 주자는: 현재 주자면 그 자리에서 다음 구간으로(남은 구간 시간만큼 문제 시간이 줄고, 다음 구간이 없으면 `time` 으로 끝), 아직 차례 전이면 order 에서 빠진다(문제 시간이 한 구간만큼 준다). 다음 문제를 시작할 때도 나간 사람은 주자에서 빠지고, 맞히는 사람이 나간 문제는 건너뛴다. **맞히는 사람이 문제 중(choosing·drawing)에 방을 완전히 나가면** 그 문제는 점수 없이 곧바로 `guesserLeft` 로 끝난다(끊김만이면 계속 진행). 인원 부족은 그다음 문제로 넘어갈 때 판정한다. 접속 인원이 최소 인원(3, `ALLOW_SOLO` 2) 미만이면 `notEnoughPlayers`. 중간 참가자는 관전(판정 없음)하고 다음 게임부터 참여.
 - **fixed (한 명이 그리기)**: `fixedDrawerId`(없으면 호스트)가 모든 턴을 출제. 라운드 순서는 `[fixedDrawerId]` 하나이므로 `rounds` = 그릴 단어 수. 출제자는 점수를 받지 않고 `game:over.ranking`에서 제외되며 `drawer`로 따로 전달된다. 출제자가 끊기면 유예 동안 기다리고(`turnEnd` 유지), 유예가 끝나 나가면 지정이 해제되어 호스트가 이어서 그린다. 중간 참가자는 바로 맞히기에 참여한다.
 
 ## 턴/라운드 흐름
@@ -182,7 +189,7 @@ relay 에서: `round` = 문제 번호(1..n), `totalRounds` = n. `relay.order` = 
 - 재시작 후 방은 첫 `room:rejoin`/`room:join` 이 그 코드로 들어오는 순간 저장소에서 복원된다(부팅 시 일괄 복원 아님 — 새 서버가 먼저 떠 있는 동안 0명으로 진행되는 것을 막기 위해). 모든 플레이어는 `connected:false`(유예 중)로 시작하고 `room:rejoin`으로 같은 자리에 복귀한다. 저장 시점의 잔여 시간이 복원 시점부터 다시 흐른다(다운타임은 게임 시간에서 빼지 않음).
 - 접속자가 2명 미만이지만 유예 중인 사람이 있어 전체 인원이 2명 이상이면, 턴을 넘길 때 게임을 끝내지 않고 2초 간격으로 재접속을 기다린다. 유예가 끝나 실제 퇴장으로 인원이 줄면 그때 게임 종료.
 - 스냅샷은 3시간이 지나면 버린다. 방이 비면 저장소에서도 삭제한다.
-- relay 는 스냅샷에 `relay`(order · guesserId · legIndex · legCount · legTime · legTimeLeft · totalTime · legStartOps · hintsUsed · hintsMax)와 `parts`(판정용 요소 배열)·조합 후보(`comboOptions`)를 함께 넣는다. 복원 때 현재 구간 남은 시간은 문제 전체 남은 시간에서 다시 계산한다.
+- relay 는 스냅샷에 `relay`(order · guesserId · legIndex · legCount · legTime · legTimeLeft · totalTime · legStartOps · hintsUsed · hintsMax · `revealedByPart`(요소별 힌트 공개 글자 인덱스 배열의 배열) · `solvedIdx`(맞히는 사람이 맞힌 요소 인덱스 배열))와 `parts`(판정용 요소 배열)·조합 후보(`comboOptions`)를 함께 넣는다. 복원 때 현재 구간 남은 시간은 문제 전체 남은 시간에서 다시 계산한다.
 
 ## 방 관리
 - roomCode: 대문자 A-Z 4글자, 충돌 없게 생성. 

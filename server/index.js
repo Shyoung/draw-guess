@@ -560,6 +560,12 @@ io.on('connection', (socket) => {
     if (err) fail(err);
   });
 
+  // hint:request — relay 맞히는 사람, drawing, 남은 횟수 안에서. 위반은 조용히 무시
+  on('hint:request', () => {
+    const room = currentRoom();
+    if (room) room.requestHint(pid());
+  });
+
   // draw:* — 출제자, drawing. 위반/잘못된 페이로드는 조용히 무시
   on('draw:start', (data) => {
     const room = currentRoom();
