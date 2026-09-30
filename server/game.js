@@ -8,7 +8,7 @@
  *  - word / wordOptions 는 출제자에게만 보낸다
  */
 
-const { pickWords, categoryOf, CATEGORY_NAMES, pickCombos, maskParts, PART_SEP } = require('./words');
+const { pickWords, categoryOf, CATEGORY_NAMES, pickCombos, maskParts, revealPartsAll, matchParts, PART_SEP } = require('./words');
 const { normalizeAnswer, levenshtein, isHangulSyllable, hintChar, maskWord, revealAll } = require('./textmatch');
 
 // ── 상수 ────────────────────────────────────────────────────────
@@ -213,7 +213,8 @@ class Room {
     this.currentStroke = null;
 
     // 이어 그리기(relay) 전용. relay 가 아니거나 대기실이면 null
-    // { order:[이번 문제 주자 id], guesserId, legIndex, legCount, legTime, legTimeLeft, totalTime, legStartOps, hintsUsed, hintsMax }
+    // { order:[이번 문제 주자 id], guesserId, legIndex, legCount, legTime, legTimeLeft, totalTime, legStartOps, hintsUsed, hintsMax,
+    //   revealedByPart: Array<Set<number>>(요소별 힌트 공개 글자 인덱스), solvedIdx: Set<number>(맞히는 사람이 맞힌 요소 인덱스, 누적) }
     this.relay = null;
     this.parts = null; // 현재 조합 제시어의 요소 배열(판정용)
     this.comboOptions = new Map(); // choosing 중 조합 후보: 표시 문자열 → parts
@@ -283,7 +284,12 @@ class Room {
       timeLeft: this.timeLeft,
       phaseEndsAt: this.phaseEndsAt,
       ops: this.ops,
-      relay: this.relay ? { ...this.relay, order: this.relay.order.slice() } : null,
+      relay: this.relay ? {
+        ...this.relay,
+        order: this.relay.order.slice(),
+        revealedByPart: (this.relay.revealedByPart || []).map((set) => [...set]),
+        solvedIdx: [...(this.relay.solvedIdx || [])],
+      } : null,
       parts: this.parts ? this.parts.slice() : null,
       comboOptions: [...this.comboOptions.entries()],
       usedWords: [...this.usedWords],
@@ -331,7 +337,13 @@ class Room {
     room.ops = Array.isArray(s.ops) ? s.ops : [];
     room.currentStroke = null;
     room.relay = s.relay && typeof s.relay === 'object' && Array.isArray(s.relay.order)
-      ? { ...s.relay, order: s.relay.order.slice() } : null;
+      ? {
+        ...s.relay,
+        order: s.relay.order.slice(),
+        hintsUsed: s.relay.hintsUsed || 0,
+        revealedByPart: (Array.isArray(s.relay.revealedByPart) ? s.relay.revealedByPart : []).map((a) => new Set(Array.isArray(a) ? a : [])),
+        solvedIdx: new Set(Array.isArray(s.relay.solvedIdx) ? s.relay.solvedIdx : []),
+      } : null;
     room.parts = Array.isArray(s.parts) ? s.parts.slice() : null;
     room.comboOptions = new Map(Array.isArray(s.comboOptions) ? s.comboOptions : []);
     room.usedWords = new Set(s.usedWords || []);
@@ -576,9 +588,20 @@ class Room {
     return idx !== -1 && idx <= this.relay.legIndex;
   }
 
-  /** 현재 relay 마스크(요소별 '_ _ _ · _ _'). TODO(R2): 힌트 버튼 공개분 반영 */
+  /** 현재 relay 마스크(요소별 '_ _ _ · _ _', 힌트 버튼으로 공개된 초성 포함). 차례 전 주자·관전자가 보는 판 */
   relayMask() {
-    return maskParts(this.parts || []);
+    return maskParts(this.parts || [], this.relay ? this.relay.revealedByPart : null);
+  }
+
+  /** 맞히는 사람이 보는 마스크: 맞힌 요소(solvedIdx)는 글자로, 나머지는 relayMask 와 같다 */
+  relayGuesserMask() {
+    const r = this.relay;
+    return revealPartsAll(this.parts || [], r ? r.solvedIdx : null, r ? r.revealedByPart : null);
+  }
+
+  /** 이 사람에게 보낼 relay 마스크(맞히는 사람이면 부분 정답 반영판) */
+  relayMaskFor(id) {
+    return this.relay && id === this.relay.guesserId ? this.relayGuesserMask() : this.relayMask();
   }
 
   /** 문제 전체 남은 시간에서 현재 구간 남은 시간을 다시 계산한다(구간 경계 고정: timeLeft = legTimeLeft + legTime × 남은 뒤 구간 수) */
@@ -793,14 +816,15 @@ class Room {
         ...(isDrawer ? { wordOptions: this.wordOptions.slice() } : {}),
       });
     } else if (this.phase === 'drawing' && this.isRelay()) {
-      // relay: 현재·지난 주자에게만 제시어, 나머지(차례 전 주자·맞히는 사람·관전자)는 마스크. TODO(R3): 복원·재접속 세부 검증
+      // relay: 현재·지난 주자에게만 제시어, 나머지(차례 전 주자·맞히는 사람·관전자)는 마스크(힌트 공개분, 맞히는 사람은 맞힌 요소까지).
+      // TODO(R3): 복원·재접속 세부 검증
       this.syncLegTimeLeft();
       this.emitTo(id, 'game:drawing', {
         drawerId: this.drawerId,
         round: this.round,
         totalRounds: this.totalRounds,
         timeLeft: this.timeLeft,
-        wordMask: this.relayMask(),
+        wordMask: this.relayMaskFor(id),
         wordLength: Array.from(this.word || '').length,
         relay: this.relayPayload(),
         ...(this.relayKnowsWord(id) ? { word: this.word } : {}),
@@ -863,9 +887,10 @@ class Room {
     );
 
     if ((this.phase === 'choosing' || this.phase === 'drawing') && this.isRelay()) {
-      if (this.connectedPlayers().length < RELAY_MIN_PLAYERS) this.endTurn('notEnoughPlayers');
+      // 맞히는 사람이 완전히 나가면 그 문제는 점수 없이 끝낸다(끊김만이면 계속). 인원 부족은 다음 문제로 넘어갈 때 판정한다
+      if (id === this.relay.guesserId) this.endTurn('guesserLeft');
+      else if (this.connectedPlayers().length < RELAY_MIN_PLAYERS) this.endTurn('notEnoughPlayers');
       else this.relayRunnerLeft(id);
-      // TODO(R3): 맞히는 사람이 나가면 guesserLeft 로 문제를 넘긴다(지금은 시간이 다 될 때까지 진행)
     } else if (this.phase === 'choosing' || this.phase === 'drawing') {
       if (this.connectedPlayers().length < MIN_PLAYERS) {
         this.endTurn('notEnoughPlayers');
@@ -1115,7 +1140,7 @@ class Room {
       this.relay = {
         order: runners, guesserId: assignment ? assignment.guesserId : null,
         legIndex: 0, legCount: runners.length, legTime, legTimeLeft: legTime, totalTime: legTime * runners.length,
-        legStartOps: 0, hintsUsed: 0, hintsMax: this.settings.hints,
+        legStartOps: 0, hintsUsed: 0, hintsMax: this.settings.hints, revealedByPart: [], solvedIdx: new Set(),
       };
       // 조합 제시어: 요소 수 = min(주자 수, 3). 조합 문자열과 요소 둘 다 다음 문제에서 피한다
       const combos = pickCombos(this.settings, exclude, this.settings.wordCount, Math.min(runners.length, 3));
@@ -1209,10 +1234,12 @@ class Room {
     r.legTimeLeft = r.legTime;
     r.totalTime = r.legTime * r.legCount;
     r.hintsUsed = 0;
+    r.revealedByPart = this.parts.map(() => new Set());
+    r.solvedIdx = new Set();
     // 점수 공식(timeLeft / drawTime)이 문제 전체 시간을 쓰도록
     this.drawTime = r.totalTime;
     this.timeLeft = r.totalTime;
-    this.hintTimes = new Set(); // 자동 힌트 없음(맞히는 사람이 버튼으로 — R2)
+    this.hintTimes = new Set(); // 자동 힌트 없음(맞히는 사람이 hint:request 로 — requestHint)
     this.hintCount = 0;
     this.categoryRevealed = false;
     for (const p of this.players) p.isDrawing = p.id === this.drawerId;
@@ -1263,7 +1290,7 @@ class Room {
     const drawer = this.getPlayer(this.drawerId);
     const base = {
       legIndex: r.legIndex, legCount: r.legCount, drawerId: this.drawerId,
-      drawerName: drawer ? drawer.name : '', legTimeLeft: r.legTimeLeft,
+      drawerName: drawer ? drawer.name : '', legTimeLeft: r.legTimeLeft, hintsUsed: r.hintsUsed,
     };
     this.emitExcept(this.drawerId, 'game:baton', base);
     this.emitTo(this.drawerId, 'game:baton', { ...base, word: this.word });
@@ -1420,7 +1447,7 @@ class Room {
 
   /**
    * 턴 종료. 출제자 점수 계산, deltas 전송, 5초 후 다음 턴(또는 게임 종료).
-   * @param {'time'|'allGuessed'|'drawerLeft'|'notEnoughPlayers'} reason
+   * @param {'time'|'allGuessed'|'drawerLeft'|'guesserLeft'|'notEnoughPlayers'} reason
    */
   endTurn(reason) {
     if (this.phase !== 'choosing' && this.phase !== 'drawing') return;
@@ -1430,7 +1457,7 @@ class Room {
     // 출제자 점수: round(300 * guessedCount / (playerCount - 1)), 최대 300
     const drawer = this.getPlayer(this.drawerId);
     const relay = this.isRelay();
-    // relay 점수는 R2(맞히는 사람·주자 200). 지금은 전원 0
+    // relay 점수는 정답 순간(onRelayCorrect)에 turnPoints 로 이미 정해진다(못 맞히면 전원 0). 출제자 공식은 쓰지 않는다
     if (drawer && this.phase === 'drawing' && this.settings.mode !== 'fixed' && !relay) {
       // (fixed 모드의 지정 출제자는 경쟁하지 않으므로 점수를 받지 않는다)
       // 연결이 끊긴 사람은 맞힐 수 없으므로 분모에서 뺀다(단, 이미 맞힌 뒤 끊긴 사람은 분자·분모 모두 포함)
@@ -1449,6 +1476,7 @@ class Room {
       const r = this.relay;
       const drawerIds = r.order.slice(0, r.legIndex + 1);
       const first = this.getPlayer(drawerIds[0]);
+      const guesser = this.getPlayer(r.guesserId);
       this.gallery.push({
         round: this.round,
         word: this.word,
@@ -1457,7 +1485,7 @@ class Room {
         drawerIds,
         drawerName: first ? first.name : '',
         guesserId: r.guesserId,
-        guessed: 0, // TODO(R2): 맞히는 사람이 맞혔으면 1
+        guessed: guesser && guesser.hasGuessed ? 1 : 0, // 맞힌 사람 수(0|1) — classic 과 같은 뜻(클라이언트·그림 보관이 숫자로 쓴다)
         ops: this.ops.slice(),
       });
       this.trimGallery();
@@ -1620,10 +1648,14 @@ class Room {
     if (masked.hit) msg.textSafe = masked.text;
 
     if ((this.phase === 'choosing' || this.phase === 'drawing') && this.isRelay()) {
-      // relay: 이번 문제의 주자끼리는 주자 채널(guessed-chat), 맞히는 사람·관전자는 방 전체. TODO(R2): 맞히는 사람 정답 판정
+      // relay: 이번 문제의 주자끼리는 주자 채널(guessed-chat), 맞히는 사람·관전자는 방 전체. 맞히는 사람은 drawing 중 요소 판정
       const runners = this.relay.order;
       if (runners.includes(p.id)) {
         this.emitToIds(runners.filter((rid) => this.getPlayer(rid)), 'chat:message', { ...msg, kind: 'guessed-chat' });
+        return null;
+      }
+      if (this.phase === 'drawing' && p.id === this.relay.guesserId && this.parts && this.parts.length) {
+        this.judgeRelayGuess(p, msg, text);
         return null;
       }
       this.emitAll('chat:message', { ...msg, kind: 'chat' });
@@ -1654,8 +1686,94 @@ class Room {
     return null;
   }
 
+  /**
+   * relay 맞히는 사람의 채팅 판정(matchParts). 맞힌 요소는 누적(solvedIdx)이라 나눠 맞혀도 된다.
+   *  - 누적으로 모든 요소 → 정답(onCorrectGuess → onRelayCorrect)
+   *  - 새로 맞힌 요소가 있음 → 보낸 사람에게 close + partial, 본인에게만 맞힌 요소가 글자로 보이는 game:hint, 나머지에게 chat
+   *  - 새로 맞힌 건 없고 못 맞힌 요소 중 근접 → 보낸 사람에게 close(partial 없음), 나머지에게 chat
+   *  - 그 밖 → 전원 chat
+   */
+  judgeRelayGuess(p, msg, text) {
+    const r = this.relay;
+    const { solved, close } = matchParts(text, this.parts);
+    const fresh = solved.filter((i) => !r.solvedIdx.has(i));
+    for (const i of fresh) r.solvedIdx.add(i);
+    if (r.solvedIdx.size >= this.parts.length) {
+      this.onCorrectGuess(p);
+      return;
+    }
+    if (fresh.length) {
+      this.emitTo(p.id, 'chat:message', { ...msg, kind: 'close', partial: { solved: r.solvedIdx.size, total: this.parts.length } });
+      this.emitExcept(p.id, 'chat:message', { ...msg, kind: 'chat' });
+      this.emitTo(p.id, 'game:hint', { wordMask: this.relayGuesserMask(), hintsUsed: r.hintsUsed });
+      this.persist();
+      return;
+    }
+    if (close.some((i) => !r.solvedIdx.has(i))) {
+      this.emitTo(p.id, 'chat:message', { ...msg, kind: 'close' });
+      this.emitExcept(p.id, 'chat:message', { ...msg, kind: 'chat' });
+      return;
+    }
+    this.emitAll('chat:message', { ...msg, kind: 'chat' });
+  }
+
+  /**
+   * hint:request (relay, 맞히는 사람, drawing, hintsUsed < hintsMax). 위반은 조용히 무시.
+   * 아직 못 맞힌 요소의 미공개 글자 중 무작위 1개의 초성을 공개한다(요소별 maxReveals: 한글만이면 전부, 영문·숫자가 섞이면 글자 수−1).
+   * 공개할 글자가 없으면 hintsUsed 를 올리지 않는다. 받는 사람 = 마스크를 보는 사람 전원(relayKnowsWord 가 false), 맞히는 사람은 부분 정답 반영판.
+   */
+  requestHint(id) {
+    if (this.phase !== 'drawing' || !this.isRelay() || !this.parts) return;
+    const r = this.relay;
+    if (id !== r.guesserId || r.hintsUsed >= r.hintsMax) return;
+    const candidates = [];
+    this.parts.forEach((part, i) => {
+      if (r.solvedIdx.has(i)) return;
+      const rev = r.revealedByPart[i] || (r.revealedByPart[i] = new Set());
+      if (rev.size >= maxReveals(part)) return;
+      Array.from(part).forEach((ch, ci) => { if (ch !== ' ' && !rev.has(ci)) candidates.push([i, ci]); });
+    });
+    if (!candidates.length) return;
+    const [pi, ci] = candidates[Math.floor(Math.random() * candidates.length)];
+    r.revealedByPart[pi].add(ci);
+    r.hintsUsed += 1;
+    const others = this.players.filter((q) => q.id !== r.guesserId && !this.relayKnowsWord(q.id)).map((q) => q.id);
+    this.emitToIds(others, 'game:hint', { wordMask: this.relayMask(), hintsUsed: r.hintsUsed });
+    this.emitTo(r.guesserId, 'game:hint', { wordMask: this.relayGuesserMask(), hintsUsed: r.hintsUsed });
+    this.persist();
+  }
+
+  /**
+   * relay 정답: 맞히는 사람 max(50, round((100 + 300 × timeLeft / totalTime) × (1 − 0.25 × hintsUsed))),
+   * 정답 시점까지 구간을 가진 주자(order[0..legIndex], 현재 주자 포함) 각 200. 곧바로 turnEnd('allGuessed')
+   */
+  onRelayCorrect(p) {
+    const r = this.relay;
+    p.hasGuessed = true;
+    const total = r.totalTime > 0 ? r.totalTime : 1;
+    const pts = Math.max(50, Math.round((100 + (300 * this.timeLeft) / total) * (1 - 0.25 * r.hintsUsed)));
+    p.score += pts;
+    this.turnPoints.set(p.id, pts);
+    for (const rid of r.order.slice(0, r.legIndex + 1)) {
+      const q = this.getPlayer(rid);
+      if (!q) continue;
+      q.score += 200;
+      this.turnPoints.set(q.id, 200);
+    }
+    r.solvedIdx = new Set(this.parts.map((_, i) => i));
+    // 본인에게만 전체 공개(요소 마스크와 같은 ' · ' 형식). 정답 텍스트는 브로드캐스트하지 않는다
+    this.emitTo(p.id, 'game:hint', { wordMask: this.relayGuesserMask(), hintsUsed: r.hintsUsed });
+    this.emitAll('chat:message', {
+      id: p.id, name: p.name, avatar: { ...p.avatar }, text: `${p.name}님이 정답을 맞혔습니다!`, kind: 'correct',
+    });
+    this.emitAll('player:guessed', { id: p.id });
+    this.broadcastState();
+    this.endTurn('allGuessed');
+  }
+
   /** 정답 처리: 점수 부여, correct/player:guessed 전송, 전원 정답 시 턴 종료 */
   onCorrectGuess(p) {
+    if (this.isRelay()) { this.onRelayCorrect(p); return; }
     p.hasGuessed = true;
     let pts;
     if (this.settings.mode === 'blitz') {
