@@ -218,6 +218,7 @@ class Room {
     this.relay = null;
     this.parts = null; // 현재 조합 제시어의 요소 배열(판정용)
     this.comboOptions = new Map(); // choosing 중 조합 후보: 표시 문자열 → parts
+    this.relayLeft = {}; // relay 게임 중 방을 완전히 나간 참가자 id → 이름(그 사람이 맞힐 문제를 건너뛸 때 안내용)
 
     this.usedWords = new Set(); // 이번 게임에서 이미 나온(선택된) 단어
     this.offeredWords = new Set(); // 이번 게임에서 후보로 한 번이라도 제시된 단어 — 반복 제시 방지
@@ -292,6 +293,7 @@ class Room {
       } : null,
       parts: this.parts ? this.parts.slice() : null,
       comboOptions: [...this.comboOptions.entries()],
+      relayLeft: { ...this.relayLeft },
       usedWords: [...this.usedWords],
       offeredWords: [...this.offeredWords],
       gallery: this.gallery,
@@ -346,6 +348,7 @@ class Room {
       } : null;
     room.parts = Array.isArray(s.parts) ? s.parts.slice() : null;
     room.comboOptions = new Map(Array.isArray(s.comboOptions) ? s.comboOptions : []);
+    room.relayLeft = s.relayLeft && typeof s.relayLeft === 'object' ? { ...s.relayLeft } : {};
     room.usedWords = new Set(s.usedWords || []);
     room.offeredWords = new Set(s.offeredWords || []);
     room.gallery = Array.isArray(s.gallery) ? s.gallery : [];
@@ -373,7 +376,9 @@ class Room {
     for (const p of this.players) this.startGrace(p);
     if (this.phase === 'choosing' || this.phase === 'drawing') {
       this.timeLeft = this.remainingSeconds();
-      if (this.isRelay() && this.phase === 'drawing') this.syncLegTimeLeft();
+      const relayDrawing = this.isRelay() && this.phase === 'drawing';
+      // relay: 현재 구간 남은 시간은 문제 전체 남은 시간에서 다시 계산한다(구간 경계는 고정)
+      if (relayDrawing) this.syncLegTimeLeft();
       if (this.timeLeft <= 0) {
         if (this.phase === 'choosing') this.beginDrawing(this.wordOptions[0]);
         else this.endTurn('time');
@@ -381,6 +386,8 @@ class Room {
         // startTicker()는 phaseEndsAt을 다시 계산하므로 여기서는 종료 시각을 유지한 채 interval만 건다
         this.clearTimers();
         this._interval = setInterval(() => this.tick(), 1000);
+        // 구간 경계 바로 그때 저장됐으면(현재 구간 0초) 곧바로 다음 주자로 — 그래야 timeLeft = legTimeLeft + legTime × 남은 뒤 구간 수 가 유지된다
+        if (relayDrawing && this.relay.legTimeLeft <= 0) this.advanceLeg();
       }
     } else if (this.phase === 'turnEnd') {
       const reason = this.lastTurnEnd ? this.lastTurnEnd.reason : 'time';
@@ -718,6 +725,8 @@ class Room {
     if (drawerWaits) {
       const ds = Math.max(1, Math.round(DRAWER_GRACE_MS / 1000));
       this.systemMessage(`출제자 ${p.name}님의 연결이 끊어졌습니다. ${ds}초 안에 돌아오면 이어서 그려요.`);
+    } else if (relay && this.phase === 'drawing' && id === this.drawerId) {
+      this.systemMessage(`${p.name}님의 연결이 끊어졌습니다. 구간이 끝나기 전에 돌아오면 이어서 그려요.`);
     } else {
       this.systemMessage(`${p.name}님의 연결이 끊어졌습니다. ${secs}초 안에 돌아오면 이어서 할 수 있어요.`);
     }
@@ -817,7 +826,7 @@ class Room {
       });
     } else if (this.phase === 'drawing' && this.isRelay()) {
       // relay: 현재·지난 주자에게만 제시어, 나머지(차례 전 주자·맞히는 사람·관전자)는 마스크(힌트 공개분, 맞히는 사람은 맞힌 요소까지).
-      // TODO(R3): 복원·재접속 세부 검증
+      // 전원 relay(현재 구간·구간 남은 시간·힌트 수)와 draw:sync. 툴바 권한은 room:state.drawerId(현재 주자)로 — 자기 구간 안에 돌아온 주자는 남은 시간만큼 이어 그린다
       this.syncLegTimeLeft();
       this.emitTo(id, 'game:drawing', {
         drawerId: this.drawerId,
@@ -843,9 +852,11 @@ class Room {
       });
       this.emitTo(id, 'draw:sync', { ops: this.ops });
     } else if (this.phase === 'turnEnd' && this.lastTurnEnd) {
+      // 이번 턴 deltas 에 이미 있는 사람(재접속)은 그대로, 없는 사람(중간 참가)만 0 으로 덧붙인다 — 같은 사람이 두 줄로 보이지 않게
+      const deltas = this.lastTurnEnd.deltas.some((d) => d.id === id) ? this.lastTurnEnd.deltas : [...this.lastTurnEnd.deltas, { id, delta: 0 }];
       this.emitTo(id, 'game:turnEnd', {
         ...this.lastTurnEnd,
-        deltas: [...this.lastTurnEnd.deltas, { id, delta: 0 }],
+        deltas,
         timeLeft: this.remainingSeconds(),
       });
     } else if (this.phase === 'gameOver' && this.lastGameOver) {
@@ -886,10 +897,15 @@ class Room {
       reason === 'kicked' ? `${p.name}님이 강퇴되었습니다.` : `${p.name}님이 나갔습니다.`,
     );
 
+    // relay 게임 중 참가자가 나가면 이름을 남겨 둔다(그 사람이 맞힐 차례의 문제를 건너뛸 때 안내)
+    if (this.settings.mode === 'relay' && this.phase !== 'lobby' && this.turnOrder.includes(id)) this.relayLeft[id] = p.name;
+
     if ((this.phase === 'choosing' || this.phase === 'drawing') && this.isRelay()) {
-      // 맞히는 사람이 완전히 나가면 그 문제는 점수 없이 끝낸다(끊김만이면 계속). 인원 부족은 다음 문제로 넘어갈 때 판정한다
+      // 맞히는 사람이 완전히 나가면 그 문제는 점수 없이 끝낸다(끊김만이면 계속 — 유예 만료로 나가도 여기로 온다).
+      // 인원 부족: 실제 퇴장으로 전체 인원(유예 중 포함)이 최소 미만이면 이 문제를 notEnoughPlayers 로 끝낸다.
+      // 접속 인원만 모자란 것(끊겨서 유예 중)은 문제를 계속하고, 다음 문제로 넘어갈 때 재접속을 기다린다(nextRelayProblem)
       if (id === this.relay.guesserId) this.endTurn('guesserLeft');
-      else if (this.connectedPlayers().length < RELAY_MIN_PLAYERS) this.endTurn('notEnoughPlayers');
+      else if (this.players.length < RELAY_MIN_PLAYERS) this.endTurn('notEnoughPlayers');
       else this.relayRunnerLeft(id);
     } else if (this.phase === 'choosing' || this.phase === 'drawing') {
       if (this.connectedPlayers().length < MIN_PLAYERS) {
@@ -1014,6 +1030,7 @@ class Room {
     this.relay = null;
     this.parts = null;
     this.comboOptions = new Map();
+    this.relayLeft = {};
     if (relay) {
       // 이어 그리기: 시작 때 접속한 사람들의 참가 순서로 고정, 문제 n개(모두가 한 번씩 맞힌다). round = 문제 번호(nextTurn 에서 1부터)
       this.turnOrder = this.connectedPlayers().map((p) => p.id);
@@ -1083,7 +1100,8 @@ class Room {
 
   /**
    * relay: 다음 문제로. 순서 밀기(relayAssignment), n문제가 끝나면 게임 종료.
-   * 방을 완전히 나간 사람은 주자에서 빼고, 맞히는 사람이 나간 문제는 건너뛴다. 주자가 0명이면 게임 종료.
+   * 방을 완전히 나간 사람은 주자에서 빼고(끊겨서 유예 중인 주자는 남긴다 — 자기 구간이 오면 비워 두고 경계에서 넘어간다),
+   * 맞히는 사람이 나간 문제·주자가 모두 나간 문제는 시스템 메시지를 남기고 건너뛴다(round 는 올라가 "문제 i/n" 이 맞다).
    */
   nextRelayProblem() {
     if (this.connectedPlayers().length < RELAY_MIN_PLAYERS) {
@@ -1098,9 +1116,16 @@ class Room {
       this.turnIndex = this.round - 1;
       if (this.round > this.totalRounds) { this.gameOver(); return; }
       const { runners, guesserId } = relayAssignment(this.turnOrder, this.round - 1);
-      if (!this.getPlayer(guesserId)) continue; // TODO(R3): guesserLeft 로 다듬기
+      if (!this.getPlayer(guesserId)) {
+        const name = this.relayLeft[guesserId];
+        this.systemMessage(`문제 ${this.round}/${this.totalRounds}: ${name ? name + '님이' : '맞힐 사람이'} 나가서 이 문제는 건너뛰어요.`);
+        continue;
+      }
       const live = runners.filter((rid) => this.getPlayer(rid));
-      if (!live.length) { this.gameOver(); return; }
+      if (!live.length) {
+        this.systemMessage(`문제 ${this.round}/${this.totalRounds}: 그릴 사람이 모두 나가서 이 문제는 건너뛰어요.`);
+        continue;
+      }
       this.beginChoosing(live[0], { runners: live, guesserId });
       return;
     }
@@ -1258,6 +1283,7 @@ class Room {
     this.emitAll('draw:sync', { ops: [] });
     this.broadcastState();
     this.systemMessage(`이어 그리기 시작! ${drawer.name}님부터 그립니다.`);
+    if (!drawer.connected) this.systemMessage(this.relayAwayText(drawer.name));
     this.startTicker();
   }
 
@@ -1295,7 +1321,14 @@ class Room {
     this.emitExcept(this.drawerId, 'game:baton', base);
     this.emitTo(this.drawerId, 'game:baton', { ...base, word: this.word });
     this.broadcastState();
-    this.systemMessage(`${base.drawerName}님이 이어서 그립니다.`);
+    // 끊긴 채로 자기 구간이 오면 그 구간은 비워 두고 경계에서 다음 주자로(건너뛰지 않는다 — 구간 안에 돌아오면 남은 시간만큼 그린다)
+    if (drawer && !drawer.connected) this.systemMessage(this.relayAwayText(drawer.name));
+    else this.systemMessage(`${base.drawerName}님이 이어서 그립니다.`);
+  }
+
+  /** 끊긴 주자의 구간이 시작될 때 안내 */
+  relayAwayText(name) {
+    return `${name}님 연결을 기다리는 중… 구간이 끝나면 다음 사람이 그려요.`;
   }
 
   /**
@@ -1620,6 +1653,7 @@ class Room {
     this.relay = null;
     this.parts = null;
     this.comboOptions = new Map();
+    this.relayLeft = {};
     this.revealed = new Set();
     this.ops = [];
     this.currentStroke = null;

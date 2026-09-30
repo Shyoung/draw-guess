@@ -7,6 +7,11 @@
  *  ④ R2 맞히기(소켓, 3명, hints 2·wordCount 2): 비주자 hint:request 무시, 힌트(받는 사람·감점 횟수·상한), 부분 정답(close + partial),
  *     누적 정답(correct·allGuessed·점수 ×0.5·구간 가진 주자 200), 두 구간 뒤 정답, 시간 초과 → game:over 점수 합·갤러리 guessed,
  *     guesserLeft(→ notEnoughPlayers 로 게임 종료). Room 단위: 스냅샷의 hintsUsed·revealedByPart·solvedIdx, 공개할 글자가 없으면 힌트 무시
+ *  ⑤ R3 끊김·복원. Room 단위: 끊긴 주자의 구간은 비워 두고 경계에서 넘어감(안내), 맞히는 사람·주자가 모두 나간 문제 건너뛰기(round 증가),
+ *     인원(끊김만이면 계속·재접속 대기 / 실제 퇴장으로 모자라면 notEnoughPlayers), choosing 복원(같은 후보), 구간 경계 복원(시간 불변식).
+ *     소켓(기본 유예): 차례 전 주자·맞히는 사람·현재 주자 끊김 → 복귀 catch-up, 끊긴 주자 경계 넘김 → 지난 주자로 복귀(권한 없음),
+ *     turnEnd 중 복귀(deltas 중복 없음). 소켓(유예 2.5초, 3135): 현재 주자 유예 만료 → 곧바로 다음 구간, 맞히는 사람 유예 만료 → guesserLeft,
+ *     나간 맞히는 사람의 문제 건너뛰기, 인원 부족. 소켓(파일 저장소, 3136): 2구간째 서버 재시작 → 같은 구간·마스크·힌트 수·그림, 시간 불변식, 정답까지
  *  node test/relay.js
  */
 'use strict';
@@ -14,9 +19,14 @@ const { spawn } = require('child_process');
 const path = require('path');
 const { io } = require('socket.io-client');
 
-const PORT = 3134 + Number(process.env.TEST_PORT_OFFSET ?? 0);
-const URL = `http://localhost:${PORT}`;
+const OFFSET = Number(process.env.TEST_PORT_OFFSET ?? 0);
+const PORT = 3134 + OFFSET;
+const PORT_GRACE = 3135 + OFFSET; // ⑤ 짧은 유예(RECONNECT_GRACE_MS) 서버
+const PORT_STORE = 3136 + OFFSET; // ⑤ 파일 저장소 재시작 복원 서버
+let URL = `http://localhost:${PORT}`;
 const ROOT = path.resolve(__dirname, '..');
+const fs = require('fs');
+const STATE_FILE = path.join(ROOT, 'test', '.tmp-relay-state.json');
 
 let passes = 0, failures = 0;
 function check(name, cond, detail) {
@@ -29,14 +39,16 @@ function check(name, cond, detail) {
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let serverProc = null;
+const procs = [];
 const clients = [];
 function cleanup(code) {
   for (const c of clients) { try { c.disconnect(); } catch (_) { /* ignore */ } }
-  if (serverProc) { try { serverProc.kill(); } catch (_) { /* ignore */ } }
+  for (const p of procs) { if (!p.exited) { try { p.kill(); } catch (_) { /* ignore */ } } }
+  try { fs.unlinkSync(STATE_FILE); } catch (_) { /* ignore */ }
   console.log(`\n${passes} passed, ${failures} failed`);
   setTimeout(() => process.exit(code), 300);
 }
-setTimeout(() => { console.log('FAIL - overall timeout'); failures += 1; cleanup(2); }, 300000);
+setTimeout(() => { console.log('FAIL - overall timeout'); failures += 1; cleanup(2); }, 420000);
 
 // 서버 env 에 ALLOW_SOLO 가 새지 않게(3명 규칙으로 돈다). 단위 테스트의 require 보다 먼저
 delete process.env.ALLOW_SOLO;
@@ -184,15 +196,186 @@ function fakeIo(sent) {
   room.destroy();
 }
 
+// ── ⑤ R3 끊김·복원 (Room 단위, 가짜 io) ─────────────────────────
+const sysTexts = (list) => list.filter((x) => x.ev === 'chat:message' && x.p && x.p.kind === 'system').map((x) => x.p.text);
+function relayRoom(sent, code, ids, settings) {
+  const room = new game.Room(fakeIo(sent), code);
+  for (const id of ids) room.addPlayer({ id, name: id, avatar: {}, token: `tok-${code}-${id}`, socketId: id });
+  room.updateSettings(ids[0], { mode: 'relay', drawTime: 15, wordCount: 2, ...(settings || {}) });
+  return room;
+}
+/** 시간 불변식: 문제 전체 남은 시간 = 현재 구간 남은 시간 + 구간 시간 × 남은 뒤 구간 수 */
+const legInvariant = (tl, r) => tl === r.legTimeLeft + r.legTime * (r.legCount - 1 - r.legIndex);
+{
+  // 끊긴 주자: 문제는 계속, 경계에서 넘어가고, 끊긴 채로 자기 구간이 오면 비워 두고 안내한 뒤 경계에서 넘어간다
+  const sent = [];
+  const room = relayRoom(sent, 'R3A', ['A', 'B', 'C']);
+  room.start('A');
+  room.chooseWord('A', room.wordOptions[0]);
+  room.handleDraw('A', 'start', { tool: 'pen', color: '#000000', size: 5, x: 1, y: 1 });
+  const mark = sent.length;
+  room.markDisconnected('A');
+  check('⑤ 현재 주자 A 가 끊김: 열린 획을 닫아 draw:end 중계, 문제는 계속(drawerLeft 없음)',
+    room.phase === 'drawing' && room.drawerId === 'A' && room.currentStroke === null && sent.slice(mark).some((x) => x.ev === 'draw:end'));
+  check('⑤ 안내: "A님의 연결이 끊어졌습니다. 구간이 끝나기 전에 돌아오면 이어서 그려요."',
+    sysTexts(sent.slice(mark)).includes('A님의 연결이 끊어졌습니다. 구간이 끝나기 전에 돌아오면 이어서 그려요.'), sysTexts(sent.slice(mark)));
+  room.markDisconnected('B');
+  for (let i = 0; i < 15; i++) room.tick();
+  check('⑤ 경계에서 끊긴 B 에게 구간이 넘어간다(건너뛰지 않음), 시간 불변식',
+    room.phase === 'drawing' && room.drawerId === 'B' && room.relay.legIndex === 1 && room.relay.legTimeLeft === 15 && legInvariant(room.timeLeft, room.relay), room.relay);
+  check('⑤ 안내: "B님 연결을 기다리는 중… 구간이 끝나면 다음 사람이 그려요."',
+    sysTexts(sent).includes('B님 연결을 기다리는 중… 구간이 끝나면 다음 사람이 그려요.') && !sysTexts(sent).includes('B님이 이어서 그립니다.'), sysTexts(sent).slice(-3));
+  for (let i = 0; i < 15; i++) room.tick();
+  check('⑤ 비워 둔 구간이 끝나면 문제 종료(time)', room.phase === 'turnEnd' && room.lastTurnEnd.reason === 'time', room.lastTurnEnd);
+  room.destroy();
+}
+{
+  // 4명: 맞히는 사람이 이미 나간 문제는 건너뛰고 안내, round 는 올라간다
+  const sent = [];
+  const room = relayRoom(sent, 'R3B', ['A', 'B', 'C', 'D']);
+  room.start('A');
+  room.removePlayer('A', 'left');
+  check('⑤ 4명 중 1번 문제 첫 주자 A 가 choosing 중 나감 → B 가 고른다', room.phase === 'choosing' && room.drawerId === 'B'
+    && same(room.relay.order, ['B', 'C']) && room.relay.guesserId === 'D', room.relay);
+  room.chooseWord('B', room.wordOptions[0]);
+  room.handleChat('D', room.parts.join(' '));
+  check('⑤ D 정답 → turnEnd(allGuessed)', room.phase === 'turnEnd' && room.lastTurnEnd.reason === 'allGuessed', room.lastTurnEnd);
+  const mark = sent.length;
+  room.nextTurn();
+  const msgs = sysTexts(sent.slice(mark));
+  check('⑤ 2번 문제(맞히는 사람 A 가 나감)는 건너뛰고 "문제 2/4: A님이 나가서 이 문제는 건너뛰어요."', msgs.includes('문제 2/4: A님이 나가서 이 문제는 건너뛰어요.'), msgs);
+  const st = room.toState();
+  check('⑤ 곧바로 3번 문제: round 3/4, 주자 C→D(나간 A 는 빠짐), 맞히는 사람 B', room.phase === 'choosing' && st.round === 3 && st.totalRounds === 4
+    && same(st.relay.order, ['C', 'D']) && st.relay.guesserId === 'B' && st.drawerId === 'C', st.relay);
+  const ch = sent.slice(mark).filter((x) => x.ev === 'game:choosing');
+  check('⑤ 건너뛴 문제에는 game:choosing 이 없다(3번 문제 것만)', ch.length === 2 && ch.every((x) => x.p.drawerId === 'C'), ch.map((x) => x.p.drawerId));
+  room.destroy();
+}
+{
+  // 주자가 모두 나간 문제도 건너뛴다(관전자가 있어 인원은 된다). 마지막 문제까지 건너뛰면 게임 종료
+  const sent = [];
+  const room = relayRoom(sent, 'R3C', ['A', 'B', 'C']);
+  room.start('A');
+  room.addPlayer({ id: 'D', name: 'D', avatar: {}, token: 'tok-R3C-D', socketId: 'D' }); // 중간 참가(관전)
+  room.addPlayer({ id: 'E', name: 'E', avatar: {}, token: 'tok-R3C-E', socketId: 'E' });
+  room.chooseWord('A', room.wordOptions[0]);
+  room.handleChat('C', room.parts.join(' '));
+  room.removePlayer('B', 'left'); // turnEnd 중 2번 문제 주자 B·C 가 나간다(맞히는 사람 A 는 남음)
+  room.removePlayer('C', 'left');
+  const mark = sent.length;
+  room.nextTurn();
+  const msgs = sysTexts(sent.slice(mark));
+  check('⑤ 주자가 모두 나간 2번 문제·맞히는 사람이 나간 3번 문제를 건너뛴다',
+    msgs.includes('문제 2/3: 그릴 사람이 모두 나가서 이 문제는 건너뛰어요.') && msgs.includes('문제 3/3: B님이 나가서 이 문제는 건너뛰어요.'), msgs);
+  check('⑤ 남은 문제가 없으면 game:over(gallery 1개)', sent.slice(mark).some((x) => x.ev === 'game:over' && x.p.gallery.length === 1) && room.phase === 'lobby');
+  room.destroy();
+}
+{
+  // 인원: 끊김만이면 문제를 계속하고, 실제 퇴장으로 전체 인원(유예 포함)이 모자라면 notEnoughPlayers
+  const sent = [];
+  const room = relayRoom(sent, 'R3D', ['A', 'B', 'C', 'D']);
+  room.start('A');
+  room.chooseWord('A', room.wordOptions[0]);
+  room.markDisconnected('C'); // 차례 전 주자(유예 중)
+  room.removePlayer('B', 'left'); // 차례 전 주자(퇴장) → 접속 2명(A·D), 전체 3명
+  check('⑤ 접속 2명이라도 유예 중 포함 3명이면 문제 계속(B 는 order 에서 빠짐, 끊긴 C 는 남음)',
+    room.phase === 'drawing' && same(room.relay.order, ['A', 'C']) && room.relay.legCount === 2, { phase: room.phase, relay: room.relay });
+  room.removePlayer('C', 'left'); // 유예 만료 → 전체 2명
+  check('⑤ 실제 퇴장으로 전체 2명 → turnEnd(notEnoughPlayers)', room.phase === 'turnEnd' && room.lastTurnEnd.reason === 'notEnoughPlayers', room.lastTurnEnd);
+  room.destroy();
+
+  const sent2 = [];
+  const r2 = relayRoom(sent2, 'R3E', ['A', 'B', 'C']);
+  r2.start('A');
+  r2.chooseWord('A', r2.wordOptions[0]);
+  r2.markDisconnected('B');
+  r2.endTurn('time');
+  const mark = sent2.length;
+  r2.nextTurn();
+  check('⑤ 다음 문제 때 접속 2명·유예 포함 3명 → 재접속을 기다린다(turnEnd 유지, 안내)', r2.phase === 'turnEnd'
+    && sysTexts(sent2.slice(mark)).includes('다른 참가자의 재접속을 기다리고 있어요…'), sysTexts(sent2.slice(mark)));
+  r2.reconnect('B', 'B2');
+  r2.nextTurn();
+  check('⑤ B 가 돌아오면 2번 문제(B 가 고름)', r2.phase === 'choosing' && r2.round === 2 && r2.drawerId === 'B', { phase: r2.phase, round: r2.round });
+  r2.destroy();
+}
+{
+  // choosing 중 저장 → 복원: 첫 주자에게 같은 후보, 나머지는 후보 없음. 고르면 저장된 요소로 이어진다
+  const room = relayRoom([], 'R3F', ['A', 'B', 'C']);
+  room.start('A');
+  const opts = room.wordOptions.slice();
+  const combos = new Map(room.comboOptions);
+  const snap = JSON.parse(JSON.stringify(room.toSnapshot()));
+  room.destroy();
+  check('⑤ 스냅샷에 turnOrder·relay·comboOptions', same(snap.turnOrder, ['A', 'B', 'C']) && snap.relay && same(snap.relay.order, ['A', 'B']) && snap.comboOptions.length === opts.length, snap.relay);
+  const sent = [];
+  const r2 = game.Room.fromSnapshot(fakeIo(sent), snap);
+  r2.resumeAfterRestore();
+  r2.reconnect('A', 'A2');
+  r2.reconnect('B', 'B2');
+  const chA = sent.find((x) => x.ev === 'game:choosing' && x.t === 'A2');
+  const chB = sent.find((x) => x.ev === 'game:choosing' && x.t === 'B2');
+  check('⑤ choosing 복원: 첫 주자 A 에게 같은 후보, B 에게는 후보 없음', chA && same(chA.p.wordOptions, opts) && chB && chB.p.wordOptions === undefined && chA.p.timeLeft > 0, { chA, chB });
+  check('⑤ choosing 복원: room:state.relay 유지', same(r2.toState().relay, { order: ['A', 'B'], guesserId: 'C', legIndex: 0, legCount: 2 }), r2.toState().relay);
+  r2.chooseWord('A', opts[1]);
+  check('⑤ 복원 뒤 고르면 저장된 요소로 drawing(timeLeft 30)', r2.phase === 'drawing' && same(r2.parts, combos.get(opts[1])) && r2.timeLeft === 30 && r2.relay.totalTime === 30, r2.parts);
+  r2.destroy();
+}
+{
+  // 구간 경계 바로 그때 저장된 스냅샷 → 복원하면 곧바로 다음 구간(시간 불변식 유지). 구간 중간이면 그 구간 남은 시간으로
+  const room = relayRoom([], 'R3G', ['A', 'B', 'C', 'D']);
+  room.start('A');
+  room.chooseWord('A', room.wordOptions[0]);
+  const snap = JSON.parse(JSON.stringify(room.toSnapshot()));
+  room.destroy();
+  const at = (secs) => { const now = Date.now(); return { ...JSON.parse(JSON.stringify(snap)), savedAt: now, phaseEndsAt: now + secs * 1000 }; };
+  const sent = [];
+  const r2 = game.Room.fromSnapshot(fakeIo(sent), at(30));
+  r2.resumeAfterRestore();
+  check('⑤ 남은 30초(첫 구간 0초)로 복원 → 곧바로 2구간(B), legTimeLeft 15, 불변식', r2.relay.legIndex === 1 && r2.drawerId === 'B' && r2.relay.legTimeLeft === 15
+    && r2.timeLeft === 30 && legInvariant(r2.timeLeft, r2.relay) && sent.some((x) => x.ev === 'game:baton' && x.p.drawerId === 'B'), { relay: r2.relay, timeLeft: r2.timeLeft });
+  r2.destroy();
+  const r3 = game.Room.fromSnapshot(fakeIo([]), at(37));
+  r3.resumeAfterRestore();
+  check('⑤ 남은 37초로 복원 → 1구간(A) 7초, 불변식', r3.relay.legIndex === 0 && r3.drawerId === 'A' && r3.relay.legTimeLeft === 7 && legInvariant(r3.timeLeft, r3.relay), { relay: r3.relay, timeLeft: r3.timeLeft });
+  r3.destroy();
+}
+
 // ── ③ 소켓 ─────────────────────────────────────────────────────
-function startServer() {
+/** 테스트 서버 띄우기(ALLOW_SOLO 없이). EADDRINUSE 면 300ms 뒤 재시도(최대 3회) — 직전 프로세스가 닫은 포트가 아직 안 풀렸을 때 */
+function startServer(port = PORT, extraEnv = {}, label = 'server', attemptsLeft = 3) {
   return new Promise((resolve, reject) => {
-    const env = { ...process.env, PORT: String(PORT) };
+    const env = { ...process.env, PORT: String(port), ...extraEnv };
     delete env.ALLOW_SOLO;
-    serverProc = spawn(process.execPath, ['server/index.js'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
-    serverProc.stdout.on('data', (d) => { if (String(d).includes('listening')) resolve(); });
-    serverProc.stderr.on('data', (d) => process.stderr.write('[server:err] ' + d));
-    serverProc.on('exit', () => reject(new Error('server exited')));
+    const proc = spawn(process.execPath, ['server/index.js'], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    procs.push(proc);
+    proc.logs = '';
+    let addrInUse = false;
+    let settled = false;
+    proc.stdout.on('data', (d) => {
+      proc.logs += String(d);
+      if (!settled && String(d).includes('listening')) { settled = true; resolve(proc); }
+    });
+    proc.stderr.on('data', (d) => {
+      proc.logs += String(d);
+      if (String(d).includes('EADDRINUSE')) addrInUse = true;
+      process.stderr.write(`[${label}:err] ` + d);
+    });
+    proc.on('exit', (code, sig) => {
+      proc.exited = { code, sig };
+      if (settled) return;
+      settled = true;
+      if (addrInUse && attemptsLeft > 1) setTimeout(() => { startServer(port, extraEnv, label, attemptsLeft - 1).then(resolve, reject); }, 300);
+      else reject(new Error(label + ' exited'));
+    });
+  });
+}
+function stopServer(proc) {
+  return new Promise((resolve) => {
+    if (proc.exited) return resolve();
+    proc.on('exit', () => resolve());
+    proc.kill('SIGTERM');
+    setTimeout(() => { if (!proc.exited) proc.kill('SIGKILL'); }, 5000);
   });
 }
 function connect(label) {
@@ -218,7 +401,7 @@ const evsSince = (c, mark, ev) => c.log.slice(mark).filter((x) => x.ev === ev);
 const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) => x.payload).filter((m) => !kind || m.kind === kind);
 
 (async () => {
-  await startServer();
+  serverProc = await startServer();
   const a = await connect('A'), b = await connect('B'), c = await connect('C');
   const created = await emitAck(a, 'room:create', { name: '에이', avatar: {}, token: 'tok-relay-a-000001' });
   const code = created.roomCode;
@@ -556,6 +739,283 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
   check('④ 그 뒤 2명이라 게임 종료(game:over → lobby)', go.mode === 'relay' && go.gallery.length === 1 && go.gallery[0].guessed === 0 && lastState(d).phase === 'lobby',
     { go: go.gallery, phase: lastState(d).phase });
   check('④ (참고) E 도 같은 결과', lastState(e) && lastState(e).phase === 'lobby' && !!E);
+
+  // ── ⑤ R3 끊김·복원(소켓, 기본 유예 60초) ─────────────────────────
+  const byId = (list, id) => list.find((p) => p.id === id);
+  const offline = (cl, id, label) => waitNext(cl, 'room:state', (s) => byId(s.players, id) && byId(s.players, id).connected === false, 5000, label);
+  const lastEvOf = (cl, ev) => { const e = cl.log.filter((x) => x.ev === ev).pop(); return e ? e.payload : null; };
+  /** 새 소켓으로 room:rejoin 하고 catch-up(game:drawing + draw:sync)을 받는다 */
+  async function rejoinDrawing(label, roomCode, token) {
+    const cl = await connect(label);
+    const dP = waitNext(cl, 'game:drawing', undefined, 5000, label + ' catch-up');
+    const sP = waitNext(cl, 'draw:sync', undefined, 5000, label + ' sync');
+    const ack = await emitAck(cl, 'room:rejoin', { roomCode, token });
+    const [dr, sy] = await Promise.all([dP, sP]);
+    return { cl, ack, dr, sy };
+  }
+  /** 다른 요소를 품지 않은 요소 하나(그것만 보내면 그 요소 하나만 맞는다) */
+  const loneIdx = (ps) => ps.findIndex((w, i) => ps.every((o, j) => j === i || !w.includes(o)));
+  const TK = { X: 'tok-relay-x-000007', Y: 'tok-relay-y-000008', Z: 'tok-relay-z-000009' };
+  let x = await connect('X'), y = await connect('Y'), z = await connect('Z');
+  const cx = await emitAck(x, 'room:create', { name: '엑스', avatar: {}, token: TK.X });
+  const code5 = cx.roomCode;
+  const X = cx.playerId;
+  const Y = (await emitAck(y, 'room:join', { roomCode: code5, name: '와이', avatar: {}, token: TK.Y })).playerId;
+  const Z = (await emitAck(z, 'room:join', { roomCode: code5, name: '제트', avatar: {}, token: TK.Z })).playerId;
+  const set5 = waitNext(x, 'room:state', (s) => s.settings.mode === 'relay' && s.settings.hints === 2, 5000, '⑤ settings');
+  x.emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 2, hints: 2 } });
+  await set5;
+  const ch5P = waitNext(x, 'game:choosing', (p) => Array.isArray(p.wordOptions), 5000, '⑤ choosing');
+  x.emit('game:start');
+  const w5 = (await ch5P).wordOptions[0];
+  const p5 = w5.split(PART_SEP);
+  const d5 = [x, y, z].map((cl) => waitNext(cl, 'game:drawing', undefined, 5000, '⑤ drawing'));
+  x.emit('word:choose', { word: w5 });
+  const [d5X] = await Promise.all(d5);
+  check('⑤ 준비: 주자 X→Y, 맞히는 사람 Z', same(d5X.relay.order, [X, Y]) && d5X.relay.guesserId === Z, d5X.relay);
+  // X 가 획 하나, Z 가 부분 정답 1개 + 힌트 1회
+  const zEnd = waitNext(z, 'draw:end', undefined, 3000, '⑤ X stroke');
+  x.emit('draw:start', { tool: 'pen', color: '#000000', size: 5, x: 50, y: 50 });
+  x.emit('draw:move', { pts: [[60, 60], [70, 70]] });
+  x.emit('draw:end');
+  await zEnd;
+  const fi5 = loneIdx(p5), ri5 = 1 - fi5;
+  const zPart = waitNext(z, 'game:hint', undefined, 3000, '⑤ partial');
+  z.emit('chat:message', { text: p5[fi5] });
+  await zPart;
+  const zH = waitNext(z, 'game:hint', (h) => h.hintsUsed === 1, 3000, '⑤ hint Z');
+  const yH = waitNext(y, 'game:hint', (h) => h.hintsUsed === 1, 3000, '⑤ hint Y');
+  z.emit('hint:request');
+  const [hz5, hy5] = await Promise.all([zH, yH]);
+
+  // 3. 차례 전 주자 Y 끊김 → 복귀: word 없음, 마스크(힌트 반영, 부분 정답은 안 보임)
+  let off = offline(x, Y, '⑤ Y off');
+  y.disconnect();
+  await off;
+  let rj = await rejoinDrawing('Y2', code5, TK.Y);
+  y = rj.cl;
+  check('⑤ 차례 전 주자 Y 복귀: 같은 id, word 없음, wordMask = 힌트 반영 마스크, relay.legIndex 0·hintsUsed 1',
+    rj.ack.ok && rj.ack.playerId === Y && rj.dr.word === undefined && rj.dr.wordMask === hy5.wordMask && rj.dr.relay.legIndex === 0 && rj.dr.relay.hintsUsed === 1,
+    { ack: rj.ack, dr: rj.dr, hy5 });
+  check('⑤ Y 복귀 draw:sync 에 X 의 획', rj.sy.ops.length === 1 && rj.sy.ops[0].points.length === 3, rj.sy.ops);
+
+  // 4. 맞히는 사람 Z 끊김 → 복귀: 맞힌 요소가 글자로, hintsUsed 1, draw:sync
+  off = offline(x, Z, '⑤ Z off');
+  z.disconnect();
+  await off;
+  rj = await rejoinDrawing('Z2', code5, TK.Z);
+  z = rj.cl;
+  check('⑤ 맞히는 사람 Z 복귀: 마스크에 맞힌 요소가 글자로(끊기기 전과 같음), hintsUsed 1, word 없음',
+    rj.dr.wordMask === hz5.wordMask && rj.dr.wordMask.split(PART_SEP)[fi5] === Array.from(p5[fi5]).join(' ') && rj.dr.wordMask.split(PART_SEP)[ri5].includes('_')
+      && rj.dr.relay.hintsUsed === 1 && rj.dr.word === undefined, { dr: rj.dr, hz5 });
+  check('⑤ Z 복귀 draw:sync 에 X 의 획', rj.sy.ops.length === 1, rj.sy.ops);
+
+  // 2. 현재 주자 X 끊김 → 자기 구간 안에 복귀: 남은 구간 시간·word·ops, 이어서 그린다
+  const sysOnY = waitNext(y, 'chat:message', (m) => m.kind === 'system' && /엑스님의 연결이 끊어졌습니다\. 구간이 끝나기 전에 돌아오면 이어서 그려요/.test(m.text), 5000, '⑤ X off msg');
+  off = offline(y, X, '⑤ X off');
+  x.disconnect();
+  await Promise.all([off, sysOnY]);
+  await sleep(1500);
+  rj = await rejoinDrawing('X2', code5, TK.X);
+  x = rj.cl;
+  const zLeg = lastEvOf(z, 'game:timer');
+  check('⑤ 현재 주자 X 가 자기 구간 안에 복귀: word, legIndex 0, legTimeLeft 가 남은 구간 시간과 ±1, 불변식',
+    rj.dr.word === w5 && rj.dr.drawerId === X && rj.dr.relay.legIndex === 0 && zLeg && Math.abs(rj.dr.relay.legTimeLeft - zLeg.legTimeLeft) <= 1
+      && rj.dr.relay.legTimeLeft < 15 && legInvariant(rj.dr.timeLeft, rj.dr.relay), { relay: rj.dr.relay, timeLeft: rj.dr.timeLeft, zLeg });
+  check('⑤ X 복귀 draw:sync 에 끊기기 전 획', rj.sy.ops.length === 1 && rj.sy.ops[0].points.length === 3, rj.sy.ops);
+  const zS = waitNext(z, 'draw:start', undefined, 3000, '⑤ X draws again');
+  const yS = waitNext(y, 'draw:start', undefined, 3000, '⑤ X draws again Y');
+  x.emit('draw:start', { tool: 'pen', color: '#ff0000', size: 5, x: 300, y: 300 });
+  x.emit('draw:move', { pts: [[310, 310]] });
+  x.emit('draw:end');
+  await Promise.all([zS, yS]);
+  check('⑤ 복귀한 X 의 그림이 다시 중계된다', true);
+
+  // 1. 현재 주자 X 가 끊긴 채 경계 → Y 에게 baton(문제는 안 끝남) → X 가 Y 구간 중 복귀: word 는 받고 그림은 무시
+  off = offline(y, X, '⑤ X off 2');
+  x.disconnect();
+  await off;
+  const byP = waitNext(y, 'game:baton', undefined, 17000, '⑤ baton Y');
+  const bzP = waitNext(z, 'game:baton', undefined, 17000, '⑤ baton Z');
+  const [by5, bz5] = await Promise.all([byP, bzP]);
+  check('⑤ 끊긴 X 의 구간 경계에서 Y 에게 baton(word 는 Y 에게만), 문제 계속',
+    by5.drawerId === Y && by5.legIndex === 1 && by5.word === w5 && bz5.word === undefined && !z.log.some((q) => q.ev === 'game:turnEnd'), { by5, bz5 });
+  rj = await rejoinDrawing('X3', code5, TK.X);
+  x = rj.cl;
+  check('⑤ 구간이 끝난 뒤 복귀한 X(지난 주자): word 받음, drawerId Y, legIndex 1', rj.dr.word === w5 && rj.dr.drawerId === Y && rj.dr.relay.legIndex === 1, rj.dr);
+  check('⑤ X 복귀 draw:sync 에 X 의 두 획', rj.sy.ops.length === 2, rj.sy.ops.length);
+  let mz = z.log.length;
+  x.emit('draw:start', { tool: 'pen', color: '#00ff00', size: 5, x: 500, y: 500 });
+  x.emit('draw:end');
+  await sleep(400);
+  check('⑤ 지난 주자 X 의 draw:start 는 무시된다', !evsSince(z, mz, 'draw:start').length && !evsSince(y, 0, 'draw:start').some((q) => q.payload.x === 500));
+
+  // 4(이어서). Z 가 나머지 요소를 맞히면 정답: 힌트 1회 ×0.75, X·Y 200
+  const tl5 = (() => { const t = lastEvOf(z, 'game:timer'); return t ? t.timeLeft : 15; })();
+  const te5P = waitNext(z, 'game:turnEnd', undefined, 5000, '⑤ turnEnd');
+  z.emit('chat:message', { text: p5[ri5] });
+  const te5 = await te5P;
+  const dd5 = Object.fromEntries(te5.deltas.map((q) => [q.id, q.delta]));
+  const f75 = (t) => Math.max(50, Math.round((100 + 300 * t / 30) * 0.75));
+  check('⑤ 복귀한 Z 가 나머지 요소로 정답: allGuessed, Z = 힌트 1회 ×0.75, X·Y 200', te5.reason === 'allGuessed' && dd5[X] === 200 && dd5[Y] === 200
+    && [tl5 - 1, tl5, tl5 + 1].some((t) => dd5[Z] === f75(t)), { dd5, tl5 });
+
+  // turnEnd 중 복귀: game:turnEnd 재전송, 자기 delta 가 한 줄만
+  off = offline(x, Y, '⑤ Y off 2');
+  y.disconnect();
+  await off;
+  const y3 = await connect('Y3');
+  const teCP = waitNext(y3, 'game:turnEnd', undefined, 5000, '⑤ turnEnd catch-up');
+  await emitAck(y3, 'room:rejoin', { roomCode: code5, token: TK.Y });
+  const teC = await teCP;
+  check('⑤ turnEnd 중 복귀: game:turnEnd 재전송, Y 의 delta 가 한 줄(200), 3명', teC.reason === 'allGuessed' && teC.deltas.length === 3
+    && teC.deltas.filter((q) => q.id === Y).length === 1 && teC.deltas.find((q) => q.id === Y).delta === 200, teC.deltas);
+  for (const cl of [x, y3, z]) cl.emit('room:leave');
+  await sleep(300);
+
+  // ── ⑤ 유예 만료(RECONNECT_GRACE_MS 2.5초, 5명) ─────────────────────
+  const GRACE = 2500;
+  const gproc = await startServer(PORT_GRACE, { RECONNECT_GRACE_MS: String(GRACE), HOST_RETURN_MS: '800' }, 'grace');
+  URL = `http://localhost:${PORT_GRACE}`;
+  const g = [];
+  for (let i = 0; i < 5; i++) g.push(await connect('G' + (i + 1)));
+  const gc0 = await emitAck(g[0], 'room:create', { name: '지일', avatar: {}, token: 'tok-relay-g1-00010' });
+  const G = [gc0.playerId];
+  const gNames = ['지일', '지이', '지삼', '지사', '지오'];
+  for (let i = 1; i < 5; i++) G.push((await emitAck(g[i], 'room:join', { roomCode: gc0.roomCode, name: gNames[i], avatar: {}, token: `tok-relay-g${i + 1}-0001${i}` })).playerId);
+  const gSet = waitNext(g[0], 'room:state', (s) => s.settings.mode === 'relay', 5000, 'G5 settings');
+  g[0].emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 2 } });
+  await gSet;
+  const gChP = waitNext(g[0], 'game:choosing', (p) => Array.isArray(p.wordOptions), 5000, 'G5 choosing');
+  g[0].emit('game:start');
+  const gCh = await gChP;
+  const gDP = waitNext(g[1], 'game:drawing', undefined, 5000, 'G5 drawing');
+  g[0].emit('word:choose', { word: gCh.wordOptions[0] });
+  const gD = await gDP;
+  check('⑤ 유예 준비: 5명, 주자 1~4, 맞히는 사람 5, 문제 1/5', same(gD.relay.order, G.slice(0, 4)) && gD.relay.guesserId === G[4] && gD.totalRounds === 5, gD.relay);
+  // 현재 주자(1)의 유예 만료 → 완전히 나감 → 경계를 기다리지 않고 곧바로 다음 구간(2)
+  const gBP = waitNext(g[1], 'game:baton', undefined, GRACE + 4000, 'G5 baton after grace');
+  const tOff = Date.now();
+  g[0].disconnect();
+  const gB = await gBP;
+  const gEl = Date.now() - tOff;
+  check(`⑤ 현재 주자 유예 만료(${gEl}ms) → 곧바로 다음 주자에게 baton(legTimeLeft 15)`, gB.drawerId === G[1] && gB.legTimeLeft === 15 && gEl >= GRACE - 300 && gEl < GRACE + 3000, { gB, gEl });
+  // 맞히는 사람(5)의 유예 만료 → guesserLeft
+  const gTP = waitNext(g[1], 'game:turnEnd', undefined, GRACE + 4000, 'G5 guesserLeft');
+  g[4].disconnect();
+  const gT = await gTP;
+  check('⑤ 맞히는 사람 유예 만료 → game:turnEnd { reason:"guesserLeft" }, 전원 0', gT.reason === 'guesserLeft' && gT.deltas.every((q) => q.delta === 0), gT);
+  // 2번 문제(맞히는 사람 1 은 나감) 건너뛰고 3번 문제: 주자 3→4(5·1 은 나감), 맞히는 사람 2
+  const gSkipP = waitNext(g[1], 'chat:message', (m) => m.kind === 'system' && m.text === '문제 2/5: 지일님이 나가서 이 문제는 건너뛰어요.', 8000, 'G5 skip msg');
+  const gCh3P = waitNext(g[2], 'game:choosing', (p) => Array.isArray(p.wordOptions), 8000, 'G5 choosing 3');
+  const [, gCh3] = await Promise.all([gSkipP, gCh3P]);
+  await sleep(200);
+  const gSt = lastState(g[1]);
+  check('⑤ 나간 사람이 맞힐 2번 문제는 안내 뒤 건너뛰고 3번 문제(round 3/5, 주자 3→4, 맞히는 사람 2)', gCh3.drawerId === G[2] && gSt.round === 3 && gSt.totalRounds === 5
+    && same(gSt.relay.order, [G[2], G[3]]) && gSt.relay.guesserId === G[1], gSt && { round: gSt.round, relay: gSt.relay });
+  // 한 명 더 나가면(3명 → 2명) 문제 중 notEnoughPlayers → game:over
+  const gNP = waitNext(g[1], 'game:turnEnd', undefined, 3000, 'G5 notEnough');
+  const gOverP = waitNext(g[1], 'game:over', undefined, 9000, 'G5 over');
+  g[3].emit('room:leave');
+  const gN = await gNP;
+  check('⑤ 문제 중 실제 퇴장으로 2명 → turnEnd(notEnoughPlayers)', gN.reason === 'notEnoughPlayers', gN);
+  await gOverP;
+  check('⑤ 그 뒤 game:over', true);
+  for (const cl of [g[1], g[2]]) cl.emit('room:leave');
+  await sleep(300);
+  await stopServer(gproc);
+
+  // ── ⑤ 서버 재시작 복원(파일 저장소, 4명, 2구간째) ─────────────────
+  try { fs.unlinkSync(STATE_FILE); } catch (_) { /* ignore */ }
+  const storeEnv = { STORE_URL: 'file:' + STATE_FILE, RECONNECT_GRACE_MS: '60000', HOST_RETURN_MS: '1500' };
+  let sproc = await startServer(PORT_STORE, storeEnv, 'storeA');
+  URL = `http://localhost:${PORT_STORE}`;
+  const sT = ['tok-relay-s1-000021', 'tok-relay-s2-000022', 'tok-relay-s3-000023', 'tok-relay-s4-000024'];
+  const sc = [];
+  for (let i = 0; i < 4; i++) sc.push(await connect('S' + (i + 1)));
+  const s0 = await emitAck(sc[0], 'room:create', { name: '에스일', avatar: {}, token: sT[0] });
+  const scode = s0.roomCode;
+  const S = [s0.playerId];
+  for (let i = 1; i < 4; i++) S.push((await emitAck(sc[i], 'room:join', { roomCode: scode, name: '에스' + (i + 1), avatar: {}, token: sT[i] })).playerId);
+  const sSet = waitNext(sc[0], 'room:state', (st) => st.settings.mode === 'relay' && st.settings.hints === 2, 5000, 'S settings');
+  sc[0].emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 2, hints: 2 } });
+  await sSet;
+  const sChP = waitNext(sc[0], 'game:choosing', (p) => Array.isArray(p.wordOptions), 5000, 'S choosing');
+  sc[0].emit('game:start');
+  const sw = (await sChP).wordOptions[0];
+  const sp = sw.split(PART_SEP);
+  const sDP = waitNext(sc[3], 'game:drawing', undefined, 5000, 'S drawing');
+  sc[0].emit('word:choose', { word: sw });
+  const sD = await sDP;
+  check('⑤ 복원 준비: 4명, 주자 1→2→3, 맞히는 사람 4, 요소 3개', same(sD.relay.order, S.slice(0, 3)) && sD.relay.guesserId === S[3] && sp.length === 3, { relay: sD.relay, sp });
+  const sEnd = waitNext(sc[3], 'draw:end', undefined, 3000, 'S stroke 1');
+  sc[0].emit('draw:start', { tool: 'pen', color: '#000000', size: 5, x: 20, y: 20 });
+  sc[0].emit('draw:move', { pts: [[30, 30]] });
+  sc[0].emit('draw:end');
+  await sEnd;
+  const sfi = loneIdx(sp);
+  const sPart = waitNext(sc[3], 'game:hint', undefined, 3000, 'S partial');
+  sc[3].emit('chat:message', { text: sp[sfi] });
+  await sPart;
+  const sH4 = waitNext(sc[3], 'game:hint', (h) => h.hintsUsed === 1, 3000, 'S hint 4');
+  const sH3 = waitNext(sc[2], 'game:hint', (h) => h.hintsUsed === 1, 3000, 'S hint 3');
+  sc[3].emit('hint:request');
+  const [sh4, sh3] = await Promise.all([sH4, sH3]);
+  const sBP = waitNext(sc[1], 'game:baton', undefined, 17000, 'S baton 2');
+  await sBP;
+  const sEnd2 = waitNext(sc[3], 'draw:end', undefined, 3000, 'S stroke 2');
+  sc[1].emit('draw:start', { tool: 'pen', color: '#0000ff', size: 9, x: 400, y: 300 });
+  sc[1].emit('draw:move', { pts: [[410, 310], [420, 320]] });
+  sc[1].emit('draw:end');
+  await sEnd2;
+  await sleep(800); // 저장 스로틀(300ms) 여유
+  const sBefore = lastEvOf(sc[3], 'game:timer');
+  const snapA = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))[scode];
+  check('⑤ 저장된 스냅샷: relay(legIndex 1·hintsUsed 1·solvedIdx·revealedByPart)·parts·turnOrder',
+    snapA && snapA.relay && snapA.relay.legIndex === 1 && snapA.relay.hintsUsed === 1 && same(snapA.relay.solvedIdx, [sfi])
+      && snapA.relay.revealedByPart.length === 3 && same(snapA.parts, sp) && same(snapA.turnOrder, S) && snapA.ops.length === 2, snapA && snapA.relay);
+  const sDisc = Promise.all(sc.map((cl) => new Promise((r) => cl.once('disconnect', r))));
+  await stopServer(sproc);
+  await sDisc;
+  await sleep(1500); // 다운타임 — 게임 시간에서 빠지지 않아야 한다
+  sproc = await startServer(PORT_STORE, storeEnv, 'storeB');
+  const sb = [];
+  for (let i = 0; i < 4; i++) sb.push(await connect('SB' + (i + 1)));
+  const sCu = sb.map((cl, i) => Promise.all([waitNext(cl, 'game:drawing', undefined, 5000, 'SB drawing ' + i), waitNext(cl, 'draw:sync', undefined, 5000, 'SB sync ' + i)]));
+  const sAcks = [];
+  for (let i = 0; i < 4; i++) sAcks.push(await emitAck(sb[i], 'room:rejoin', { roomCode: scode, token: sT[i] }));
+  const sGot = await Promise.all(sCu);
+  check('⑤ 재시작 뒤 복원(서버 로그), 전원 같은 id 로 복귀', /restored room [A-Z]{4} from store \(phase drawing, 4 players\)/.test(sproc.logs)
+    && sAcks.every((ak, i) => ak.ok && ak.playerId === S[i]), sAcks);
+  const sDr = sGot.map((x2) => x2[0]);
+  const sSy = sGot.map((x2) => x2[1]);
+  check('⑤ 복원: 전원 같은 구간(legIndex 1/3, drawerId 2), hintsUsed 1', sDr.every((dr) => dr.relay.legIndex === 1 && dr.relay.legCount === 3 && dr.drawerId === S[1] && dr.relay.hintsUsed === 1 && dr.relay.guesserId === S[3]),
+    sDr.map((dr) => ({ relay: dr.relay, drawerId: dr.drawerId })));
+  check('⑤ 복원: word 는 지난 주자 1·현재 주자 2 에게만', sDr[0].word === sw && sDr[1].word === sw && sDr[2].word === undefined && sDr[3].word === undefined, sDr.map((dr) => dr.word));
+  check('⑤ 복원: 차례 전 주자 3 은 힌트 반영 마스크, 맞히는 사람 4 는 맞힌 요소까지 같은 마스크', sDr[2].wordMask === sh3.wordMask && sDr[3].wordMask === sh4.wordMask
+    && sDr[3].wordMask.split(PART_SEP)[sfi] === Array.from(sp[sfi]).join(' '), { m3: sDr[2].wordMask, h3: sh3.wordMask, m4: sDr[3].wordMask, h4: sh4.wordMask });
+  check('⑤ 복원: draw:sync 에 두 주자의 획(ops 2)', sSy.every((sy) => sy.ops.length === 2 && sy.ops[1].color === '#0000ff'), sSy.map((sy) => sy.ops.length));
+  const sTl = sDr[3].timeLeft;
+  check('⑤ 복원: 시간 불변식 timeLeft = legTimeLeft + 15 × 1, 다운타임은 빼지 않음(±2)', legInvariant(sTl, sDr[3].relay) && sBefore && sTl <= sBefore.timeLeft + 2 && sTl >= sBefore.timeLeft - 2,
+    { sTl, relay: sDr[3].relay, before: sBefore });
+  const sTk = await waitNext(sb[3], 'game:timer', undefined, 3000, 'SB tick');
+  check('⑤ 복원 뒤 타이머가 흐르고 legTimeLeft 도 같이', typeof sTk.legTimeLeft === 'number' && sTk.timeLeft === sTk.legTimeLeft + 15, sTk);
+  const sRel = waitNext(sb[3], 'draw:start', undefined, 3000, 'SB relay draw');
+  sb[1].emit('draw:start', { tool: 'pen', color: '#ff0000', size: 5, x: 600, y: 100 });
+  sb[1].emit('draw:end');
+  await sRel;
+  check('⑤ 복원 뒤 현재 주자 2 의 그림이 중계된다', true);
+  const sTl2 = sTk.timeLeft;
+  const sTeP = waitNext(sb[0], 'game:turnEnd', undefined, 5000, 'SB turnEnd');
+  sb[3].emit('chat:message', { text: sp.filter((_, i) => i !== sfi).join(' 그리고 ') });
+  const sTe = await sTeP;
+  const sdd = Object.fromEntries(sTe.deltas.map((q) => [q.id, q.delta]));
+  const f75s = (t) => Math.max(50, Math.round((100 + 300 * t / 45) * 0.75));
+  check('⑤ 복원 뒤 나머지 요소로 정답: allGuessed, 주자 1·2 200, 3 0, 맞히는 사람 = 힌트 1회 ×0.75', sTe.reason === 'allGuessed' && sdd[S[0]] === 200 && sdd[S[1]] === 200 && sdd[S[2]] === 0
+    && [sTl2 - 2, sTl2 - 1, sTl2, sTl2 + 1].some((t) => sdd[S[3]] === f75s(t)), { sdd, sTl2 });
+  for (const cl of sb) cl.emit('room:leave');
+  await sleep(500);
+  await stopServer(sproc);
 
   cleanup(failures ? 1 : 0);
 })().catch((e) => {
