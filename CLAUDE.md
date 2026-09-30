@@ -35,7 +35,7 @@
   | `docs/ops/BOARD.md` | 사이클 조율자. 다른 세션은 "방향 메모"에 한 줄 추가만 |
   | `docs/ops/TEST-LOG.md` | qa(추가) · fixer(상태). feature 브랜치 기간에는 쓰지 않는다(설계 문서 "진행 중 결함" 표를 쓴다) |
   | `docs/BACKLOG.md` | 제안됨: 사이클·제품 / 다음: 제품(승인분 추가)·builder(완료로 이동) / 완료: builder |
-  | `docs/GAME-MODES.md` `docs/PRD-PLATFORM.md` `docs/product/` `docs/ROADMAP.md` 제품 줄 | product-planner·기획 세션. **예외: 설계 문서의 ✅ 완료 표시와 "진행 중 결함" 표, ROADMAP 진행률 한 줄(`진행 (feature/…, n/m)`)은 dev-session이 쓴다** |
+  | `docs/GAME-MODES.md` `docs/PRD-PLATFORM.md` `docs/product/` `docs/ROADMAP.md` 제품 줄 | product-planner·기획 세션. **예외: 설계 문서의 ✅ 완료 표시·"변경 이력" 표·"진행 중 결함" 표와 ROADMAP 진행률 한 줄(`진행 (feature/…, n/m)`)은 dev-session이 쓴다.** 머지 뒤 `문서 정리 필요` 표시는 dev-session이 붙이고 기획 세션이 지운다 |
   | `docs/marketing/` | marketing-strategist |
   | `docs/ROADMAP.md` 마케팅·개발 줄 | 사이클 조율자 |
   | `.claude/` `CLAUDE.md` | 관리자 세션 |
