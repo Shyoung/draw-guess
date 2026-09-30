@@ -8,6 +8,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const crypto = require('crypto');
 const http = require('http');
 const express = require('express');
@@ -673,7 +674,26 @@ if (auth.enabled) {
   setInterval(pingSupabase, 24 * 60 * 60 * 1000).unref();
 }
 
+// 같은 네트워크의 다른 PC·휴대폰에서 접속할 수 있는 LAN IPv4 주소 목록
+// (루프백 제외, 여러 개 잡히면 전부 반환 — 없으면 빈 배열)
+function getLanAddresses() {
+  const addresses = [];
+  const interfaces = os.networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (!iface.internal && (iface.family === 'IPv4' || iface.family === 4)) {
+        addresses.push(iface.address);
+      }
+    }
+  }
+  return addresses;
+}
+
 server.listen(PORT, () => {
   console.log(`[draw-guess] listening on http://localhost:${PORT} (asset version ${ASSET_VERSION}, store=${store.kind}, rooms restore on demand)`);
+  const lanAddresses = getLanAddresses();
+  if (lanAddresses.length > 0) {
+    console.log(`[draw-guess] 같은 네트워크: ${lanAddresses.map((ip) => `http://${ip}:${PORT}`).join(', ')}`);
+  }
   startKeepAlive();
 });
