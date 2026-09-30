@@ -26,7 +26,7 @@ description: 이뭔그(draw-guess) 기획 세션 시작. 운영자와 대화로 
 - 새 아이디어 → `docs/GAME-MODES.md`(모드) 또는 `docs/PRD-PLATFORM.md`(계정·저장 기능)에 후보로. 형식은 기존 항목과 같게.
 - 합의한 설계 → `docs/product/YYYY-MM-<slug>.md`(product-planner 정의의 설계 문서 형식). 마지막 "운영자가 정할 것"까지.
 - 로드맵 제품 줄의 상태·기간 갱신.
-- **운영자가 이 세션에서 설계에 GO 했을 때만** 설계 문서 5번의 쪼갠 항목을 BACKLOG "다음" 표에 넣고, BOARD "방향 메모"에 `날짜: <설계명> GO(기획 세션)`을 한 줄 남긴다. GO가 없으면 ROADMAP 상태를 "설계 승인 대기"로 두고 BOARD 결정 필요에 올려 달라고 안내한다(BOARD 표는 사이클이 관리한다).
+- **운영자가 이 세션에서 설계에 GO 했을 때만** ROADMAP 상태를 "설계 승인"으로 바꾸고 BOARD "방향 메모"에 `날짜: <설계명> GO(기획 세션)`을 한 줄 남긴다. 큰 기능의 쪼갠 항목은 BACKLOG에 넣지 않고 다음 `/dev-session <기능>`이 설계 문서를 읽고 진행한다(작은 독립 개선만 BACKLOG "다음"에 넣는다). GO가 없으면 상태를 "설계 승인 대기"로 두고 BOARD 결정 필요에 올려 달라고 안내한다(BOARD 표는 사이클이 관리한다).
 - 마지막에 바꾼 문서 경로만 명시해 `git add`(docs/ 밖은 건드리지 않음, `-A` 금지) → 커밋 → `git fetch origin && git rebase origin/develop && git push origin HEAD:develop`. 충돌하면 양쪽 변경을 살려 풀고, 못 풀면 저장만 하고 운영자에게 알린다. 끝나면 워크트리와 브랜치를 지운다.
 
 ## 3. 끝맺음 메시지
