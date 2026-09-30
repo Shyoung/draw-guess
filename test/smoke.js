@@ -15,7 +15,7 @@ const { io } = require('socket.io-client');
 const { maskWord, hintChar, normalizeAnswer, levenshtein, computeHintTimes, maxReveals } = require('../server/game');
 const words = require('../server/words');
 
-const PORT = 3123;
+const PORT = 3123 + Number(process.env.TEST_PORT_OFFSET ?? 0);
 const URL = `http://localhost:${PORT}`;
 const ROOT = path.resolve(__dirname, '..');
 const OVERALL_TIMEOUT_MS = 90000;

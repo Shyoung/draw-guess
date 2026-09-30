@@ -15,7 +15,11 @@ const ROOT = path.join(__dirname, '..');
 const STATE = path.join(__dirname, '.tmp-deploy.json');
 const BUMP = path.join(ROOT, 'public', '_bump.js');
 const SCENE = process.argv[2] || 'lobby';
-let target = 3171;
+const OFFSET = Number(process.env.TEST_PORT_OFFSET ?? 0);
+const PROXY_PORT = 3170 + OFFSET;
+const PORT_A = 3171 + OFFSET;
+const PORT_B = 3172 + OFFSET;
+let target = PORT_A;
 const conns = new Set();
 const proxy = net.createServer((c) => {
   const up = net.connect(target, '127.0.0.1');
@@ -34,10 +38,10 @@ function start(tag, port) {
 (async () => {
   try { fs.unlinkSync(STATE); } catch (e) { /* ignore */ }
   try { fs.unlinkSync(BUMP); } catch (e) { /* ignore */ }
-  await new Promise((r) => proxy.listen(3170, r));
-  const A = await start('A', 3171);
+  await new Promise((r) => proxy.listen(PROXY_PORT, r));
+  const A = await start('A', PORT_A);
   const b = await chromium.launch({ channel: 'chrome' });
-  const URL = 'http://localhost:3170';
+  const URL = 'http://localhost:' + PROXY_PORT;
   const pages = [];
   const join = async (nick, code) => {
     const p = await (await b.newContext({ viewport: { width: 1200, height: 800 } })).newPage();
@@ -65,8 +69,8 @@ function start(tag, port) {
   };
   await snap('before');
   fs.writeFileSync(BUMP, '// bump ' + Date.now());
-  const B = await start('B', 3172);
-  target = 3172; // 새 연결은 B 로(옛 웹소켓 연결은 A 에 그대로)
+  const B = await start('B', PORT_B);
+  target = PORT_B; // 새 연결은 B 로(옛 웹소켓 연결은 A 에 그대로)
   await sleep(3000);
   await snap('overlap');
   A.kill('SIGTERM'); // Windows 에서는 즉시 종료(flush 없음) — 마지막 저장 스로틀(300ms) 이후 상태가 남아 있다

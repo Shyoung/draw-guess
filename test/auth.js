@@ -21,7 +21,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const { chromium, devices } = require('playwright');
 
-const PORT = 3130;
+const PORT = 3130 + Number(process.env.TEST_PORT_OFFSET ?? 0);
 const URL = `http://localhost:${PORT}`;
 const ROOT = path.join(__dirname, '..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

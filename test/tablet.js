@@ -13,7 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const { chromium } = require('playwright');
 
-const PORT = 3145;
+const PORT = 3145 + Number(process.env.TEST_PORT_OFFSET ?? 0);
 const URL = `http://localhost:${PORT}`;
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(__dirname, 'shots', 'tablet');

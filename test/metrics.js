@@ -11,7 +11,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const { io } = require('socket.io-client');
 
-const PORT = 3131;
+const PORT = 3131 + Number(process.env.TEST_PORT_OFFSET ?? 0);
 const URL = `http://localhost:${PORT}`;
 const ROOT = path.resolve(__dirname, '..');
 const ADMIN_KEY = 'test-admin-key-0123456789';

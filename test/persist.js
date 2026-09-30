@@ -13,7 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const { io } = require('socket.io-client');
 
-const PORT = 3127;
+const PORT = 3127 + Number(process.env.TEST_PORT_OFFSET ?? 0);
 const URL = `http://localhost:${PORT}`;
 const ROOT = path.resolve(__dirname, '..');
 const STATE_FILE = path.join(ROOT, 'test', '.tmp-state.json');

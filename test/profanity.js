@@ -11,7 +11,7 @@ const path = require('path');
 const { io } = require('socket.io-client');
 const { maskProfanity, containsProfanity } = require('../server/profanity');
 
-const PORT = 3132;
+const PORT = 3132 + Number(process.env.TEST_PORT_OFFSET ?? 0);
 const URL = `http://localhost:${PORT}`;
 const ROOT = path.resolve(__dirname, '..');
 
