@@ -89,17 +89,17 @@ check('② partCount 이상한 값 → 2~3개', pickCombos({}, new Set(), 2, 'x'
 
 // ── ④ 사용자 단어만 ──
 {
-  const custom = ['사과', '배', '감', '귤'];
+  const custom = ['사과', '포도', '수박', '자두'];
   let ok = true, bad = null;
   for (let r = 0; r < REPEAT; r++) {
-    const combos = pickCombos({ customWordsOnly: true, customWords: '사과,배,감,귤', categories: [] }, new Set(), 3, 2);
+    const combos = pickCombos({ customWordsOnly: true, customWords: '사과,포도,수박,자두', categories: [] }, new Set(), 3, 2);
     if (combos.length !== 3 || !distinct(combos.map((c) => c.word))) { ok = false; bad = combos; }
     for (const c of combos) {
       if (c.parts.length !== 2 || !distinct(c.parts) || c.parts.some((w) => !custom.includes(w))) { ok = false; bad = c; }
     }
   }
   check('④ customWordsOnly → 사용자 단어끼리, 조합 안 중복 없음', ok, bad);
-  const few = pickCombos({ customWordsOnly: true, customWords: '사과,배', categories: ['동물', '음식'] }, new Set(), 3, 3);
+  const few = pickCombos({ customWordsOnly: true, customWords: '사과,포도', categories: ['동물', '음식'] }, new Set(), 3, 3);
   check('④ 사용자 단어가 요소 수보다 적으면 카테고리 풀로 채운다',
     few.length === 3 && few.every((c) => c.parts.length === 3 && distinct(c.parts)), few);
 }
@@ -115,17 +115,31 @@ check('② partCount 이상한 값 → 2~3개', pickCombos({}, new Set(), 2, 'x'
   check('④ customWords는 요소 풀에 섞인다', seen);
 }
 
+{
+  // 한 글자 단어는 요소로 쓰지 않는다(기본 사전·사용자 단어 모두)
+  let ok = true, bad = null;
+  for (let r = 0; r < REPEAT; r++) {
+    for (const c of pickCombos({ categories: [] }, new Set(), 3, 3).concat(
+      pickCombos({ customWords: '곰,소,말,게,배,감', categories: ['동물', '음식'] }, new Set(), 3, 2))) {
+      if (c.parts.some((w) => Array.from(w).length < 2)) { ok = false; bad = c; }
+    }
+  }
+  const onlyOne = pickCombos({ customWordsOnly: true, customWords: '곰,소,사과,포도' }, new Set(), 3, 2);
+  if (onlyOne.some((c) => c.parts.some((w) => Array.from(w).length < 2))) { ok = false; bad = onlyOne; }
+  check('④ 한 글자 단어(곰·소·게 등)는 조합 요소로 안 나온다', ok, bad);
+}
+
 // ── ⑤ exclude ──
 {
   // 사용자 단어 3개 → 조합은 3쌍뿐. 두 쌍을 빼면(순서 무관) 남은 한 쌍만 나와야 한다
   let ok = true, bad = null;
   for (let r = 0; r < REPEAT; r++) {
-    const ex = new Set(['사과 · 배', '감 · 사과']);
-    const [c] = pickCombos({ customWordsOnly: true, customWords: '사과,배,감' }, ex, 1, 2);
-    if (!same(c.parts.slice().sort(), ['감', '배'].sort())) { ok = false; bad = c; }
+    const ex = new Set(['사과 · 포도', '수박 · 사과']);
+    const [c] = pickCombos({ customWordsOnly: true, customWords: '사과,포도,수박' }, ex, 1, 2);
+    if (!same(c.parts.slice().sort(), ['수박', '포도'].sort())) { ok = false; bad = c; }
   }
   check('⑤ exclude의 조합은 (순서 무관) 풀이 충분하면 안 나온다', ok, bad);
-  const all = pickCombos({ customWordsOnly: true, customWords: '사과,배,감' }, new Set(['사과 · 배', '배 · 감', '감 · 사과']), 2, 2);
+  const all = pickCombos({ customWordsOnly: true, customWords: '사과,포도,수박' }, new Set(['사과 · 포도', '포도 · 수박', '수박 · 사과']), 2, 2);
   check('⑤ 전부 제외돼도 count개를 돌려준다(재사용)', all.length === 2 && all.every((c) => c.parts.length === 2), all);
 }
 {

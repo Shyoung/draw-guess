@@ -526,10 +526,14 @@ const FALLBACK_PARTS = ['사과', '고양이', '바다'];
 
 // 카테고리별 "소속" 단어(categoryOf 기준). 여러 카테고리에 있는 단어는 앞 카테고리에만 들어간다
 // → 조합 요소의 categoryOf가 그 자리의 카테고리와 항상 같다.
+// 한 글자 단어(곰·소·말·게 등)는 조합 요소로 쓰지 않는다 — 부분 문자열 판정이라 "축구하게"의 "게"처럼 흔한 문장에서 오탐한다
+const isMultiChar = (w) => Array.from(String(w)).length >= 2;
 const OWNED_WORDS = {};
 for (const name of CATEGORY_NAMES) {
-  OWNED_WORDS[name] = dedupe(CATEGORIES[name]).filter((w) => categoryOf(w) === name);
+  OWNED_WORDS[name] = dedupe(CATEGORIES[name]).filter((w) => categoryOf(w) === name && isMultiChar(w));
 }
+/** 조합 요소 최후 풀(전체 사전 중 두 글자 이상) */
+const KO_MULTI = ko.filter(isMultiChar);
 
 const wordKey = (w) => String(w).normalize('NFC').toLowerCase();
 /** 순서 무관 조합 키: '고양이 · 축구'와 '축구 · 고양이'를 같은 조합으로 본다 */
@@ -546,6 +550,7 @@ function randomOf(list) {
  *    맞는 템플릿이 없으면 켜진 카테고리 중 서로 다른 카테고리 partCount개로(모자라면 같은 카테고리에서 다른 단어로)
  *  - customWords가 있으면 각 자리마다 (사용자 단어 수 / (사용자 단어 수 + 그 카테고리 단어 수)) 확률로 사용자 단어를 쓴다
  *  - exclude(이미 쓰인 요소 단어·조합 문자열)는 가능하면 피하고, 풀이 모자라면 재사용한다. 조합은 순서 무관으로 비교한다
+ *  - 한 글자 단어는 요소로 쓰지 않는다(기본 사전·사용자 단어 모두 — 부분 문자열 판정 오탐 방지)
  *  - 한 조합 안에 같은 요소는 두 번 들어가지 않는다. 반환된 word는 가능하면 서로 다르다(풀이 너무 작으면 겹칠 수 있다)
  *  - settings가 없거나 이상해도 예외 없이 항상 count개를 돌려준다
  * @param {object} settings { categories, customWords, customWordsOnly }
@@ -585,7 +590,7 @@ function pickCombosInner(settings, exclude, n, k) {
     else exWords.add(wordKey(v));
   }
 
-  const custom = parseCustomWords(s.customWords);
+  const custom = parseCustomWords(s.customWords).filter(isMultiChar); // 사용자 단어도 한 글자는 뺀다
   const customOnly = !!s.customWordsOnly && custom.length >= k;
   const enabled = Array.isArray(s.categories)
     ? CATEGORY_NAMES.filter((name) => s.categories.includes(name))
@@ -628,7 +633,7 @@ function pickCombosInner(settings, exclude, n, k) {
         const useCustom = custom.length > 0 && Math.random() < custom.length / (custom.length + own.length);
         w = pickFrom(useCustom ? custom : own, inCombo) || pickFrom(useCustom ? own : custom, inCombo);
       }
-      if (!w) w = pickFrom(ko, inCombo) || pickFrom(FALLBACK_PARTS, inCombo);
+      if (!w) w = pickFrom(KO_MULTI, inCombo) || pickFrom(FALLBACK_PARTS, inCombo);
       if (!w) break;
       parts.push(w);
       inCombo.add(wordKey(w));
