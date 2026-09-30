@@ -134,7 +134,7 @@ D1 = 2026-09-29(화). 개발 작업은 운영자가 개발 세션에 넘길 목�
 | 날 | 날짜 | 할 일 (✅ 완료 기준) |
 |---|---|---|
 | D1 | 9/29 화 | ✅ 리브랜딩(제목·manifest·로고 "이뭔그")이 프로덕션에 반영됐는지 확인(09-29 프로덕션, BACKLOG 완료 표). ✅ OG 태그 + OG 이미지 작업을 개발 목록 1순위로 넣기(6장 F1 → 09-29 프로덕션 반영). ✅(09-30 운영자 확인, 캐시 초기화 뒤) 카톡 나와의 채팅에 일반 링크와 초대 링크(`/?room=…`)를 붙였을 때 새 미리보기가 뜬다 |
-| D2 | 9/30 수 | ✅ Render 대시보드에서 **이번 달 instance hours·outbound bandwidth 사용량** 확인, 스크린샷 저장(09-29 선행 확인, 결과는 6-4). ☐ 결제수단 등록 여부 결정(대역폭 초과 시 "과금" 대 "서버 정지") → BOARD 결정 요청. ✅ 최소 지표 로깅(F2)을 개발 목록에 넣기(09-29 프로덕션 반영. `/admin/stats` 확인은 ADMIN_KEY 파일 저장 뒤) |
+| D2 | 9/30 수 | ✅ Render 대시보드에서 **이번 달 instance hours·outbound bandwidth 사용량** 확인, 스크린샷 저장(09-29 선행 확인, 결과는 6-4). ✅ 결제수단 등록 여부 결정 → **등록**(한도 초과 시 정지 대신 과금, BOARD 결정 4 GO, 09-30). ✅ 최소 지표 로깅(F2)을 개발 목록에 넣기(09-29 프로덕션 반영, `/admin/stats` 연결 확인 09-30 — 오늘 첫 실집계: 방 1개 생성·1개 종료(75초), 완료 게임 0판, ref 없음 → 실사용 아닌 테스트로 추정) |
 | D3 | 10/1 목 | ☐ 프레스킷 v0: 스크린샷 PC 3장·폰 3장, 15초 GIF 1개(갤러리 장면), 로고 PNG(투명·흰 배경). ☐ `docs/marketing/`에 한 줄·50자·200자 소개 정리 |
 | D4 | 10/2 금 | ☐ **시드 게임 1**: 본인 친구 단톡방에 초대 문구 #1로 21시 한 판. ☐ 막힌 곳 메모(링크 열기·닉네임·폰 가로세로·소리). ☐ 끝나고 갤러리 "한 장으로 모아 저장" 이미지를 단톡에 공유 |
 | D5 | 10/3 토 (개천절) | ☐ **시드 게임 2**: 다른 단톡방. ☐ 게임 끝 갤러리 이미지를 참가자들이 알아서 저장·공유하는지 관찰(안 하면 왜 안 하는지 메모 → F5·F3 요구사항) |
@@ -468,7 +468,7 @@ https://draw-guess-i927.onrender.com
 | ID | 위험 | 근거 | 영향 | 대응 |
 |---|---|---|---|---|
 | **I1** | **월 750시간 한도 초과 → 모든 무료 서비스 정지(다음 달까지)** | Render는 **작업공간당** 월 750시간을 주고, 다 쓰면 그 작업공간의 무료 웹 서비스를 모두 정지한다 [확인: [Render Free 문서](https://render.com/docs/free)]. 프로덕션은 자기 핑으로 24시간 켜져 있다 [확인: README·`server/index.js`] → 31일 달이면 744시간. **스테이징(`draw-guess-staging`)이 같은 작업공간에 있으면 10월·12월에는 스테이징이 깨어 있을 수 있는 시간이 약 6시간뿐이다** [계산·추정: 작업공간 구성은 대시보드에서 확인 필요] | 한창 퍼질 때 프로덕션이 꺼질 수 있다 | D2에 대시보드에서 사용 시간 확인. 스테이징 확인은 짧게 하거나, 31일 달에는 로컬 + cloudflared로 대체. 또는 스테이징을 다른 무료 호스트로 옮긴다 |
-| **I2** | **아웃바운드 대역폭 월 5GB (Hobby)** — 결제수단이 없으면 초과 시 다음 달까지 서비스 정지, 있으면 GB당 $0.15 과금 | [확인: [Render Outbound Bandwidth 문서](https://render.com/docs/outbound-bandwidth)]. 2026년 4월에 100GB에서 5GB로 줄었다 [확인: [bex.co 분석](https://bex.co/blog/2026/07/09/render-april-2026-repricing-egress-cut-self-hosting-cost)]. 웹소켓 송신도 포함된다 [확인] | **입소문의 천장이 될 수 있다.** 그리기 좌표를 20ms마다 전송하고 [확인: `client.js` `setInterval(flush, 20)`] 출제자 외 전원에게 중계하며, 게임 끝 갤러리는 최대 약 1.5MB를 각자에게 보낸다 [확인: PROTOCOL]. 8명·3라운드 한 게임이 대략 10~30MB, 4명이면 5MB 안팎으로 보면 **월 수백 판 수준에서 5GB에 닿을 수 있다** [추정: F2의 bytesOut으로 반드시 측정] | ① F2 `bytesOut` 측정. ② Socket.IO `perMessageDeflate` 켜기, 좌표 압축·정수 차분 인코딩(작음~중간). ③ **결제수단 등록 여부를 운영자가 결정**: 정지 대신 과금을 택하면 50GB라도 약 $7 수준 [계산]. ④ 월 1,000판이 넘으면 호스팅 이전(Oracle Always Free, Fly.io, Koyeb 등 — README에 선택지 있음) 검토 |
+| **I2** | **아웃바운드 대역폭 월 5GB (Hobby)** — 결제수단이 없으면 초과 시 다음 달까지 서비스 정지, 있으면 GB당 $0.15 과금 | [확인: [Render Outbound Bandwidth 문서](https://render.com/docs/outbound-bandwidth)]. 2026년 4월에 100GB에서 5GB로 줄었다 [확인: [bex.co 분석](https://bex.co/blog/2026/07/09/render-april-2026-repricing-egress-cut-self-hosting-cost)]. 웹소켓 송신도 포함된다 [확인] | **입소문의 천장이 될 수 있다.** 그리기 좌표를 20ms마다 전송하고 [확인: `client.js` `setInterval(flush, 20)`] 출제자 외 전원에게 중계하며, 게임 끝 갤러리는 최대 약 1.5MB를 각자에게 보낸다 [확인: PROTOCOL]. 8명·3라운드 한 게임이 대략 10~30MB, 4명이면 5MB 안팎으로 보면 **월 수백 판 수준에서 5GB에 닿을 수 있다** [추정: F2의 bytesOut으로 반드시 측정] | ① F2 `bytesOut` 측정. ② Socket.IO `perMessageDeflate` 켜기, 좌표 압축·정수 차분 인코딩(작음~중간). ③ **결제수단 등록 여부를 운영자가 결정**: 정지 대신 과금을 택하면 50GB라도 약 $7 수준 [계산]. ④ 월 1,000판이 넘으면 호스팅 이전(Oracle Always Free, Fly.io, Koyeb 등 — README에 선택지 있음) 검토. → **09-30: 결제수단 등록 완료(GO). 초과 시 정지가 아니라 과금으로 결정됨** |
 | **I3** | 콜드스타트 30~60초 | 무료 서비스는 15분 동안 들어오는 트래픽이 없으면 잠들고 깨는 데 약 1분 걸린다 [확인: Render 문서]. 자기 핑으로 평소에는 깨어 있지만 재배포·재시작 직후 첫 방문자는 기다릴 수 있다 [확인: README] | 커뮤니티 글·방송 직후 첫 사람이 "안 열리네" 하고 떠난다 | **운영 규칙: 게시·방송 1시간 전부터 main 머지 금지**, 게시 직전에 직접 한 번 접속해 깨우기. 무료 외부 모니터링(5분 간격 핑)을 보조로 두기 [제안]. F9 |
 | I4 | 한 방 최대 12명 | [확인] | 방송·동아리에서 넘친다 | 안내 문구(F4), 방 여러 개 운영 안내, F10 |
 | I5 | 욕설·악성 참가자 | 필터 없음, 강퇴만 있음 [확인] | 방송·학교에서 사고 | F6, 정기 공개 방은 운영자가 방장 |
@@ -481,6 +481,7 @@ https://draw-guess-i927.onrender.com
 - 커스텀 도메인: 0 / 2 포함 → 도메인만 사면 추가 비용 없이 연결 가능(F11).
 - 결제수단: **미등록** → 한도 초과 시 과금이 아니라 서비스 정지.
 - 결정 권고: ① 카드 등록(대역폭 초과 시 GB당 $0.15, 정지 대신 과금), ② 반응이 확인되면 프로덕션만 Starter($7/월)로 올려 콜드스타트(I3)와 750시간(I1)을 한 번에 해결, ③ 스테이징은 무료·자동 슬립 유지.
+- **09-30 갱신**: ①번(카드 등록) 반영 완료(BOARD 결정 4 GO). ②·③은 아직 미착수 — 반응이 쌓인 뒤(2주 회고, D14) 다시 판단.
 
 ---
 
@@ -546,3 +547,4 @@ https://draw-guess-i927.onrender.com
 - 법·규정: [추천·보증 심사지침(법제처)](https://www.law.go.kr/LSW//admRulInfoP.do?admRulSeq=2100000190311) · [생활법령: 광고 표시](https://easylaw.go.kr/CSP/CnpClsMain.laf?popMenu=ov&csmSeq=1575&ccfNo=2&cciNo=3&cnpClsNo=1) · [개인정보보호법 제22조의2](https://casenote.kr/%EB%B2%95%EB%A0%B9/%EA%B0%9C%EC%9D%B8%EC%A0%95%EB%B3%B4_%EB%B3%B4%ED%98%B8%EB%B2%95/%EC%A0%9C22%EC%A1%B0%EC%9D%982)
 - 인프라·도구: [Render Free 문서](https://render.com/docs/free) · [Render Outbound Bandwidth](https://render.com/docs/outbound-bandwidth) · [bex.co: Render 2026년 4월 대역폭 축소](https://bex.co/blog/2026/07/09/render-april-2026-repricing-egress-cut-self-hosting-cost) · [Render 비용 안내(로그 보관)](https://render.com/articles/how-much-does-cloud-application-hosting-cost-for-small-businesses) · [카카오 OG 캐시 초기화 안내](https://devtalk.kakao.com/t/topic/22238) · [카카오 OG 캐시 초기화 도구](https://developers.kakao.com/tool/clear/og)
 - 이벤트: [ZDNet: BIC 2026](https://zdnet.co.kr/view/?no=20260719142248) · [인벤: BIC 2026](https://www.inven.co.kr/webzine/news/?news=313010) · [BIC 참가 안내](https://bicfest.org/enroll/information)
+</content>
