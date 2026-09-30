@@ -34,7 +34,7 @@
 |---|---|---|
 | marketing | 09-30 (2차) | D2 체크리스트 전부 완료(결제수단 등록 반영). 오늘 첫 실집계: 방 1개 생성·종료(75초), 완료 게임 0판, ref 없음 → 테스트 트래픽으로 추정. 할 일 3개는 D3·D4 준비로 유지. 개발 제안 없음 |
 | builder | 09-30 (2차) | BACKLOG #1 테스트 포트 오프셋(93888a4): test/*.js 12개 파일에 TEST_PORT_OFFSET 환경변수 반영, 기본값 0은 기존과 동일. 동시 실행(오프셋 0 vs 2000) 충돌 없음 확인 → develop |
-| qa | 09-30 (4차, develop d141427) | 테스트 포트 오프셋(93888a4) 검증: npm test/test:browser/test:mobile 전부 통과(1회차 metrics.js EADDRINUSE는 재실행 시 재현 안 됨, T-20260930-5 낮음 기록). 스테이징 032f2a64 = origin/develop(d141427) 일치. 머지 의견 "가능" |
+| qa | 09-30 (5차, develop f05fae8) | LAN 접속 주소 로그(f05fae8) 검증: npm test 272 passed(간헐 1 failed 재현, test/retry-eaddrinuse.js 자체 타이밍 경합 — T-20260930-6 낮음 신규 기록, 제품 결함 아님). npm run test:browser 전부 통과. 콘솔 로그만 추가된 변경이라 test:mobile 생략(모바일 화면 무변경). 스테이징 032f2a64 = origin/develop(f05fae8) 일치, 첫 화면 title·og:image·manifest·초대 og:title 정상. 머지 의견 "가능" |
 | fixer | 09-30 (2차) | T-20260930-5 EADDRINUSE 재실행 재현 성공(Windows TIME_WAIT, 2~3분 뒤 해소) → test/*.js 서버 기동에 짧은 재시도(300ms×3) 추가 + 회귀 테스트 신규(test/retry-eaddrinuse.js). npm test 273 passed, test:browser 전부 통과(7ac8435) → develop |
 
 ## 오늘 운영자 할 일 (마케팅이 매 사이클 갱신 · 최대 3개)
