@@ -13,6 +13,7 @@
 ## 결정 필요
 | # | 날짜 | 요청 | 근거 | 답 |
 |---|---|---|---|---|
+| 1 | 09-30 | develop → main 머지: 서버 시작 로그 LAN 접속 주소 표시(f05fae8) + retry-eaddrinuse 테스트 타이밍 경합 수정(c100020) | QA 09-30(5차, f05fae8) "가능": test:browser 전부 통과, 스테이징 032f2a64 일치, 막힘·높음 결함 없음. npm test 간헐 1건(T-20260930-6, 낮음)은 fixer가 원인(더미 서버 해제를 고정 800ms 대기가 아니라 실제 EADDRINUSE 관측 시점으로 변경) 규명·재현 12회 연속 PASS로 수정 완료. 낮음뿐이라 재QA는 다음 사이클로 이월. server/index.js 로그 한 줄 추가 + 테스트 파일만 변경, PROTOCOL 영향 없음 | |
 
 ## 방향 메모 (운영자)
 - 2026-09-29: 운영자 명의 SNS 계정 홍보는 하지 않는다. 참가자·스트리머가 올리게 만든다(성장 계획 0-1).
@@ -33,9 +34,9 @@
 | 역할 | 마지막 실행 | 상태 |
 |---|---|---|
 | marketing | 09-30 (2차) | D2 체크리스트 전부 완료(결제수단 등록 반영). 오늘 첫 실집계: 방 1개 생성·종료(75초), 완료 게임 0판, ref 없음 → 테스트 트래픽으로 추정. 할 일 3개는 D3·D4 준비로 유지. 개발 제안 없음 |
-| builder | 09-30 (2차) | BACKLOG #1 테스트 포트 오프셋(93888a4): test/*.js 12개 파일에 TEST_PORT_OFFSET 환경변수 반영, 기본값 0은 기존과 동일. 동시 실행(오프셋 0 vs 2000) 충돌 없음 확인 → develop |
+| builder | 09-30 (3차) | 운영자 직접 요청: 서버 시작 로그에 LAN 접속 주소 표시(f05fae8) — os.networkInterfaces()로 non-internal IPv4 찾아 콘솔 출력, 같은 네트워크 여러 기기 테스트 편의 → develop |
 | qa | 09-30 (5차, develop f05fae8) | LAN 접속 주소 로그(f05fae8) 검증: npm test 272 passed(간헐 1 failed 재현, test/retry-eaddrinuse.js 자체 타이밍 경합 — T-20260930-6 낮음 신규 기록, 제품 결함 아님). npm run test:browser 전부 통과. 콘솔 로그만 추가된 변경이라 test:mobile 생략(모바일 화면 무변경). 스테이징 032f2a64 = origin/develop(f05fae8) 일치, 첫 화면 title·og:image·manifest·초대 og:title 정상. 머지 의견 "가능" |
-| fixer | 09-30 (2차) | T-20260930-5 EADDRINUSE 재실행 재현 성공(Windows TIME_WAIT, 2~3분 뒤 해소) → test/*.js 서버 기동에 짧은 재시도(300ms×3) 추가 + 회귀 테스트 신규(test/retry-eaddrinuse.js). npm test 273 passed, test:browser 전부 통과(7ac8435) → develop |
+| fixer | 09-30 (3차) | T-20260930-6 retry-eaddrinuse 간헐 실패(1/4~1/5) 원인 규명: 더미 서버를 고정 800ms 뒤 해제해 자식 기동이 느리면 EADDRINUSE를 못 만남 → stderr에서 EADDRINUSE 관측 시점에 해제하도록 이벤트 기반으로 변경, 단독 12회 연속 PASS 확인(c100020) → develop |
 
 ## 오늘 운영자 할 일 (마케팅이 매 사이클 갱신 · 최대 3개)
 - [ ] **시드 게임 1 날짜 잡히면 BOARD/채팅으로 알려주기** — 날짜 미정이라 단톡 예고는 보류. 잡히면 성장 계획 5-1 초대 문구 #1로 예고, 참가 인원 목표 3~8명
@@ -56,3 +57,4 @@
 | 09-30 | 결정 1 GO → main 머지, 프로덕션 032f2a64 확인. 결정 필요 없음 | – |
 | 09-30 | 마케팅 D2 체크리스트 완료 갱신·첫 실집계(방1·종료1·75초) · builder BACKLOG #1 테스트 포트 오프셋(93888a4)→develop · QA 4차 전부 통과, 스테이징 d141427 일치, 낮음 결함 1건(T-20260930-5) · fixer 재현·수정(7ac8435, EADDRINUSE 재시도)→develop. 병행: 기능 세션이 이어 그리기 진행(feature/relay-drawing, 3/7) | 1 |
 | 09-30 | 결정 1 GO(채팅) → main 머지(c559b5a), 프로덕션 032f2a64 확인(에셋 무변경이라 해시 그대로, 테스트 인프라만 바뀜) · BACKLOG 완료 표 "프로덕션"으로 갱신. 운영자 피드백 반영: 시드 게임 1 날짜 미정으로 예정 일정·할 일 수정 | – |
+| 09-30 | 운영자 직접 요청(로컬 LAN 접속 편의) → builder 서버 시작 로그에 LAN 주소 표시(f05fae8)→develop · QA 5차 통과, 스테이징 f05fae8 일치, 낮음 결함 1건(T-20260930-6, retry-eaddrinuse 타이밍 경합) · fixer 원인 규명·수정(c100020, 12회 연속 PASS 확인)→develop. 머지 GO 대기 | 1 |
