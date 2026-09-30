@@ -9,7 +9,7 @@ description: 이뭔그(draw-guess) 기획 세션 시작. 운영자와 대화로 
 
 ## 0. 시작 (묻기 전에 먼저 한다)
 1. `date "+%F %a %H:%M"`으로 오늘을 구한다. 대화에서 말한 "내일"을 믿지 않는다.
-2. `git status --short`로 워킹 트리를 본다. **다른 세션(사이클)이 작업 중이면** 문서만 다루더라도 커밋은 미루고 저장만 하며, 충돌 위험이 있으면 `git worktree`로 분리해 작업한다고 알린다.
+2. **메인 체크아웃은 사이클 전용이다. 이 세션은 자기 워크트리를 만들어 거기서 일한다**(CLAUDE.md "동시 작업 규칙"의 명령 사용: 폴더 `E:/claude pj/개인/draw-guess-work/product`, 브랜치 `work/product-<YYYYMMDD>`). 사이클이 도는 중이어도 기다리지 않는다. 이후 모든 읽기·쓰기는 워크트리 경로에서 한다.
 3. 읽는다: `docs/ROADMAP.md`(오늘 기간의 제품 줄), `docs/BACKLOG.md`("제안됨"·"다음"), `docs/GAME-MODES.md`, `docs/PRD-PLATFORM.md`, `docs/product/`의 문서 목록, `docs/marketing/2026-10-growth-plan.md` 0-1·6-1·7장. `secret/admin-key.txt`가 있으면 지표를 조회해 요약에 포함한다(키는 출력하지 않는다. 조회 방법은 `.claude/skills/ops-cycle/SKILL.md` 0번).
 4. 상태를 한 문단으로 요약하고 오늘 무엇을 할지 묻는다(운영자가 고르면 아래 "모델 추천"을 먼저 알린다). 선택지: **(a) 새 모드·기능 아이디어 뽑기 (b) 기존 기능 개선 기획 (c) 특정 항목 설계 문서 작성 (d) "제안됨" 요청 분류**. 운영자가 이미 말했으면 묻지 않고 그 일로 간다.
 
@@ -27,7 +27,7 @@ description: 이뭔그(draw-guess) 기획 세션 시작. 운영자와 대화로 
 - 합의한 설계 → `docs/product/YYYY-MM-<slug>.md`(product-planner 정의의 설계 문서 형식). 마지막 "운영자가 정할 것"까지.
 - 로드맵 제품 줄의 상태·기간 갱신.
 - **운영자가 이 세션에서 설계에 GO 했을 때만** 설계 문서 5번의 쪼갠 항목을 BACKLOG "다음" 표에 넣고, BOARD "방향 메모"에 `날짜: <설계명> GO(기획 세션)`을 한 줄 남긴다. GO가 없으면 ROADMAP 상태를 "설계 승인 대기"로 두고 BOARD 결정 필요에 올려 달라고 안내한다(BOARD 표는 사이클이 관리한다).
-- 마지막에 문서만 골라서 `git add`(docs/ 밖은 건드리지 않음) → 커밋 → develop에 push. 사이클이 도는 중이면 푸시 전에 `git fetch`로 충돌을 확인한다.
+- 마지막에 바꾼 문서 경로만 명시해 `git add`(docs/ 밖은 건드리지 않음, `-A` 금지) → 커밋 → `git fetch origin && git rebase origin/develop && git push origin HEAD:develop`. 충돌하면 양쪽 변경을 살려 풀고, 못 풀면 저장만 하고 운영자에게 알린다. 끝나면 워크트리와 브랜치를 지운다.
 
 ## 3. 끝맺음 메시지
 1. 오늘 정한 것 (한두 문장)

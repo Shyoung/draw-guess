@@ -12,7 +12,32 @@
 ## 브랜치와 배포
 - `develop` = 스테이징(혼자서도 게임 시작 가능), `main` = 프로덕션 자동 배포.
 - **main 머지는 운영자 GO 뒤에만.** 게시·방송(BOARD "예정 일정") 1시간 전부터는 머지하지 않는다.
-- 다른 세션이 워킹 트리를 쓰고 있을 수 있다. 남의 커밋 안 된 변경은 건드리지 않는다. 동시에 작업해야 하면 `git worktree`로 분리한다.
+- 세션이 여럿 열릴 수 있다. **아래 "동시 작업 규칙"을 따른다.**
+
+## 동시 작업 규칙 (세션이 겹쳐도 충돌하지 않게)
+- **메인 체크아웃(`draw-guess` 폴더)은 사이클 전용이다.** 코드 수정·테스트·서버 실행은 여기서 `/ops-cycle`만 한다(builder·fixer·qa는 한 번에 하나씩 순서대로).
+- **그 밖의 세션(기획 세션·관리자 세션·수동 작업)은 메인 체크아웃을 쓰지 않고 자기 워크트리에서 문서만 고친다.**
+  ```
+  git fetch origin
+  git worktree add "E:/claude pj/개인/draw-guess-work/<역할>" -b work/<역할>-<YYYYMMDD> origin/develop
+  # 그 폴더에서 작업 → 필요한 경로만 git add → 커밋
+  git fetch origin && git rebase origin/develop && git push origin HEAD:develop
+  # 끝나면 메인 체크아웃에서: git worktree remove "<폴더>" && git branch -d work/<역할>-<YYYYMMDD>
+  ```
+  워크트리에는 node_modules가 없으므로 테스트·서버 실행은 하지 않는다. 코드를 건드려야 하면 BACKLOG에 올려 사이클에 맡긴다.
+- **커밋은 자기 파일만 명시해서 `git add <경로>`.** `git add -A`는 남의 미커밋 변경이 섞일 수 있어 쓰지 않는다. push 직전에는 트리를 깨끗하게 한 뒤 `git pull --rebase origin develop`(또는 워크트리에서는 위의 rebase)를 한다. 충돌하면 강제로 밀지 말고 양쪽 변경을 살려 풀고, 못 풀면 멈추고 운영자에게 알린다.
+- **파일 주인** (겹치는 파일이 없으면 충돌도 없다)
+
+  | 파일 | 쓰는 쪽 |
+  |---|---|
+  | `server/` `public/` `test/` `PROTOCOL.md` `README.md` | builder·fixer (사이클, 순서대로) |
+  | `docs/ops/BOARD.md` | 사이클 조율자. 다른 세션은 "방향 메모"에 한 줄 추가만 |
+  | `docs/ops/TEST-LOG.md` | qa(추가) · fixer(상태) |
+  | `docs/BACKLOG.md` | 제안됨: 사이클·제품 / 다음: 제품(승인분 추가)·builder(완료로 이동) / 완료: builder |
+  | `docs/GAME-MODES.md` `docs/PRD-PLATFORM.md` `docs/product/` `docs/ROADMAP.md` 제품 줄 | product-planner·기획 세션 |
+  | `docs/marketing/` | marketing-strategist |
+  | `docs/ROADMAP.md` 마케팅·개발 줄 | 사이클 조율자 |
+  | `.claude/` `CLAUDE.md` | 관리자 세션 |
 
 ## 운영 구조 (운영자는 GO / STOP / 보류와 방향 조정만 한다)
 - 조율: `docs/ops/BOARD.md` (결정 필요 · 방향 메모 · 예정 일정 · 역할 상태 · 사이클 로그). 실행은 `/ops-cycle`.
