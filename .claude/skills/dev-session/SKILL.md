@@ -25,13 +25,13 @@ cd "E:/claude pj/개인/draw-guess-work/feature-<slug>" && npm ci
 ## 2. 항목 반복 (설계 문서 5번 "쪼갠 목록" 순서대로, 한 번 실행에 최대 3항목)
 1. **모델 표를 먼저 출력한다.** 서브에이전트마다 `.claude/skills/ops-cycle/SKILL.md` 0-1의 규칙으로 고르되, 이 세션에서는 크기 큼 성격의 builder에 Opus나 Fable을 쓴다.
 2. 항목 시작 전에 `git fetch origin && git rebase origin/develop`. 충돌하면 양쪽 변경을 살려 풀고, 못 풀면 멈추고 보고한다(강제 push 금지).
-3. `builder`에게 이 워크트리 경로를 알려 주고 그 항목만 구현하게 한다. 프롬프트에 넣을 것: 워크트리 경로, 설계 문서 경로, 항목 번호, "메인 체크아웃 경로에서 작업하지 말 것", "`git add`는 경로 명시, `-A` 금지", "PROTOCOL.md가 바뀌면 같이 고칠 것".
-4. `qa-reviewer`에게 **로컬 검증만** 시킨다(스테이징 확인은 생략. feature 브랜치는 스테이징에 배포되지 않는다). 결함은 `docs/ops/TEST-LOG.md`에 남기게 하고, 열림 결함이 있으면 `fixer`를 부른다.
+3. `builder`에게 이 워크트리 경로를 알려 주고 그 항목만 구현하게 한다. 프롬프트에 넣을 것: 워크트리 경로, 설계 문서 경로, 항목 번호, "메인 체크아웃 경로에서 작업하지 말 것", "`git add`는 경로 명시, `-A` 금지", "PROTOCOL.md가 바뀌면 같이 고칠 것", 그리고 feature 예외 세 가지 — **① 브랜치가 develop이 아니어도 멈추지 않는다 ② push는 `origin feature/<slug>` ③ BACKLOG는 갱신하지 않는다(완료 표시는 설계 문서 ✅로만)**.
+4. `qa-reviewer`에게 **로컬 검증만** 시킨다(스테이징 확인은 생략. feature 브랜치는 스테이징에 배포되지 않는다). **TEST-LOG는 쓰지 않는다.** 결함은 설계 문서의 "진행 중 결함" 표(없으면 문서 끝에 만든다: ID·심각도·재현·상태)에 기록하게 하고, 열림 결함이 있으면 `fixer`를 부른다(fixer도 그 표에서 닫는다). 이 표는 설계 문서의 예외로 dev-session 몫이다.
 5. 항목이 끝나면 설계 문서의 해당 항목에 완료 표시(`✅ 날짜 커밋해시`)를 하고 커밋한 뒤 `git push origin feature/<slug>`(백업, 배포 안 됨).
 
 ## 3. 세션 끝 (항목을 다 했거나 3항목이 끝났을 때)
 - 진행률 갱신: ROADMAP의 해당 항목 상태를 `진행 (feature/<slug>, n/m)`으로 바꾸는 **한 줄 변경만** develop에 반영한다. 이 세션의 워크트리는 feature 브랜치이므로 문서용 임시 워크트리(CLAUDE.md "동시 작업 규칙")를 따로 만들어 rebase 후 push하고 지운다.
-- **기능이 완성되면**(모든 항목 ✅): 전체 테스트(`npm test`·`npm run test:browser`·`npm run test:mobile`) 통과 → `git fetch && git rebase origin/develop` → 다시 전체 테스트 → `git push origin HEAD:develop`(스테이징 배포). 이어서 ROADMAP 상태를 "스테이징(QA 대기)"로 바꾸는 문서 변경을 push하고, feature 브랜치·워크트리를 지운다(`git worktree remove` 후 `git push origin --delete feature/<slug>`). main 머지는 하지 않는다. 다음 `/ops-cycle`이 스테이징 QA를 하고 머지 GO를 묻는다.
+- **기능이 완성되면**(모든 항목 ✅, **진행 중 결함 표의 열린 결함 0건**): 전체 테스트(`npm test`·`npm run test:browser`·`npm run test:mobile`) 통과 → `git fetch && git rebase origin/develop` → 다시 전체 테스트 → `git push origin HEAD:develop`(스테이징 배포). 이어서 ROADMAP 상태를 "스테이징(QA 대기)"로 바꾸는 문서 변경을 push하고, feature 브랜치·워크트리를 지운다(`git worktree remove` 후 `git push origin --delete feature/<slug>`). main 머지는 하지 않는다. 다음 `/ops-cycle`이 스테이징 QA를 하고 머지 GO를 묻는다.
 - 마지막 메시지: ① 이번에 끝낸 항목과 커밋 ② 남은 항목 수 ③ 운영자가 폰·실기기로 확인할 것 ④ 막힌 것·운영자 결정이 필요한 것.
 
 ## 하지 않는 것

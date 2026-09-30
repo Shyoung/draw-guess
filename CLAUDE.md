@@ -33,9 +33,9 @@
   |---|---|
   | `server/` `public/` `test/` `PROTOCOL.md` `README.md` | 사이클의 builder·fixer(develop, 작은 항목) · 개발 세션의 builder·fixer(feature 브랜치, 큰 기능). 서로 다른 항목을 맡고 같은 파일은 rebase로 합친다 |
   | `docs/ops/BOARD.md` | 사이클 조율자. 다른 세션은 "방향 메모"에 한 줄 추가만 |
-  | `docs/ops/TEST-LOG.md` | qa(추가) · fixer(상태) |
+  | `docs/ops/TEST-LOG.md` | qa(추가) · fixer(상태). feature 브랜치 기간에는 쓰지 않는다(설계 문서 "진행 중 결함" 표를 쓴다) |
   | `docs/BACKLOG.md` | 제안됨: 사이클·제품 / 다음: 제품(승인분 추가)·builder(완료로 이동) / 완료: builder |
-  | `docs/GAME-MODES.md` `docs/PRD-PLATFORM.md` `docs/product/` `docs/ROADMAP.md` 제품 줄 | product-planner·기획 세션 |
+  | `docs/GAME-MODES.md` `docs/PRD-PLATFORM.md` `docs/product/` `docs/ROADMAP.md` 제품 줄 | product-planner·기획 세션. **예외: 설계 문서의 ✅ 완료 표시와 "진행 중 결함" 표, ROADMAP 진행률 한 줄(`진행 (feature/…, n/m)`)은 dev-session이 쓴다** |
   | `docs/marketing/` | marketing-strategist |
   | `docs/ROADMAP.md` 마케팅·개발 줄 | 사이클 조율자 |
   | `.claude/` `CLAUDE.md` | 관리자 세션 |

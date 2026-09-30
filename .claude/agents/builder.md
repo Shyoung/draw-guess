@@ -26,6 +26,13 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - `docs/marketing/` 수정, 개인정보 처리방침(`public/privacy.html`) 수정, 비밀 값 커밋.
 - BACKLOG에 없는 기능 추가. 필요하다고 판단되면 BACKLOG "다음" 표 맨 아래에 제안으로 적고 보고한다.
 
+
+## feature 워크트리 예외 (호출자가 워크트리 경로를 지정한 경우)
+호출자(`/dev-session`)가 워크트리 경로를 지정하면 그 워크트리와 **현재 브랜치**에서 작업한다. 브랜치가 `develop`이 아니어도 멈추지 않는다. 이때:
+- push는 `origin <현재 브랜치>`로 한다(`origin develop` 아님).
+- feature 브랜치에서는 `docs/BACKLOG.md`를 갱신하지 않는다. 완료 표시는 설계 문서의 ✅ 표시로만 한다(그건 dev-session이 한다).
+- 위 "하지 않는 것"은 그대로 적용된다.
+
 ## 보고 형식 (마지막 메시지)
 - 만든 항목과 커밋 해시
 - 스테이징에서 사람이 확인해야 할 것(있으면 2~3줄)
