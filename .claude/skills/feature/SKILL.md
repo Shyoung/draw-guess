@@ -53,7 +53,7 @@ cd "E:/claude pj/개인/draw-guess-work/feature-<slug>"
 $env:ALLOW_SOLO='1'; $env:PORT='3200'; npm start
 # Git Bash: ALLOW_SOLO=1 PORT=3200 npm start
 ```
-- 접속 주소: `http://localhost:3200` (혼자서도 게임 시작 가능. 여러 명 확인은 탭·시크릿 창을 여러 개 연다)
+- 접속 주소: 먼저 `node scripts/local-urls.js 3200`을 실행해(워크트리 폴더에서) 나온 값을 **그대로 적는다** — `http://localhost:3200`(이 PC)과 `http://<LAN IP>:3200`(같은 Wi-Fi의 폰·다른 기기). 혼자서도 게임 시작 가능, 여러 명 확인은 탭·시크릿 창을 여러 개 연다. 폰이 다른 망이거나 LAN 주소가 안 열리면 아래 터널을 쓴다.
 - 폰용 터널(같은 PC에서 서버를 켠 채로 다른 터미널에서): `cloudflared tunnel --url http://localhost:3200` (없으면 `npx localtunnel --port 3200`). 출력된 https 주소를 폰에서 연다. 터널 주소는 세션이 끝나면 버리고, 공개된 동안 링크를 남에게 보내지 않는다.
 - 이번 항목에서 확인할 것을 2~3줄로 덧붙인다(설계 문서 쪼갠 목록의 "끝났을 때 확인할 것").
 - 서버 실행은 운영자 몫이다. 세션이 서버를 계속 띄워 두지 않는다.
