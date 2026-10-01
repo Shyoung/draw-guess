@@ -685,6 +685,12 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 .gallery-by { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .gallery-by .gallery-av { width: 20px; height: 20px; font-size: 12px; flex: 0 0 auto; box-shadow: none; }
 .gallery-drawer { font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 이어 그리기 갤러리: "1번 · 🖍 A·B·C  🎯 D 맞힘" 한 줄, 좁으면 공동 작가부터 말줄임(전체는 카드 title) */
+.gallery-by.relay { overflow: hidden; white-space: nowrap; gap: 5px; }
+.gallery-by.relay .gallery-no { flex: 0 0 auto; }
+.gallery-by.relay .gallery-drawer { flex: 0 1 auto; min-width: 0; }
+.gallery-guesser { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.gallery-guesser.got { color: #1e9a62; }
 @media (max-width: 640px) { .gallery-grid { grid-template-columns: repeat(2, 1fr); } .modal { padding: 10px; } .modal-card { padding: 14px; } }
 
 /* =====================================================================
@@ -757,8 +763,21 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 .relay-band .rb-next { color: var(--muted); }
 .relay-band .rb-leg, .ts-leg { font-family: var(--mono); font-weight: 800; color: var(--secondary-dark); }
 .relay-band .rb-leg.urgent, .ts-leg.urgent { color: var(--red); }
-/* 조합 마스크: 요소 묶음 사이에 가운뎃점 */
+/* 마스크 아래 줄: 상단 띠 + 맞히는 사람의 초성 힌트 버튼(같은 줄이라 주자↔맞히는 사람이 바뀌어도 헤더 높이가 같다) */
+.relay-row { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; max-width: 100%; }
+.relay-hint {
+  padding: 3px 12px; gap: 4px; font-size: 13px; font-weight: 800; color: #7a4a00;
+  background: var(--amber-soft); box-shadow: inset 0 0 0 1.5px rgba(244, 163, 0, .55);
+}
+.relay-hint:hover:not(:disabled) { background: #ffe6b3; }
+.relay-hint:disabled { opacity: .45; }
+.relay-hint .rh-short { display: none; }
+/* 조합 마스크: 요소 묶음 사이에 가운뎃점. 맞힌 요소(본인 화면)는 초록, 방금 맞혔으면 한 번 튀어 오른다 */
 .mask-part { display: inline-flex; align-items: flex-end; gap: 5px; }
+.mask-part.solved .mask-box { background: #d6f5e3; color: #1e9a62; border-bottom-color: #1e9a62; }
+.mask-part.just-solved { animation: cat-pop .45s ease-out; }
+/* 부분 정답 안내(보낸 사람만): "3개 중 1개 맞았어요!" */
+.msg-close.msg-partial { background: #e6f7ee; color: #17784c; }
 .mask-sep { align-self: center; font-weight: 900; font-size: 18px; color: var(--muted); padding: 0 3px; }
 .word-secret.relay-word .word { font-size: 21px; }
 /* 차례가 아닌 주자: 툴바는 흐리게 잠그고 안내만 또렷하게 */
@@ -1421,6 +1440,12 @@ img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cove
 /* 이어 그리기 — 모바일(위 모바일 블록과 같은 조건). 상단 띠는 턴 띠가 대신하고, 조합 마스크·제시어는 360px 에서 넘치지 않게 줄인다 */
 @media (max-width: 639px), (max-width: 767px) and (orientation: portrait), (max-width: 767px) and (pointer: fine), (max-width: 1099px) and (orientation: portrait) and (pointer: coarse) {
   .relay-band { display: none !important; }
+  /* 맞히는 사람의 힌트 버튼은 헤더 1행(라운드 · 힌트 · 타이머 · ⋯)에 — 키보드가 올라와 상태 띠가 숨어도 누를 수 있고 헤더 높이가 늘지 않는다 */
+  .relay-row { display: contents; }
+  .room:not([data-phase="lobby"]) .topbar.has-relay-hint { grid-template-columns: minmax(0, 1fr) auto auto auto; grid-template-areas: "round hint timer menu" "word word word word"; }
+  .relay-hint { grid-area: hint; padding: 6px 10px; font-size: 12px; min-height: 32px; }
+  .relay-hint .rh-long { display: none; }
+  .relay-hint .rh-short { display: inline; }
   .mask-part { flex-wrap: nowrap; gap: 3px; }
   .mask-combo .mask { column-gap: 2px; }
   .mask-sep { font-size: 14px; padding: 0 1px; }

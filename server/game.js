@@ -222,7 +222,7 @@ class Room {
 
     this.usedWords = new Set(); // 이번 게임에서 이미 나온(선택된) 단어
     this.offeredWords = new Set(); // 이번 게임에서 후보로 한 번이라도 제시된 단어 — 반복 제시 방지
-    this.gallery = []; // 이번 게임의 턴별 기록 [{ round, word, category, drawerId, drawerName, guessed, ops }] — 게임 종료 갤러리
+    this.gallery = []; // 이번 게임의 턴별 기록 [{ round, word, category, drawerId, drawerIds, drawerNames, drawerName, guesserId, guesserName, guessed, ops }] — 게임 종료 갤러리
     this.hintCount = 0; // 이번 턴에 예정된 초성 힌트 개수
     this.categoryRevealed = false; // 마지막 초성 힌트와 함께 카테고리를 공개했는지
     this.turnPoints = new Map(); // 이번 턴 획득 점수 (id → delta)
@@ -1192,7 +1192,8 @@ class Room {
     this.emitExcept(drawerId, 'game:choosing', base);
     this.emitTo(drawerId, 'game:choosing', { ...base, wordOptions: this.wordOptions.slice() });
     this.broadcastState();
-    this.systemMessage(`${drawer.name}님이 단어를 고르고 있습니다.`);
+    // relay 는 "제시어"(조합)라 문구를 따로. classic·fixed 는 그대로
+    this.systemMessage(this.settings.mode === 'relay' ? `${drawer.name}님이 제시어를 고르고 있어요.` : `${drawer.name}님이 단어를 고르고 있습니다.`);
     this.startTicker();
   }
 
@@ -1510,14 +1511,18 @@ class Room {
       const drawerIds = r.order.slice(0, r.legIndex + 1);
       const first = this.getPlayer(drawerIds[0]);
       const guesser = this.getPlayer(r.guesserId);
+      // 이름은 지금 기록한다 — 게임이 끝나기 전에 나간 사람도 갤러리 캡션 "A·B·C" 에 남게(나간 사람은 relayLeft 의 이름)
+      const nameOf = (id) => { const q = this.getPlayer(id); return q ? q.name : (this.relayLeft[id] || ''); };
       this.gallery.push({
         round: this.round,
         word: this.word,
         category: null,
         drawerId: drawerIds[0],
         drawerIds,
-        drawerName: first ? first.name : '',
+        drawerNames: drawerIds.map(nameOf),
+        drawerName: first ? first.name : nameOf(drawerIds[0]),
         guesserId: r.guesserId,
+        guesserName: nameOf(r.guesserId),
         guessed: guesser && guesser.hasGuessed ? 1 : 0, // 맞힌 사람 수(0|1) — classic 과 같은 뜻(클라이언트·그림 보관이 숫자로 쓴다)
         ops: this.ops.slice(),
       });
@@ -1530,8 +1535,10 @@ class Room {
         category: this.category(),
         drawerId: this.drawerId,
         drawerIds: [this.drawerId],
+        drawerNames: [drawer ? drawer.name : ''],
         drawerName: drawer ? drawer.name : '',
         guesserId: null,
+        guesserName: null,
         guessed,
         ops: this.ops.slice(),
       });

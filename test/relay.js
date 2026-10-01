@@ -121,6 +121,8 @@ function fakeIo(sent) {
   const g = room.gallery[0];
   check('② 갤러리: drawerIds = 구간을 가진 주자, drawerId = 첫 주자, guesserId, category null',
     g && same(g.drawerIds, ['A', 'B', 'D']) && g.drawerId === 'A' && g.guesserId === 'E' && g.category === null && g.word.includes(PART_SEP), g);
+  check('② 갤러리: drawerNames 는 문제 끝에 기록(도중에 나간 A 이름도 남음) · guesserName',
+    g && same(g.drawerNames, ['A님', 'B님', 'D님']) && g.drawerName === 'A님' && g.guesserName === 'E님', g && { drawerNames: g.drawerNames, drawerName: g.drawerName, guesserName: g.guesserName });
   room.gameOver();
   const over = sent.filter((x) => x.ev === 'game:over').pop();
   check('② game:over.gallery 에 drawerIds·guesserId', over && same(over.p.gallery[0].drawerIds, ['A', 'B', 'D']) && over.p.gallery[0].guesserId === 'E');
@@ -129,13 +131,16 @@ function fakeIo(sent) {
 }
 {
   // classic 갤러리도 형식 통일: drawerIds:[drawerId], guesserId:null
-  const room = new game.Room(fakeIo([]), 'UNI2');
+  const sentC = [];
+  const room = new game.Room(fakeIo(sentC), 'UNI2');
   for (const id of ['A', 'B']) room.addPlayer({ id, name: id, avatar: {}, token: 'tok2-' + id, socketId: id });
   room.start('A');
+  check('② classic choosing 안내는 그대로 "A님이 단어를 고르고 있습니다."', sentC.some((x) => x.ev === 'chat:message' && x.p && x.p.kind === 'system' && x.p.text === 'A님이 단어를 고르고 있습니다.'));
   room.chooseWord('A', room.wordOptions[0]);
   room.endTurn('time');
   const g = room.gallery[0];
   check('② classic 갤러리: drawerIds=[drawerId], guesserId=null', g && same(g.drawerIds, ['A']) && g.guesserId === null && typeof g.category === 'string', g);
+  check('② classic 갤러리: drawerNames=[출제자 이름], guesserName=null', g && same(g.drawerNames, ['A']) && g.guesserName === null, g);
   check('② classic room:state.relay = null', room.toState().relay === null);
   room.destroy();
 }
@@ -211,6 +216,7 @@ const legInvariant = (tl, r) => tl === r.legTimeLeft + r.legTime * (r.legCount -
   const sent = [];
   const room = relayRoom(sent, 'R3A', ['A', 'B', 'C']);
   room.start('A');
+  check('⑤ relay choosing 안내: "A님이 제시어를 고르고 있어요."', sysTexts(sent).includes('A님이 제시어를 고르고 있어요.') && !sysTexts(sent).some((t) => t.includes('단어를 고르고')), sysTexts(sent));
   room.chooseWord('A', room.wordOptions[0]);
   room.handleDraw('A', 'start', { tool: 'pen', color: '#000000', size: 5, x: 1, y: 1 });
   const mark = sent.length;

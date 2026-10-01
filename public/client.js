@@ -228,7 +228,9 @@
     galleryThumbs: [],  // 렌더링한 썸네일 dataURL 캐시 (gallery와 같은 인덱스)
     recentChat: [],     // 최근 채팅 3개 { kind, name, text, mine } — 모바일 티커/말풍선/접힌 채팅 바용
     // 이어 그리기: 구간 남은 시간 · 문제 정보(game:drawing.relay) · 내 구간이 시작될 때의 ops 길이(되돌리기 경계) · 내 차례 배너 타이머
-    legTimeLeft: null, relayInfo: null, legStartOps: 0, bannerTimer: null
+    legTimeLeft: null, relayInfo: null, legStartOps: 0, bannerTimer: null,
+    // 이어 그리기 맞히는 사람: 힌트 요청 응답 대기 · 막 맞힌 요소(마스크 반짝임 { idx: true, until })
+    hintPending: false, hintPendingTimer: null, solvedFlash: null, relayWaitTimer: null
   };
 
   var profile = { name: '', emoji: EMOJIS[0], color: AV_COLORS[4] };
@@ -708,12 +710,14 @@
       resetCanvasState(); ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.chosenWord = null;
       ui.turnEnd = null; setTimeLeft(null);
       ui.legTimeLeft = null; ui.relayInfo = null; ui.legStartOps = 0; hideTurnBanner();
+      clearHintPending(); ui.solvedFlash = null;
       // ui.ranking 은 유지 — 결과 화면은 내가 "대기실로 돌아가기"를 누를 때까지 보여야 한다
     }
     var meNow = findPlayer(myId);
     if (meNow && !meNow.atResults && ui.ranking && !ui.resultsPending) ui.ranking = null; // 서버가 결과 확인을 반영하면 정리
     if (state.phase !== 'choosing') { ui.wordOptions = null; ui.chosenWord = null; }
     if (drawing && (state.phase !== 'drawing' || !isDrawer())) cancelLocalStroke(false);
+    if (ui.relayWaitTimer) { clearTimeout(ui.relayWaitTimer); ui.relayWaitTimer = null; } // onChoosing 이 미뤄 둔 그리기를 여기서
     renderAll();
   }
   /** room:state.relay · game:drawing.relay 공통 형식 { order, guesserId, legIndex, legCount } (없거나 이상하면 null) */
@@ -732,8 +736,19 @@
     ui.chosenWord = null; ui.optionsPeek = false; ui.wordPeek = false;
     ui.word = null; ui.wordMask = ''; ui.category = null; ui.turnEnd = null; ui.ranking = null;
     ui.legTimeLeft = null; ui.relayInfo = null; ui.legStartOps = 0; hideTurnBanner();
+    clearHintPending(); ui.solvedFlash = null;
+    // 이어 그리기: 서버는 game:choosing 을 새 문제의 room:state(주자 순서·맞히는 사람)보다 먼저 보낸다. 지난 문제(또는 대기실)의
+    // relay 로 그리면 배치(data-role)·헤더가 한 번 엇갈렸다가 바로 바뀌어 깜빡이므로, 순서가 아직 이 문제 것이 아니면
+    // 곧 올 room:state 가 그리게 둔다(안 오면 0.4초 뒤 그대로 그린다)
+    var relayStale = state.settings.mode === 'relay' && (!state.relay || state.relay.order[0] !== state.drawerId);
+    if (relayStale) state.relay = null;
     resetCanvasState();
     setTimeLeft(p.timeLeft != null ? num(p.timeLeft, 15) : 15, true);
+    if (relayStale) {
+      if (ui.relayWaitTimer) clearTimeout(ui.relayWaitTimer);
+      ui.relayWaitTimer = setTimeout(function () { ui.relayWaitTimer = null; renderAll(); }, 400);
+      return;
+    }
     renderAll();
   }
 
@@ -756,6 +771,7 @@
       ui.relayInfo = { legTime: num(rp.legTime, state.settings.drawTime), totalTime: num(rp.totalTime, 0), hintsUsed: num(rp.hintsUsed, 0), hintsMax: num(rp.hintsMax, state.settings.hints) };
       ui.legTimeLeft = num(rp.legTimeLeft, ui.relayInfo.legTime);
       ui.legStartOps = 0; // 뒤따르는 draw:sync 가 경계를 다시 잡는다(onDrawSync)
+      clearHintPending();
       state.nextDrawerId = state.relay ? (state.relay.order[state.relay.legIndex + 1] || null) : state.nextDrawerId;
     } else { ui.relayInfo = null; ui.legTimeLeft = null; }
     setTimeLeft(p.timeLeft != null ? num(p.timeLeft, 0) : num(state.settings.drawTime, 80), true);
@@ -817,17 +833,26 @@
 
   function onHint(p) {
     if (!p || typeof p.wordMask !== 'string') return;
+    // 이어 그리기 부분 정답: 새로 글자로 바뀐 요소를 잠깐 반짝이게(본인에게만 오는 game:hint)
+    if (inRelay()) {
+      var before = solvedParts(ui.wordMask), after = solvedParts(p.wordMask), fresh = {}, any = false;
+      after.forEach(function (s, i) { if (s && !before[i]) { fresh[i] = true; any = true; } });
+      ui.solvedFlash = any ? { idx: fresh, until: Date.now() + 1200 } : ui.solvedFlash;
+    }
     ui.wordMask = p.wordMask;
     if (typeof p.category === 'string') ui.category = p.category;
     if (ui.relayInfo && typeof p.hintsUsed === 'number') ui.relayInfo.hintsUsed = p.hintsUsed;
+    clearHintPending();
     renderWordArea();
+    renderRelayHint();
+    renderChatInput();
   }
 
   function onTurnEnd(p) {
     if (!p || typeof p !== 'object') return;
     state.phase = 'turnEnd';
     cancelLocalStroke(false);
-    hideTurnBanner(); ui.legTimeLeft = null;
+    hideTurnBanner(); ui.legTimeLeft = null; clearHintPending();
     ui.turnEnd = {
       word: p.word != null ? String(p.word) : '—',
       reason: typeof p.reason === 'string' ? p.reason : 'time',
@@ -872,10 +897,21 @@
     ui.turnEnd = null;
     ui.gameOverDrawer = p && p.drawer && typeof p.drawer === 'object' ? { name: String(p.drawer.name || '?'), avatar: safeAvatar(p.drawer.avatar) } : null;
     if (Array.isArray(p && p.gallery)) {
+      var relayGame = p.mode === 'relay';
       ui.gallery = p.gallery.filter(function (g) { return g && typeof g === 'object' && typeof g.word === 'string'; }).map(function (g) {
+        var drawerName = String(g.drawerName || playerName(g.drawerId, '?'));
+        // 이어 그리기: 공동 작가(drawerIds 순서)와 맞히는 사람. 이름은 서버가 문제 끝에 기록한 drawerNames 우선(나간 사람도 남는다)
+        var ids = Array.isArray(g.drawerIds) && g.drawerIds.length ? g.drawerIds.slice() : [g.drawerId];
+        var names = ids.map(function (id, i) {
+          var n = Array.isArray(g.drawerNames) && typeof g.drawerNames[i] === 'string' && g.drawerNames[i] ? g.drawerNames[i] : '';
+          return n || (i === 0 ? drawerName : playerName(id, '?'));
+        });
         return {
           round: num(g.round, 0), word: String(g.word), category: g.category ? String(g.category) : '',
-          drawerId: g.drawerId, drawerName: String(g.drawerName || playerName(g.drawerId, '?')), guessed: num(g.guessed, 0),
+          drawerId: g.drawerId, drawerName: drawerName, guessed: num(g.guessed, 0),
+          relay: relayGame, drawerIds: ids, drawerNames: names,
+          guesserId: g.guesserId == null ? null : g.guesserId,
+          guesserName: g.guesserId == null ? '' : String(g.guesserName || playerName(g.guesserId, '?')),
           ops: Array.isArray(g.ops) ? g.ops.map(sanitizeOp).filter(Boolean) : [], trimmed: !!g.trimmed
         };
       });
@@ -919,8 +955,12 @@
     var r = (ui.ranking || []).filter(function (x) { return x.id === id; })[0]; if (r && r.avatar) return r.avatar;
     return null;
   }
+  /** 갤러리 캡션 조각: 그린 사람("✏️ 민수" / 이어 그리기 "🖍 A·B·C"), 맞힘("2명 맞힘" / "🎯 D 맞힘"), 번호("1라운드" / "1번 문제") */
+  function galleryByText(g) { return g.relay ? '🖍 ' + g.drawerNames.join('·') : '✏️ ' + g.drawerName; }
+  function galleryGuessText(g) { return g.relay ? '🎯 ' + (g.guesserName || '?') + (g.guessed ? ' 맞힘' : ' 못 맞힘') : g.guessed + '명 맞힘'; }
+  function galleryRoundText(g) { return g.round ? (g.relay ? g.round + '번 문제' : g.round + '라운드') : ''; }
   function galleryCaption(g) {
-    return (g.round ? g.round + '라운드 · ' : '') + '정답 ' + g.word + ' · ✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘';
+    return (g.round ? galleryRoundText(g) + ' · ' : '') + '정답 ' + g.word + ' · ' + galleryByText(g) + ' · ' + galleryGuessText(g);
   }
   function safeFile(s) { return String(s).replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40); }
   function downloadDataUrl(dataUrl, filename) {
@@ -960,7 +1000,7 @@
     c2.fillStyle = PENCIL; c2.font = 'bold 26px "Pretendard", "Malgun Gothic", sans-serif'; c2.textBaseline = 'middle';
     c2.fillText(g.word + (g.category ? '  (' + g.category + ')' : ''), 20, H + 26, textMax);
     c2.fillStyle = '#6c6f85'; c2.font = '16px "Pretendard", "Malgun Gothic", sans-serif';
-    c2.fillText('✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘' + (g.round ? ' · ' + g.round + '라운드' : '') + ' · 이게 뭔 그림인데?', 20, H + 54, textMax);
+    c2.fillText(galleryByText(g) + ' · ' + galleryGuessText(g) + (g.round ? ' · ' + galleryRoundText(g) : '') + ' · 이게 뭔 그림인데?', 20, H + 54, textMax);
     return cv.toDataURL('image/png');
   }
   /** 전체를 한 장에 모은 시트 PNG (3열). 아래 여백에 워드마크 */
@@ -981,10 +1021,12 @@
       c2.fillStyle = '#ffffff'; c2.fillRect(x, y, cellW, cellH + cap);
       c2.drawImage(renderOpsToCanvas(g.ops), x, y, cellW, cellH);
       c2.fillStyle = '#f3ecff'; c2.fillRect(x, y + cellH, cellW, cap);
+      // 이어 그리기는 제시어(조합)·공동 작가가 길어 칸 절반씩 넘지 않게(넘치면 fillText 가 가로로 줄인다)
       c2.fillStyle = '#2b2d42'; c2.font = 'bold 17px "Pretendard", "Malgun Gothic", sans-serif';
-      c2.fillText(g.word, x + 12, y + cellH + cap / 2);
+      if (g.relay) c2.fillText(g.word, x + 12, y + cellH + cap / 2, cellW * 0.5 - 16); else c2.fillText(g.word, x + 12, y + cellH + cap / 2);
       c2.fillStyle = '#6c6f85'; c2.font = '13px "Pretendard", "Malgun Gothic", sans-serif'; c2.textAlign = 'right';
-      c2.fillText('✏️ ' + g.drawerName + ' · ' + g.guessed + '명 맞힘', x + cellW - 12, y + cellH + cap / 2);
+      if (g.relay) c2.fillText(galleryByText(g) + ' · 🎯 ' + (g.guesserName || '?'), x + cellW - 12, y + cellH + cap / 2, cellW * 0.5 - 16);
+      else c2.fillText(galleryByText(g) + ' · ' + galleryGuessText(g), x + cellW - 12, y + cellH + cap / 2);
       c2.textAlign = 'left';
     });
     return cv.toDataURL('image/png');
@@ -1050,11 +1092,19 @@
       if (g.category) wd.appendChild(el('span', 'gallery-cat', g.category));
       meta.appendChild(wd);
       var sub = el('div', 'gallery-sub');
-      var by = el('span', 'gallery-by');
-      if (g.round) by.appendChild(document.createTextNode(g.round + 'R · '));
-      by.appendChild(avatarNode(avatarOf(g.drawerId) || { emoji: '✏️', color: '#f3ecff' }, 'gallery-av'));
-      by.appendChild(el('span', 'gallery-drawer', g.drawerName));
-      by.appendChild(document.createTextNode(' · ' + g.guessed + '명 맞힘'));
+      var by = el('span', 'gallery-by' + (g.relay ? ' relay' : ''));
+      if (g.relay) {
+        // 이어 그리기: 공동 작가 "🖍 A·B·C" · 맞히는 사람 "🎯 D 맞힘". 좁으면 말줄임, 전체는 title 로
+        card.title = galleryCaption(g);
+        if (g.round) by.appendChild(el('span', 'gallery-no', g.round + '번 ·'));
+        by.appendChild(el('span', 'gallery-drawer', galleryByText(g)));
+        by.appendChild(el('span', 'gallery-guesser' + (g.guessed ? ' got' : ''), galleryGuessText(g)));
+      } else {
+        if (g.round) by.appendChild(document.createTextNode(g.round + 'R · '));
+        by.appendChild(avatarNode(avatarOf(g.drawerId) || { emoji: '✏️', color: '#f3ecff' }, 'gallery-av'));
+        by.appendChild(el('span', 'gallery-drawer', g.drawerName));
+        by.appendChild(document.createTextNode(' · ' + g.guessed + '명 맞힘'));
+      }
       sub.appendChild(by);
       var dl = el('button', 'btn btn-secondary btn-sm', 'PNG 저장'); dl.type = 'button';
       dl.addEventListener('click', function () {
@@ -1074,8 +1124,12 @@
   // ------------------------------------------------------------------
   var MAX_DRAWINGS = 100, SAVED_GAMES_KEY = 'drawguess.savedGames';
   var vault = { rows: null, loading: false, unavailable: false, error: '', loadedAt: 0, viewing: null, busy: false };
+  /** 내가 그린 턴(PROTOCOL "로그인"): 이어 그리기는 drawerIds 에 내가 있으면(공동 작품 — 주자마다 각자 보관), 그 밖은 drawerId */
   function myGalleryItems() {
-    return (ui.gallery || []).filter(function (g) { return g.drawerId === myId && g.ops && g.ops.length; });
+    return (ui.gallery || []).filter(function (g) {
+      var mine = g.relay ? g.drawerIds.indexOf(myId) !== -1 : g.drawerId === myId;
+      return mine && g.ops && g.ops.length;
+    });
   }
   function gallerySig(items) {
     return (state.roomCode || '') + ':' + items.map(function (g) { return g.round + '/' + g.word + '/' + g.ops.length; }).join('|');
@@ -1472,6 +1526,8 @@
     var ph = state.phase, r = state.relay;
     var show = inRelay() && (ph === 'drawing' || ph === 'choosing');
     rb.hidden = !show;
+    var row = $('relay-row'); if (row) row.hidden = !show;
+    renderRelayHint();
     if (!show) { if (rb.childElementCount) rb.innerHTML = ''; return; }
     var dn = playerName(state.drawerId, ui.drawerName || '');
     var key, build;
@@ -1496,6 +1552,47 @@
     if (rb.getAttribute('data-key') === key) return;
     rb.setAttribute('data-key', key); rb.innerHTML = '';
     build();
+  }
+
+  // ---- 이어 그리기: 맞히는 사람의 "초성 힌트" 버튼(마스크 아래 · 모바일은 헤더 1행) ----
+  var HINT_PENALTY = 25; // 힌트 1회당 정답 점수 −25%(PROTOCOL 점수 절)
+  /** 마스크에 아직 안 열린 칸('_')이 있는지 — 다 열렸으면(초성·맞힌 요소) 서버가 무시하므로 버튼을 잠근다 */
+  function maskHasHidden(mask) { return String(mask || '').split(' ').some(function (t) { return t === '_'; }); }
+  /** { max, used, left } — drawing 중엔 game:drawing/baton/hint 의 hintsUsed·hintsMax, choosing 중엔 설정값 */
+  function relayHintState() {
+    var max = ui.relayInfo ? num(ui.relayInfo.hintsMax, 0) : num(state.settings.hints, 0);
+    var used = ui.relayInfo ? num(ui.relayInfo.hintsUsed, 0) : 0;
+    return { max: max, used: used, left: Math.max(0, max - used) };
+  }
+  function renderRelayHint() {
+    var b = $('btn-relay-hint'); if (!b) return;
+    var ph = state.phase, hs = relayHintState();
+    // choosing 중에도 자리를 지켜 둔다(비활성) — drawing 이 시작될 때 헤더가 출렁이지 않게
+    var show = isRelayGuesser() && (ph === 'drawing' || ph === 'choosing') && hs.max > 0;
+    b.hidden = !show;
+    var tb = document.querySelector('#view-room .topbar'); if (tb) tb.classList.toggle('has-relay-hint', show);
+    if (!show) return;
+    b.disabled = !(ph === 'drawing' && hs.left > 0 && !ui.hintPending && maskHasHidden(ui.wordMask));
+    var long = hs.left > 0 ? '초성 힌트 (남은 ' + hs.left + '회 · −' + HINT_PENALTY + '%)' : '초성 힌트 (남은 0회)';
+    var short = hs.left > 0 ? '힌트 ' + hs.left + ' · −' + HINT_PENALTY + '%' : '힌트 0';
+    var ln = $('relay-hint-long'), sn = $('relay-hint-short');
+    if (ln && ln.textContent !== long) ln.textContent = long;
+    if (sn && sn.textContent !== short) sn.textContent = short;
+    b.setAttribute('aria-label', long);
+    b.title = (ph === 'choosing' ? '그림이 시작되면 누를 수 있어요. ' : '') + '누르면 아직 안 보이는 글자 하나의 초성이 열려요. 쓸 때마다 정답 점수 −' + HINT_PENALTY + '%'
+      + (hs.used ? ' · 지금까지 ' + hs.used + '번(−' + Math.min(100, hs.used * HINT_PENALTY) + '%)' : '');
+  }
+  function requestRelayHint() {
+    var b = $('btn-relay-hint'); if (!b || b.hidden || b.disabled) return;
+    emit('hint:request'); // ack 없음 — 응답은 game:hint { wordMask, hintsUsed }
+    ui.hintPending = true; // 연타로 두 번 쓰지 않게 응답(또는 2초)까지 잠근다
+    if (ui.hintPendingTimer) clearTimeout(ui.hintPendingTimer);
+    ui.hintPendingTimer = setTimeout(function () { ui.hintPending = false; ui.hintPendingTimer = null; renderRelayHint(); }, 2000);
+    renderRelayHint();
+  }
+  function clearHintPending() {
+    ui.hintPending = false;
+    if (ui.hintPendingTimer) { clearTimeout(ui.hintPendingTimer); ui.hintPendingTimer = null; }
   }
 
   function renderWordArea() {
@@ -1544,17 +1641,30 @@
   // wordMask: 글자 사이 공백 1개, 단어 사이 공백 3개 → 토큰 분해 (빈 토큰 = 단어 경계)
   // 이어 그리기 조합 마스크는 요소 사이에 ' · ' 가 있다(예 '_ _ _ · _ _'). 요소마다 묶음(.mask-part)으로 만들어 좁은 화면에서는 요소 단위로 줄바꿈
   var PART_SEP = ' · ';
+  /**
+   * 조합 마스크의 요소별 "맞힘" 여부. 맞힌 요소는 서버가 글자 그대로 보낸다(본인만). 초성 힌트는 자모(ㄱ~ㅎ)라
+   * 칸이 모두 열려 있고 자모가 하나도 없으면 맞힌 요소다(영문·숫자 요소는 힌트로 글자 수−1 까지만 열리므로 다 열렸으면 맞힌 것)
+   */
+  function solvedParts(mask) {
+    return String(mask || '').split(PART_SEP).map(function (part) {
+      var t = part.split(' ').filter(function (x) { return x !== ''; });
+      return t.length > 0 && t.every(function (x) { return x !== '_' && !/[ㄱ-ㆎ]/.test(x); });
+    });
+  }
   function maskNode(mask, wordLength) {
     var wrap = el('span', 'mask-wrap');
     var m = el('span', 'mask');
     var parts = String(mask).split(PART_SEP);
     var multi = parts.length > 1;
     var boxes = 0, words = 1;
+    var solved = multi ? solvedParts(mask) : [];
+    var flash = ui.solvedFlash && Date.now() < ui.solvedFlash.until ? ui.solvedFlash.idx : null;
     parts.forEach(function (part, pi) {
       var holder = m;
       if (multi) {
         if (pi > 0) m.appendChild(el('span', 'mask-sep', '·'));
-        holder = el('span', 'mask-part'); m.appendChild(holder);
+        // 맞힌 요소는 초록으로, 방금 맞혔으면 한 번 튀어 오른다
+        holder = el('span', 'mask-part' + (solved[pi] ? ' solved' : '') + (solved[pi] && flash && flash[pi] ? ' just-solved' : '')); m.appendChild(holder);
       }
       var tokens = part.split(' ');
       var gapPending = false, partBoxes = 0;
@@ -1695,6 +1805,7 @@
         var dp = findPlayer(state.drawerId);
         var drawerAway = dp && dp.connected === false && (state.phase === 'drawing' || state.phase === 'choosing');
         var txt = drawerAway ? '📶 ' + dn + '님 연결을 기다리고 있어요'
+          : inRelay() ? relayStatusText(dn)
           : state.phase === 'drawing' ? '✏️ ' + dn + '님이 그리고 있어요'
           : state.phase === 'choosing' ? '✏️ ' + dn + '님의 차례예요'
           : '⏳ 다음 턴을 준비하고 있어요';
@@ -1716,6 +1827,14 @@
     }
     if (canvas) canvas.classList.toggle('can-draw', canDraw());
     if (lobby) { renderModePanel(); renderSettings(); }
+  }
+
+  /** 이어 그리기 상태 띠(맞히는 사람·관전자): "🎯 내가 맞혀요 · 🖍 ○○님이 이어 그리는 중" */
+  function relayStatusText(dn) {
+    var ph = state.phase;
+    if (ph === 'turnEnd') return '⏳ 다음 문제를 준비하고 있어요';
+    var who = isRelayGuesser() ? '🎯 내가 맞혀요 · ' : '👀 관전 중 · ';
+    return who + (ph === 'choosing' ? dn + '님이 제시어를 고르고 있어요' : '🖍 ' + dn + '님이 이어 그리는 중');
   }
 
   /** 이어 그리기: 차례가 아닌 주자의 툴바에 잠김 표시 "🔒 ○○님 차례예요" */
@@ -1998,8 +2117,11 @@
     var ci = $('chat-input'); if (!ci) return;
     // 이어 그리기: 주자의 채팅은 주자끼리만(guessed-chat 채널). 맞히는 사람은 drawing 중 정답 판정, 관전자는 판정 없음
     if (inRelay() && (state.phase === 'choosing' || state.phase === 'drawing')) {
+      // 맞히는 사람: 요소를 나눠 맞혀도 되므로 맞힌 게 있으면 남은 개수를 알려 준다. 관전자(중간 참가)는 판정 없음
+      var sp = solvedParts(ui.wordMask), left = sp.length > 1 ? sp.filter(function (x) { return !x; }).length : 0;
       ci.placeholder = isRunner() ? '주자끼리만 보여요…'
-        : isRelayGuesser() && state.phase === 'drawing' ? '정답을 입력하세요…' : '메시지를 입력하세요…';
+        : isRelayGuesser() ? (state.phase !== 'drawing' ? '🎯 곧 그림이 시작돼요…' : left && left < sp.length ? '🎯 남은 ' + left + '개도 맞혀 보세요…' : '🎯 정답을 입력하세요…')
+        : '관전 중 · 메시지를 입력하세요…';
       return;
     }
     if (state.phase === 'drawing' && !isDrawer()) {
@@ -2030,7 +2152,7 @@
     var text = m.text == null ? '' : String(m.text);
     var safe = typeof m.textSafe === 'string' && m.textSafe !== text ? m.textSafe : null; // 서버가 욕설을 가린 판
     var atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-    var node;
+    var node, peekNote = ''; // 모바일 요약(말풍선·티커)에 덧붙일 부분 정답 문구
     if (kind === 'system') {
       node = el('div', 'msg msg-system', text);
       if (text.indexOf('입장했습니다') !== -1) SFX.play('join');
@@ -2039,7 +2161,12 @@
       node = el('div', 'msg msg-correct'); node.appendChild(el('span', 'msg-icon', '🎉')); node.appendChild(el('span', 'msg-text', text));
       SFX.play(m.id === myId ? 'correctSelf' : 'correctOther');
     } else if (kind === 'close') {
-      node = el('div', 'msg msg-close'); node.appendChild(el('span', 'msg-icon', '🔥')); node.appendChild(msgText(text, safe)); node.appendChild(el('span', 'msg-note', '거의 맞았어요!'));
+      // 이어 그리기 부분 정답: 서버가 partial { solved, total } 을 붙여 보낸다(보낸 사람에게만) → "3개 중 1개 맞았어요!"
+      var pt = m.partial && typeof m.partial === 'object' ? m.partial : null;
+      var partial = !!(pt && num(pt.total, 0) > 0);
+      var note = partial ? num(pt.total, 0) + '개 중 ' + num(pt.solved, 0) + '개 맞았어요!' : '거의 맞았어요!';
+      if (partial) peekNote = note;
+      node = el('div', 'msg msg-close' + (partial ? ' msg-partial' : '')); node.appendChild(el('span', 'msg-icon', partial ? '🎯' : '🔥')); node.appendChild(msgText(text, safe)); node.appendChild(el('span', 'msg-note', note));
       SFX.play('close');
     }
     else if (kind === 'guessed-chat') {
@@ -2057,7 +2184,7 @@
     while (list.children.length > 300) list.removeChild(list.firstChild);
     if (atBottom) list.scrollTop = list.scrollHeight;
     // 모바일 요약(티커 · 말풍선 · 접힌 채팅 바)용 최근 메시지
-    ui.recentChat.push({ kind: kind, name: m.name ? String(m.name) : '', text: safe && prefs.profanityFilter ? safe : text, raw: text, safe: safe, mine: !!(m.id && m.id === myId) });
+    ui.recentChat.push({ kind: kind, name: m.name ? String(m.name) : '', text: safe && prefs.profanityFilter ? safe : text, raw: text, safe: safe, mine: !!(m.id && m.id === myId), note: peekNote });
     while (ui.recentChat.length > 3) ui.recentChat.shift();
     renderChatPeek(true);
   }
@@ -2950,6 +3077,7 @@
       b.addEventListener('click', function () { setPref(b.getAttribute('data-pref'), b.getAttribute('aria-checked') !== 'true'); });
     });
     renderPrefSwitches();
+    var rh = $('btn-relay-hint'); if (rh) rh.addEventListener('click', requestRelayHint); // 이어 그리기 맞히는 사람 초성 힌트
     var go = $('btn-gallery-open'); if (go) go.addEventListener('click', openGallery);
     var rd = $('btn-results-done'); if (rd) rd.addEventListener('click', function () {
       ui.resultsPending = false; ui.ranking = null; emit('results:done'); renderAll();
@@ -3286,7 +3414,9 @@
   }
 
   /** 채팅 요약: 접힌 채팅 바(마지막 메시지) · 출제자 티커(최신 1개) · 컴팩트 말풍선(최근 3개). fresh=true 면 티커를 4초간 진하게 */
-  function summarize(m) { return (m.kind === 'chat' || m.kind === 'guessed-chat') && m.name ? m.name + ': ' + m.text : m.text; }
+  function summarize(m) { return (m.kind === 'chat' || m.kind === 'guessed-chat') && m.name ? m.name + ': ' + m.text : peekText(m); }
+  /** 요약에 쓸 본문: 이어 그리기 부분 정답이면 "고양이 · 3개 중 1개 맞았어요!" */
+  function peekText(m) { return m.note ? m.text + ' · ' + m.note : m.text; }
   function kindClass(kind) { return kind === 'correct' ? 'kind-correct' : kind === 'close' ? 'kind-close' : kind === 'system' ? 'kind-system' : kind === 'guessed-chat' ? 'kind-guessed' : 'kind-chat'; }
   function renderChatPeek(fresh) {
     var recent = ui.recentChat, last = recent[recent.length - 1];
@@ -3298,7 +3428,7 @@
       tk.appendChild(el('span', 'tk-icon', last ? (last.kind === 'correct' ? '🎉' : last.kind === 'close' ? '🔥' : last.kind === 'guessed-chat' ? '🔒' : '💬') : '💬'));
       var tt = el('span', 'tk-text');
       if (last && (last.kind === 'chat' || last.kind === 'guessed-chat') && last.name) { tt.appendChild(el('span', 'tk-name', last.name)); tt.appendChild(document.createTextNode(last.text)); }
-      else tt.textContent = last ? last.text : '채팅 열기';
+      else tt.textContent = last ? peekText(last) : '채팅 열기';
       tk.appendChild(tt);
       if (fresh && last) {
         tk.classList.add('fresh');
@@ -3315,7 +3445,7 @@
         recent.forEach(function (m) {
           var b = el('div', 'chat-bubble ' + kindClass(m.kind) + (m.mine ? ' mine' : ''));
           if ((m.kind === 'chat' || m.kind === 'guessed-chat') && m.name) b.appendChild(el('span', 'bb-name', m.name));
-          b.appendChild(el('span', 'bb-text', m.text));
+          b.appendChild(el('span', 'bb-text', peekText(m)));
           dc.appendChild(b);
         });
       }
@@ -3326,7 +3456,7 @@
       if (mobileMq.matches) recent.forEach(function (m) {
         var b = el('div', 'chat-bubble ' + kindClass(m.kind) + (m.mine ? ' mine' : ''));
         if ((m.kind === 'chat' || m.kind === 'guessed-chat') && m.name) b.appendChild(el('span', 'bb-name', m.name));
-        b.appendChild(el('span', 'bb-text', m.text));
+        b.appendChild(el('span', 'bb-text', peekText(m)));
         bb.appendChild(b);
       });
     }

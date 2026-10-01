@@ -841,6 +841,25 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await v.evaluate(() => window.__mockAuth.tables.drawings.length === 0 && Object.keys(window.__mockAuth.storage.drawings).length === 0), '그림 삭제: 행 · 파일 모두 삭제');
     check((await v.locator('#drawings-grid .drawing-item').count()) === 0 && (await txt(v, '#drawings-count')) === '0 / 100', '그림 삭제: 빈 안내 · 0 / 100');
 
+    // 이어 그리기(R5): 공동 작품은 drawerIds 에 내가 있으면 보관(첫 주자가 아니어도), 맞히기만 한 문제는 보관하지 않음
+    await v.click('#btn-me-back');
+    await v.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    await v.click('#btn-create');
+    await v.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
+    await v.evaluate((ops) => window.__mockFire('game:over', {
+      mode: 'relay', ranking: [{ id: 'me', name: '나', avatar: { emoji: '😀', color: '#bae1ff' }, score: 300 }],
+      gallery: [
+        { round: 1, word: '고양이 · 축구', category: null, drawerId: 'p2', drawerIds: ['p2', 'me'], drawerNames: ['토끼', '나'], drawerName: '토끼', guesserId: 'p3', guesserName: '곰', guessed: 1, ops },
+        { round: 2, word: '사자 · 피자', category: null, drawerId: 'p3', drawerIds: ['p3', 'p2'], drawerNames: ['곰', '토끼'], drawerName: '곰', guesserId: 'me', guesserName: '나', guessed: 1, ops },
+      ],
+    }), myOps);
+    await v.waitForSelector('#results-save.rs-saved', { timeout: 5000 }).catch(() => {});
+    const rv = await v.evaluate(() => window.__mockAuth.tables.drawings.map((r) => r.word));
+    check(rv.length === 1 && rv[0] === '고양이 · 축구' && (await txt(v, '#results-save')).includes('1장을 보관함에 저장'), '이어 그리기: 내가 주자로 그린 문제만 보관(두 번째 주자여도 · 맞히기만 한 문제 제외)', JSON.stringify(rv));
+    await v.evaluate(() => { window.__mockAuth.tables.drawings.length = 0; const st = window.__mockAuth.storage.drawings; Object.keys(st).forEach((k) => delete st[k]); });
+    await leaveToMain(v);
+    await openGalleryTab(v);
+
     // 100장 가득: 오래된 그림 받고 바꾸기
     await v.evaluate(() => {
       const t = window.__mockAuth.tables.drawings;

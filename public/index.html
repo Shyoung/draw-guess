@@ -258,8 +258,12 @@
       <div class="topbar-center">
         <div id="round-indicator" class="round-indicator">대기실</div>
         <div id="word-area" class="word-area" aria-live="polite"></div>
-        <!-- 이어 그리기 상단 띠(데스크톱): 현재 주자 (구간/전체) · 다음 주자 · 구간 남은 시간. 모바일은 턴 띠가 같은 내용 -->
-        <div id="relay-band" class="relay-band" hidden></div>
+        <!-- 이어 그리기 줄(마스크 아래): 상단 띠(데스크톱 — 현재 주자 (구간/전체) · 다음 주자 · 구간 남은 시간. 모바일은 턴 띠가 같은 내용)
+             + 맞히는 사람의 초성 힌트 버튼(모바일은 헤더 1행 타이머 왼쪽으로 — CSS) -->
+        <div id="relay-row" class="relay-row" hidden>
+          <div id="relay-band" class="relay-band" hidden></div>
+          <button id="btn-relay-hint" class="btn btn-sm relay-hint" type="button" hidden><span class="rh-ico" aria-hidden="true">💡</span><span id="relay-hint-long" class="rh-long"></span><span id="relay-hint-short" class="rh-short" aria-hidden="true"></span></button>
+        </div>
       </div>
 
       <div class="topbar-right">

@@ -141,6 +141,11 @@ async function relayScenario(browser) {
   await pa.selectOption('#set-drawTime', '15');
   await pb.waitForFunction(() => window.__dg.state.settings.drawTime === 15, null, { timeout: 3000 }).catch(() => {});
 
+  // data-role 이 바뀔 때마다(같은 값으로 다시 써도) 그때의 phase 와 함께 기록 — 배치 깜빡임 검사
+  await Promise.all([pa, pb, pc].map((pg) => pg.evaluate(() => {
+    const v = document.getElementById('view-room'); window.__roles = [];
+    new MutationObserver(() => window.__roles.push({ role: v.getAttribute('data-role'), ph: v.getAttribute('data-phase') })).observe(v, { attributes: true, attributeFilter: ['data-role', 'data-phase'] });
+  })));
   await pa.click('#btn-start');
   const pages = [pa, pb, pc], nicks = ['릴레이A', '릴레이B', '릴레이C'];
   let chooser = null, word = null, optTexts = [];
@@ -197,6 +202,45 @@ async function relayScenario(browser) {
   const gBadge = await first.locator(`#player-list li[data-id="${ids[gi]}"] .badge-guesser`).textContent().catch(() => '');
   check(gBadge === '🎯', 'relay: 플레이어 목록 맞히는 사람 아바타 🎯', gBadge);
   await second.screenshot({ path: path.join(SHOTS, 'e2e-relay-runner-locked.png') });
+
+  // ---- R5 맞히는 사람: 🎯 상태 띠 · 초성 힌트 버튼(남은 횟수 · −25%, 다 쓰면 비활성) ----
+  const hintView = (pg) => pg.evaluate(() => {
+    const b = document.getElementById('btn-relay-hint'), r = b.getBoundingClientRect(), wa = document.getElementById('word-area').getBoundingClientRect();
+    return { shown: !b.hidden && b.offsetParent !== null, disabled: b.disabled, text: b.textContent, label: b.getAttribute('aria-label') || '', below: r.top >= wa.bottom - 1,
+      used: window.__dg.ui.relayInfo ? window.__dg.ui.relayInfo.hintsUsed : null, revealed: document.querySelectorAll('#word-area .mask-box.revealed').length,
+      status: document.getElementById('draw-status-text').textContent };
+  });
+  const h0 = await hintView(guesser);
+  check(h0.shown && !h0.disabled && h0.text.includes('초성 힌트 (남은 3회 · −25%)') && h0.below, 'relay 맞히는 사람: 마스크 아래 "초성 힌트 (남은 3회 · −25%)" 버튼(활성)', JSON.stringify(h0));
+  check(h0.status.includes('🎯') && h0.status.includes(nickOf(first)), 'relay 맞히는 사람: 상태 띠 "🎯 내가 맞혀요 · 🖍 ○○님이 이어 그리는 중"', h0.status);
+  check(!(await hintView(first)).shown && !(await hintView(second)).shown, 'relay: 주자에게는 힌트 버튼 없음');
+  await guesser.click('#btn-relay-hint');
+  await guesser.waitForFunction(() => window.__dg.ui.relayInfo && window.__dg.ui.relayInfo.hintsUsed === 1, null, { timeout: 3000 }).catch(() => {});
+  await sleep(200);
+  const h1 = await hintView(guesser);
+  check(h1.used === 1 && h1.text.includes('남은 2회') && h1.revealed >= 1 && !h1.disabled, 'relay 힌트 1회: "남은 2회" · 마스크에 초성 1칸', JSON.stringify(h1));
+  check((await second.locator('#word-area .mask-box.revealed').count()) >= 1 && (await first.locator('#word-area .mask-box.revealed').count()) === 0, 'relay 힌트: 차례 전 주자 마스크도 갱신(현재 주자는 제시어라 그대로)');
+  for (let n = 2; n <= 3; n++) {
+    await guesser.click('#btn-relay-hint');
+    await guesser.waitForFunction((k) => window.__dg.ui.relayInfo && window.__dg.ui.relayInfo.hintsUsed === k, n, { timeout: 3000 }).catch(() => {});
+  }
+  await sleep(200);
+  const h3 = await hintView(guesser);
+  check(h3.used === 3 && h3.disabled && h3.text.includes('남은 0회'), 'relay 힌트 3회(최대): "남은 0회" · 비활성', JSON.stringify(h3));
+  // 부분 정답: 첫 요소만 보내면 본인에게만 "2개 중 1개 맞았어요!" + 그 요소가 마스크에서 글자로
+  const parts = word.split(' · ');
+  const runnerChatBefore = await first.locator('#chat-list').textContent();
+  await say(guesser, parts[0]);
+  await guesser.waitForSelector('#chat-list .msg-partial', { timeout: 3000 }).catch(() => {});
+  await sleep(200);
+  const partialMsg = await guesser.locator('#chat-list .msg-partial').last().textContent().catch(() => '');
+  check(partialMsg.includes(parts.length + '개 중 1개 맞았어요!'), `relay 부분 정답: 보낸 사람에게 "${parts.length}개 중 1개 맞았어요!"`, partialMsg);
+  const solvedPart = await guesser.evaluate(() => { const s = document.querySelector('#word-area .mask-part.solved'); return s ? s.textContent.replace(/\s+/g, '') : ''; });
+  check(solvedPart === parts[0].replace(/\s+/g, '') && (await guesser.locator('#word-area .mask-part.solved').count()) === 1, 'relay 부분 정답: 맞힌 요소만 마스크에서 글자로(초록)', solvedPart);
+  check((await guesser.getAttribute('#chat-input', 'placeholder')).includes('남은 ' + (parts.length - 1) + '개'), 'relay 부분 정답: 입력창 "🎯 남은 n개도 맞혀 보세요…"', await guesser.getAttribute('#chat-input', 'placeholder'));
+  const runnerChatAfter = await first.locator('#chat-list').textContent();
+  check(!runnerChatAfter.slice(runnerChatBefore.length).includes('맞았어요') && (await second.locator('#word-area .mask-part.solved').count()) === 0, 'relay 부분 정답: 다른 사람에게는 안내·공개 없음');
+  await guesser.screenshot({ path: path.join(SHOTS, 'e2e-relay-guesser-partial.png') });
 
   // 주자 채팅은 주자끼리만
   await say(second, '주자비밀말');
@@ -262,21 +306,85 @@ async function relayScenario(browser) {
   const reasonOther = await first.textContent('#turnend-reason').catch(() => '');
   check(reason.includes('🎯') && reason.includes('맞혔어요') && reasonOther.includes(nicks[gi]), 'relay: 정답 → 턴 종료 "🎯 ○○님이 맞혔어요!"', `${reason} | ${reasonOther}`);
   check((await first.textContent('#turnend-word')).includes(word), 'relay: 턴 종료 오버레이에 조합 제시어', await first.textContent('#turnend-word'));
+  // 힌트 3회 감점: (100 + 300 × 남은/전체) × (1 − 0.75) → 25~100점, 구간을 가진 주자 둘은 200
+  const deltaOf = (pg, nick) => pg.evaluate((nk) => { const r = [...document.querySelectorAll('#turnend-deltas .delta-row')].find((x) => x.querySelector('.dname').textContent.startsWith(nk)); return r ? Number(r.querySelector('.delta').textContent.replace('+', '')) : null; }, nick);
+  const dG = await deltaOf(first, nickOf(guesser)), dF = await deltaOf(first, nickOf(first)), dS = await deltaOf(first, nickOf(second));
+  check(dG >= 50 && dG <= 100 && dF === 200 && dS === 200, 'relay 점수: 힌트 3회 → 맞히는 사람 ×0.25(최소 50) · 주자 각 200', `${dG} / ${dF} / ${dS}`);
   // 다음 문제: 순서가 한 칸 밀려 맞히는 사람이 바뀌고, 배치도 문제 단위로 바뀐다
   const relay2 = await guesser.waitForFunction((g) => { const r = window.__dg.state.relay; return r && window.__dg.state.round === 2 && r.guesserId !== g ? r : null; }, relay.guesserId, { timeout: 12000 }).then((h) => h.jsonValue()).catch(() => null);
   check(!!relay2 && relay2.guesserId === relay.order[0], 'relay: 2번 문제는 첫 주자였던 사람이 맞힘', relay2);
+  const probs = [relay]; // 문제별 { order, guesserId } — 배치 깜빡임 검사용
   if (relay2) {
     const g2 = pageOf(relay2.guesserId);
     check(await g2.evaluate(() => document.getElementById('view-room').getAttribute('data-role')) === 'guesser'
       && await guesser.evaluate(() => document.getElementById('view-room').getAttribute('data-role')) === 'drawer', 'relay: 2번 문제 배치 전환(맞히는 사람 ↔ 주자)');
+    // 2·3번 문제: 첫 주자가 고르면 맞히는 사람이 곧바로 정답(첫 구간에서 끝 → 공동 작가 1명)
+    for (let q = 2; q <= 3; q++) {
+      const rq = await pa.waitForFunction((n) => { const s = window.__dg.state; return s.round === n && s.relay && s.phase === 'choosing' ? s.relay : null; }, q, { timeout: 12000 }).then((h) => h.jsonValue()).catch(() => null);
+      if (!rq) { check(false, `relay: ${q}번 문제 시작`); break; }
+      probs.push(rq);
+      const ch = pageOf(rq.order[0]), gq = pageOf(rq.guesserId);
+      await ch.waitForSelector('#word-options .word-option:not([disabled])', { timeout: 5000 }).catch(() => {});
+      const wq = (await ch.locator('#word-options .word-option').first().textContent().catch(() => '')).trim();
+      if (q === 2) {
+        const sys = await gq.locator('#chat-list').textContent();
+        check(sys.includes(nickOf(ch) + '님이 제시어를 고르고 있어요.'), 'relay: choosing 시스템 메시지 "○○님이 제시어를 고르고 있어요."', sys.slice(-60));
+      }
+      await ch.locator('#word-options .word-option').first().click().catch(() => {});
+      await gq.waitForFunction(() => window.__dg.state.phase === 'drawing', null, { timeout: 5000 }).catch(() => {});
+      if (q === 2) {
+        // 문제가 바뀌면 힌트 수도 새로: 남은 3회
+        const hq = await hintView(gq);
+        check(hq.shown && !hq.disabled && hq.text.includes('남은 3회'), 'relay: 다음 문제 맞히는 사람 힌트 버튼 "남은 3회"로 새로', JSON.stringify(hq));
+        check(!(await hintView(guesser)).shown, 'relay: 이번엔 주자가 된 지난 맞히는 사람에게 힌트 버튼 없음');
+      }
+      await drawScribble(ch);
+      await sleep(300);
+      await say(gq, wq.split(' · ').join(' '));
+      await gq.waitForSelector('#overlay-turnend:not([hidden])', { timeout: 5000 }).catch(() => {});
+    }
   }
+  // 배치 깜빡임 없음: 문제마다 data-role 이 (주자 → drawer / 맞히는 사람 → guesser) 로 한 번씩만 바뀐다(중간에 다른 값이 끼지 않음)
+  if (probs.length === 3) {
+    for (const pg of pages) {
+      const me = ids[pages.indexOf(pg)];
+      const want = probs.map((r) => (r.order.indexOf(me) !== -1 ? 'drawer' : 'guesser')).filter((v, i, a) => i === 0 || v !== a[i - 1]);
+      const seen = (await pg.evaluate(() => window.__roles || [])).filter((x) => x.ph === 'choosing' || x.ph === 'drawing' || x.ph === 'turnEnd').map((x) => x.role).filter((v, i, a) => i === 0 || v !== a[i - 1]);
+      check(JSON.stringify(seen) === JSON.stringify(want), `relay: ${nickOf(pg)} 배치 전환이 문제마다 한 번(깜빡임 없음)`, `${seen.join('→')} (기대 ${want.join('→')})`);
+    }
+  }
+  // 게임 끝 → 갤러리: 공동 작가 캡션 "🖍 A·B" · 맞히는 사람 "🎯 C 맞힘"(화면 · 저장 PNG)
+  await pa.waitForSelector('#overlay-gameover:not([hidden])', { timeout: 15000 }).catch(() => {});
+  await pa.click('#btn-gallery-open').catch(() => {});
+  await pa.waitForSelector('#overlay-gallery:not([hidden])', { timeout: 3000 }).catch(() => {});
+  const cards = await pa.$$eval('#gallery-grid .gallery-item', (els) => els.map((e) => ({ by: (e.querySelector('.gallery-by') || {}).textContent || '', relay: !!e.querySelector('.gallery-by.relay'), title: e.title })));
+  const co = nickOf(first) + '·' + nickOf(second);
+  check(cards.length === 3 && cards.every((c) => c.relay), 'relay 갤러리: 문제 3장 · 이어 그리기 캡션', JSON.stringify(cards.map((c) => c.by)));
+  check(!!cards[0] && cards[0].by.includes('1번') && cards[0].by.includes('🖍 ' + co) && cards[0].by.includes('🎯 ' + nickOf(guesser) + ' 맞힘'), `relay 갤러리: 1번 문제 "🖍 ${co}" · "🎯 ${nickOf(guesser)} 맞힘"`, cards[0] && cards[0].by);
+  if (relay2) check(!!cards[1] && cards[1].by.includes('🖍 ' + nickOf(pageOf(relay2.order[0]))) && !cards[1].by.includes(nickOf(pageOf(relay2.order[0])) + '·'), 'relay 갤러리: 첫 구간에 끝난 문제는 그린 주자만', cards[1] && cards[1].by);
+  check(!!cards[0] && cards[0].title.includes('정답 ' + word), 'relay 갤러리: 카드 title 에 전체 캡션', cards[0] && cards[0].title);
+  // 저장 PNG 캡션: fillText 로 그린 글자를 가로채 본다
+  await pa.evaluate(() => { window.__texts = []; const o = CanvasRenderingContext2D.prototype.fillText; CanvasRenderingContext2D.prototype.fillText = function (t, ...a) { window.__texts.push(String(t)); return o.call(this, t, ...a); }; });
+  const dlR = pa.waitForEvent('download', { timeout: 5000 }).catch(() => null);
+  await pa.locator('#gallery-grid .gallery-item .btn').first().click();
+  const dR = await dlR;
+  const texts = await pa.evaluate(() => window.__texts);
+  check(!!dR && texts.some((t) => t.includes('🖍 ' + co) && t.includes('🎯 ' + nickOf(guesser) + ' 맞힘') && t.includes('1번 문제')) && texts.some((t) => t === word), `relay 갤러리 PNG: 캡션 "🖍 ${co} · 🎯 ${nickOf(guesser)} 맞힘 · 1번 문제"`, JSON.stringify(texts.slice(0, 4)));
+  if (dR) await dR.saveAs(path.join(SHOTS, 'e2e-relay-gallery-item.png')).catch(() => {});
+  await pa.evaluate(() => { window.__texts = []; });
+  const dlS = pa.waitForEvent('download', { timeout: 5000 }).catch(() => null);
+  await pa.click('#btn-gallery-sheet');
+  await dlS;
+  const sheetTexts = await pa.evaluate(() => window.__texts);
+  check(sheetTexts.some((t) => t.includes('🖍 ' + co) && t.includes('🎯 ' + nickOf(guesser))), 'relay 갤러리 시트 PNG: 칸마다 공동 작가 · 맞히는 사람', JSON.stringify(sheetTexts.slice(0, 6)));
+  await pa.screenshot({ path: path.join(SHOTS, 'e2e-relay-gallery.png') });
   await Promise.all(rctx.map((c) => c.close().catch(() => {})));
 }
 
 (async () => {
   const server = await startServer();
   const browser = await chromium.launch({ channel: 'chrome', headless: !process.env.HEADFUL });
-  const timeout = setTimeout(() => { console.log('FAIL  전체 타임아웃'); process.exit(2); }, 240000);
+  const timeout = setTimeout(() => { console.log('FAIL  전체 타임아웃'); process.exit(2); }, 330000);
   try {
     const ctxs = await Promise.all([1, 2, 3, 4].map(() => browser.newContext({ viewport: { width: 1280, height: 860 } })));
     const host = await joinAs(ctxs[0], '호스트');

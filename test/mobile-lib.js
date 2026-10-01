@@ -168,4 +168,4 @@ async function runMobileFlow(hook, opts) {
   }
 }
 
-module.exports = { runMobileFlow, say, sleep, URL, PORT };
+module.exports = { runMobileFlow, startServer, scribble, say, sleep, URL, PORT };
