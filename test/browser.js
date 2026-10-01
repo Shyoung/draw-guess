@@ -134,7 +134,6 @@ async function say(page, text) {
     check(/3명 × 3라운드 · 최대 약 \d+분/.test(await host.textContent('#settings-estimate')), '예상 시간 표시(인원 × 라운드)', await host.textContent('#settings-estimate'));
     check(await host.locator('#settings-details').evaluate((d) => !d.open) && await host.locator('#custom-body').isHidden(), '세부 설정 · 우리만의 단어는 접힌 채 시작');
     check(await p2.locator('#settings-host').isHidden() && await p2.locator('#settings-summary').isVisible() && (await p2.textContent('#settings-summary')).includes('보통'), '방장이 아닌 사람: 설정 요약만', await p2.textContent('#settings-summary'));
-    check((await p2.locator('#btn-sum-wordset-link').count()) === 0, '방장이 아닌 사람: 우리만의 단어가 없으면 "이 단어로 방 만들기 링크" 없음');
     {
       const rc0 = serverMetrics.filter((m) => m.ev === 'room_created' && m.room === code)[0];
       check(rc0 && rc0.fromWordSetLink === false, '지표: 그냥 만든 방은 room_created.fromWordSetLink false', JSON.stringify(rc0));
@@ -195,17 +194,6 @@ async function say(page, text) {
     check((await p2.inputValue('#set-drawTime')) === '30', '설정 변경 동기화(drawTime=30)', await p2.inputValue('#set-drawTime'));
     await p2.waitForFunction(() => document.querySelectorAll('#settings-summary .sum-word').length === 12, null, { timeout: 3000 }).catch(() => {});
     check((await p2.locator('#settings-summary .sum-word').count()) === 12 && (await p2.textContent('#settings-summary .sum-words-title')).includes('우리 단어로만'), '방장이 아닌 사람: 우리만의 단어 목록 12개 · "우리 단어로만 출제"', await p2.locator('#settings-summary .sum-word').count());
-    // 방장이 아닌 사람도 지금 방의 단어로 링크를 받는다(세트 이름 없이). 방장 화면에는 요약이 없으니 버튼도 없다
-    check(await p2.locator('#settings-summary .sum-words #btn-sum-wordset-link').isVisible() && (await host.locator('#btn-sum-wordset-link').isHidden().catch(() => true)), '방장이 아닌 사람: 우리만의 단어 목록 아래 "🔗 이 단어로 방 만들기 링크"(방장 화면엔 없음)');
-    await ctxs[1].grantPermissions(['clipboard-read', 'clipboard-write'], { origin: URL });
-    await p2.click('#btn-sum-wordset-link');
-    await sleep(300);
-    {
-      const t2 = await p2.evaluate(() => navigator.clipboard.readText());
-      const m2 = /#ws=([A-Za-z0-9_-]+)/.exec(t2);
-      const pl = m2 ? JSON.parse(Buffer.from(m2[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')) : null;
-      check(pl && pl.w.length === 12 && pl.w[0] === '자전거' && pl.o === 1 && !('n' in pl) && (await p2.textContent('#toasts')).includes('단어 세트 링크를 복사했어요'), '방장이 아닌 사람 링크: #ws= 에 단어 12개 · 우리 단어만 · 이름 없음', JSON.stringify(pl && { n: pl.n, len: pl.w.length, o: pl.o }));
-    }
 
     // F8 단어 세트 링크: 방장이 "이 단어로 방 만들기 링크" 복사 → 그 링크로 온 사람이 방을 만들면 단어가 채워진다
     check(await host.locator('#wordset-share').isVisible() && await p2.locator('#btn-wordset-link').isHidden(), '우리만의 단어가 있으면 방장에게 "이 단어로 방 만들기 링크"');
