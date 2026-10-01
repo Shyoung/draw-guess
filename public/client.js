@@ -168,10 +168,14 @@
   }
   /** 전체 턴 수와 최대 예상 시간(분). 턴마다 단어 고르기(평균 ~8초, 속도전 0) + 결과 5초를 더한다 */
   function estimateGame(s) {
-    var n = Math.max(2, state.players.filter(function (p) { return p.connected !== false; }).length);
+    var conn = state.players.filter(function (p) { return p.connected !== false; }).length;
+    var n = Math.max(2, conn);
     if (s.mode === 'relay') {
+      // 최소 인원 미만이면 "최소 인원으로 시작하면" 기준으로 계산한다(기준 표시는 renderSettings)
+      var below = conn < relayMin();
+      if (below) n = relayMin();
       // 문제 n개, 문제마다 주자 n−1명이 한 명당 drawTime 초 + 제시어 고르기(~8초) + 결과 5초
-      return { players: n, turns: n, minutes: Math.max(1, Math.round(n * (s.drawTime * (n - 1) + 8 + 5) / 60)) };
+      return { players: n, turns: n, below: below, minutes: Math.max(1, Math.round(n * (s.drawTime * (n - 1) + 8 + 5) / 60)) };
     }
     var turns = s.mode === 'fixed' ? s.rounds : s.rounds * n;
     var per = s.drawTime + (s.mode === 'blitz' ? 0 : 8) + 5;
@@ -1888,7 +1892,7 @@
     });
     var relay = s.mode === 'relay';
     var estEl = $('settings-estimate');
-    if (estEl) estEl.textContent = (relay ? est.players + '명 · ' + est.turns + '문제' : fixed ? s.rounds + '문제' : est.players + '명 × ' + s.rounds + '라운드') + ' · 최대 약 ' + est.minutes + '분';
+    if (estEl) estEl.textContent = (relay ? est.players + (est.below ? '명 기준 · ' : '명 · ') + est.turns + '문제' : fixed ? s.rounds + '문제' : est.players + '명 × ' + s.rounds + '라운드') + ' · 최대 약 ' + est.minutes + '분';
     var dn = $('details-note'); if (dn) dn.textContent = preset ? '' : '직접 설정함';
     var hostView = $('settings-host'), sum = $('settings-summary');
     if (hostView) hostView.hidden = !isHost();

@@ -121,6 +121,7 @@ async function relayScenario(browser) {
     await pa.click(card);
     await pa.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
     check(await pa.locator('#btn-start').isDisabled() && (await pa.textContent('#start-hint')).includes('이어 그리기는 3명부터 할 수 있어요 (지금 2명)'), 'relay: 2명이면 시작 버튼 잠김 · 안내 "3명부터 할 수 있어요 (지금 2명)"', await pa.textContent('#start-hint'));
+    { const t = await pa.textContent('#settings-estimate'); check(t.includes('3명 기준 · 3문제'), 'relay: 2명이면 예상 "3명 기준 · 3문제"', t); }
     check((await pb.textContent('#start-hint')).includes('이어 그리기는 3명부터 할 수 있어요 (지금 2명)'), 'relay: 비방장 화면도 같은 안내', await pb.textContent('#start-hint'));
     // 7명 이상: 화면 상태에만 가짜 접속자를 넣어 본다(바로 원래대로 되돌린다)
     const seven = await pa.evaluate((sel) => {
@@ -151,7 +152,7 @@ async function relayScenario(browser) {
     badge: document.getElementById('mode-badge').textContent,
   }));
   check(lay.rounds && lay.hintEndAt && lay.dt === '한 명당 시간' && lay.hl === '최대 힌트' && lay.badge.includes('이어 그리기'), 'relay 설정: 라운드·힌트 시점 숨김 · 라벨 바뀜', lay);
-  check((await pa.textContent('#settings-estimate')).includes('3문제'), 'relay 설정: 예상 "3명 · 3문제"', await pa.textContent('#settings-estimate'));
+  check((await pa.textContent('#settings-estimate')).includes('3명 · 3문제') && !(await pa.textContent('#settings-estimate')).includes('기준'), 'relay 설정: 예상 "3명 · 3문제"(기준 없음)', await pa.textContent('#settings-estimate'));
   // 구간 교대까지 보려고 가장 짧은 15초로
   await pa.selectOption('#set-drawTime', '15');
   await pb.waitForFunction(() => window.__dg.state.settings.drawTime === 15, null, { timeout: 3000 }).catch(() => {});
@@ -426,6 +427,7 @@ async function soloRelayCardScenario(browser) {
     await pa.click(card);
     await pa.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
     check(await pa.locator('#btn-start').isDisabled() && (await pa.textContent('#start-hint')).includes('이어 그리기는 2명부터 할 수 있어요 (지금 1명)'), 'ALLOW_SOLO 서버: 혼자면 시작 버튼 잠김 · "2명부터 할 수 있어요 (지금 1명)"', await pa.textContent('#start-hint'));
+    { const t = await pa.textContent('#settings-estimate'); check(t.includes('2명 기준 · 2문제'), 'ALLOW_SOLO 서버: 혼자면 예상 "2명 기준 · 2문제"', t); }
     await pa.click('#btn-mode-back');
     await pa.waitForSelector('#mode-panel:not([hidden])', { timeout: 3000 });
     await joinAs(ctx[1], '솔로B', code, soloUrl);
