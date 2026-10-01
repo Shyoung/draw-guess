@@ -735,8 +735,8 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
     grid-template-areas: "tools color . sizes edit" "palette palette palette palette palette";
     gap: 4px 6px; padding: 5px 6px; align-items: center; border-radius: 12px;
   }
-  body.tablet-shell .toolbar .tool-group:first-child { grid-area: tools; }
-  body.tablet-shell .toolbar .tool-group:last-child { grid-area: edit; justify-self: end; }
+  body.tablet-shell .toolbar .tool-group:first-of-type { grid-area: tools; }
+  body.tablet-shell .toolbar .tool-group:last-of-type { grid-area: edit; justify-self: end; }
   body.tablet-shell .toolbar .tool-group { gap: 3px; }
   body.tablet-shell .toolbar .tool { width: 32px; height: 32px; border-radius: 9px; }
   body.tablet-shell .toolbar .tool svg { width: 18px; height: 18px; }
@@ -747,6 +747,51 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
   body.tablet-shell .sizes { grid-area: sizes; gap: 3px; justify-self: end; }
   body.tablet-shell .size-btn { width: 28px; height: 28px; }
 }
+
+/* ---------- 이어 그리기(relay) ---------- */
+/* 상단 띠(데스크톱): "🖍 민수님 (1/2) · 다음 지은님 · 12초" */
+.relay-band { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; font-size: 13px; font-weight: 700; color: var(--text); background: #f8f6fc; border-radius: 999px; padding: 3px 12px; white-space: nowrap; }
+.relay-band[hidden] { display: none; }
+.relay-band b { font-weight: 900; }
+.relay-band .rb-sep { color: var(--muted); font-weight: 500; }
+.relay-band .rb-next { color: var(--muted); }
+.relay-band .rb-leg, .ts-leg { font-family: var(--mono); font-weight: 800; color: var(--secondary-dark); }
+.relay-band .rb-leg.urgent, .ts-leg.urgent { color: var(--red); }
+/* 조합 마스크: 요소 묶음 사이에 가운뎃점 */
+.mask-part { display: inline-flex; align-items: flex-end; gap: 5px; }
+.mask-sep { align-self: center; font-weight: 900; font-size: 18px; color: var(--muted); padding: 0 3px; }
+.word-secret.relay-word .word { font-size: 21px; }
+/* 차례가 아닌 주자: 툴바는 흐리게 잠그고 안내만 또렷하게 */
+.toolbar { position: relative; }
+.toolbar.relay-locked[aria-disabled="true"] { opacity: 1; filter: none; }
+.toolbar.relay-locked > :not(.toolbar-lock) { opacity: .28; filter: grayscale(.8); }
+.toolbar-lock {
+  position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; padding: 0 12px;
+  text-align: center; font-size: 14px; font-weight: 900; color: var(--text); pointer-events: none; border-radius: inherit;
+  background: rgba(248, 246, 252, .55); /* 흐린 도구 위에서도 안내 글자가 또렷하게 */
+}
+.toolbar-lock[hidden] { display: none; }
+/* 플레이어 목록: 맞히는 사람 🎯, 이번 문제 주자 🖍 */
+.player.relay-guesser { outline: 1.5px dashed var(--amber); outline-offset: -1.5px; }
+.runner-tag { font-size: 11px; }
+/* 주자끼리 채팅(맞히는 사람은 못 본다) */
+.msg-runner { background: var(--amber-soft); color: #7a4a00; }
+.msg-tag { margin-left: 6px; font-size: 10px; font-weight: 800; padding: 0 6px; border-radius: 8px; background: rgba(122, 74, 0, .1); vertical-align: 1px; }
+/* 모드 카드: 인원이 맞지 않으면 비활성 + 이유 */
+.mode-card.unavailable { opacity: .55; }
+.mode-card.unavailable .mode-meta { color: var(--red); }
+/* 내 차례 배너: 1.5초. 입력은 막지 않는다(pointer-events: none) */
+.relay-banner { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 20px; background: rgba(43, 45, 66, .32); pointer-events: none; }
+.relay-banner[hidden] { display: none; }
+.relay-banner.show { animation: relay-fade 1.5s ease-out forwards; }
+.relay-banner.show .relay-banner-card { animation: relay-pop .35s ease-out; }
+.relay-banner-card { background: var(--card); border-radius: 24px; padding: 20px 30px; text-align: center; box-shadow: var(--shadow); max-width: min(92vw, 520px); }
+.relay-banner-title { font-family: var(--font-display); font-size: 44px; font-weight: 900; line-height: 1.1; color: var(--primary-dark); }
+.relay-banner-time { margin-top: 2px; font-size: 20px; font-weight: 800; font-family: var(--mono); color: var(--secondary-dark); }
+.relay-banner-word { margin-top: 10px; font-size: 28px; font-weight: 900; line-height: 1.25; color: var(--text); overflow-wrap: anywhere; }
+@keyframes relay-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes relay-pop { from { transform: scale(.75); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .relay-banner.show, .relay-banner.show .relay-banner-card { animation: none; } }
 
 /* =====================================================================
    모바일 전용 컴포넌트 — 데스크톱/태블릿에서는 존재하지만 렌더링되지 않는다(display:none).
@@ -935,8 +980,8 @@ body.sheet-open { overflow: hidden; }
     grid-template-areas: "tools color . edit" "palette palette palette sizes";
     gap: 6px 8px; padding: 8px; align-items: center; border-radius: 12px;
   }
-  .toolbar .tool-group:first-child { grid-area: tools; }
-  .toolbar .tool-group:last-child { grid-area: edit; justify-self: end; }
+  .toolbar .tool-group:first-of-type { grid-area: tools; } /* of-type: 잠김 안내 span(#toolbar-lock)이 끼어도 그대로 */
+  .toolbar .tool-group:last-of-type { grid-area: edit; justify-self: end; }
   .toolbar .tool-group { gap: 4px; }
   .toolbar .tool { width: 36px; height: 36px; border-radius: 10px; }
   .toolbar .tool svg { width: 20px; height: 20px; }
@@ -1360,4 +1405,16 @@ img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cove
   .me-main .btn-sm, .me-account .btn-sm { min-height: 38px; padding: 8px 12px; }
   .me-account .link-btn, .invite-dismiss { min-height: 38px; padding: 8px 6px; }
   .invite-code { font-size: 30px; }
+}
+
+/* 이어 그리기 — 모바일(위 모바일 블록과 같은 조건). 상단 띠는 턴 띠가 대신하고, 조합 마스크·제시어는 360px 에서 넘치지 않게 줄인다 */
+@media (max-width: 639px), (max-width: 767px) and (orientation: portrait), (max-width: 767px) and (pointer: fine), (max-width: 1099px) and (orientation: portrait) and (pointer: coarse) {
+  .relay-band { display: none !important; }
+  .mask-part { flex-wrap: nowrap; gap: 3px; }
+  .mask-combo .mask { column-gap: 2px; }
+  .mask-sep { font-size: 14px; padding: 0 1px; }
+  .word-secret.relay-word .word { font-size: clamp(15px, 4.6vw, 20px); word-break: keep-all; }
+  .toolbar-lock { font-size: 13px; padding: 0 8px; }
+  .relay-banner-title { font-size: 38px; }
+  .relay-banner-word { font-size: 23px; }
 }

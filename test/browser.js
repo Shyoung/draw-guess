@@ -91,6 +91,188 @@ async function say(page, text) {
   await page.press('#chat-input', 'Enter');
 }
 
+/**
+ * 이어 그리기(relay) 주자 화면 시나리오(R4 — R5·R6 에서 넓힌다): 새 방 2명 → 카드 비활성 · 7명이면 비활성 → 3명이 되면 활성 →
+ * 설정 화면 라벨(한 명당 시간 · 최대 힌트, 라운드·힌트 시점 숨김) → 첫 주자에게 조합 후보(' · ') → 첫 주자 "내 차례!" 배너 · 진동 ·
+ * 툴바 활성 · 다른 주자 툴바 잠김 · 차례 전 주자와 맞히는 사람은 마스크(' · ') → 상단 띠 → 주자 채팅은 주자끼리 →
+ * 구간 교대(game:baton): 앞 주자 툴바 잠김 · "다음은 ○○님" · 새 주자 배너 · 제시어 공개 · 앞사람 그림 되돌리기 불가 →
+ * 맞히는 사람이 요소를 모두 입력하면 turnEnd → 2번 문제에서 배치 전환.
+ */
+async function relayScenario(browser) {
+  const rctx = await Promise.all([1, 2, 3].map(() => browser.newContext({ viewport: { width: 1280, height: 860 } })));
+  // 진동 호출을 센다(데스크톱 Chrome 에도 navigator.vibrate 가 있다)
+  await Promise.all(rctx.map((c) => c.addInitScript(() => { window.__vib = 0; navigator.vibrate = () => { window.__vib++; return true; }; })));
+  const pa = await joinAs(rctx[0], '릴레이A');
+  const rcode = (await pa.textContent('#room-code')).trim().replace(/[^A-Z]/g, '');
+  const pb = await joinAs(rctx[1], '릴레이B', rcode);
+  await pa.waitForFunction(() => window.__dg.state.players.length === 2, null, { timeout: 3000 }).catch(() => {});
+  const card = '#mode-panel .mode-card[data-mode="relay"]';
+  const solo = await pa.evaluate(() => window.__dg.state.allowSolo);
+  if (!solo) {
+    check(await pa.locator(card).isDisabled() && (await pa.textContent(card + ' .mode-meta')).includes('3명부터 할 수 있어요'), 'relay: 2명이면 카드 비활성 · "3명부터 할 수 있어요"', await pa.textContent(card + ' .mode-meta'));
+  }
+  // 7명 이상: 화면 상태에만 가짜 접속자를 넣어 카드가 잠기는지 본다(바로 원래대로 되돌린다)
+  const seven = await pa.evaluate((sel) => {
+    const st = window.__dg.state, keep = st.players.slice();
+    for (let i = 0; i < 5; i++) st.players.push({ id: 'fake' + i, name: '가짜' + i, avatar: { emoji: '🐱', color: '#ff6b6b' }, score: 0, connected: true });
+    window.__dg.renderAll();
+    const b = document.querySelector(sel), r = { disabled: b.disabled, meta: b.querySelector('.mode-meta').textContent };
+    st.players = keep; window.__dg.renderAll();
+    return r;
+  }, card);
+  check(seven.disabled && seven.meta.includes('6명까지'), 'relay: 7명이면 카드 비활성 · "6명까지 할 수 있어요"', seven.meta);
+  const pc = await joinAs(rctx[2], '릴레이C', rcode);
+  await pa.waitForFunction((sel) => !document.querySelector(sel).disabled, card, { timeout: 3000 }).catch(() => {});
+  check(await pa.locator(card).isEnabled() && (await pa.textContent(card + ' .mode-meta')).includes('~6명') && (await pa.textContent(card + ' .mode-desc')).includes('이어 그리고 한 명이 맞혀요'), 'relay: 3명이 되면 카드 활성 · 문구', await pa.textContent(card + ' .mode-meta'));
+  await pa.click(card);
+  await pb.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
+  await pb.waitForFunction(() => window.__dg.state.settings.mode === 'relay', null, { timeout: 3000 }).catch(() => {});
+  check(await pb.evaluate(() => { const s = window.__dg.state.settings; return s.mode === 'relay' && s.drawTime === 20 && s.hints === 3; }), 'relay 카드: 프리셋 한 명당 20초 · 힌트 3 동기화');
+  await pa.click('#settings-details > summary');
+  const lay = await pa.evaluate(() => ({
+    rounds: document.getElementById('set-rounds').closest('.setting').hidden,
+    hintEndAt: document.getElementById('set-hintEndAt').closest('.setting').hidden,
+    dt: document.getElementById('set-drawTime-label').textContent, hl: document.getElementById('set-hints-label').textContent,
+    badge: document.getElementById('mode-badge').textContent,
+  }));
+  check(lay.rounds && lay.hintEndAt && lay.dt === '한 명당 시간' && lay.hl === '최대 힌트' && lay.badge.includes('이어 그리기'), 'relay 설정: 라운드·힌트 시점 숨김 · 라벨 바뀜', lay);
+  check((await pa.textContent('#settings-estimate')).includes('3문제'), 'relay 설정: 예상 "3명 · 3문제"', await pa.textContent('#settings-estimate'));
+  // 구간 교대까지 보려고 가장 짧은 15초로
+  await pa.selectOption('#set-drawTime', '15');
+  await pb.waitForFunction(() => window.__dg.state.settings.drawTime === 15, null, { timeout: 3000 }).catch(() => {});
+
+  await pa.click('#btn-start');
+  const pages = [pa, pb, pc], nicks = ['릴레이A', '릴레이B', '릴레이C'];
+  let chooser = null, word = null, optTexts = [];
+  for (let t = 0; t < 40 && !chooser; t++) {
+    for (const pg of pages) {
+      const btn = pg.locator('#word-options .word-option:not([disabled])');
+      if (await btn.count() > 0 && await btn.first().isVisible()) { chooser = pg; optTexts = await btn.allTextContents(); word = optTexts[0].trim(); break; }
+    }
+    if (!chooser) await sleep(250);
+  }
+  check(!!chooser && optTexts.length === 3 && optTexts.every((w) => w.includes(' · ')), 'relay: 첫 주자에게 조합 후보 3개(" · " 포함)', optTexts);
+  if (!chooser) return;
+  check((await chooser.textContent('#choosing-title')).includes('제시어'), 'relay: 후보 창 제목 "제시어를 골라주세요!"');
+  for (const pg of pages) if (pg !== chooser) check(!(await pg.locator('#overlay-choosing').textContent()).includes(word), 'relay: 다른 사람 화면에 후보 노출 없음');
+  await chooser.locator('#word-options .word-option').first().click();
+  // 첫 주자: 내 차례 배너(1.5초) — 제시어 크게 + 구간 시간 + 진동
+  const banner1 = await chooser.waitForSelector('#relay-banner:not([hidden])', { timeout: 3000 }).then(() => chooser.textContent('#relay-banner')).catch(() => '');
+  check(banner1.includes('내 차례!') && banner1.includes('15초') && banner1.includes(word), 'relay: 첫 주자 "내 차례! 15초" 배너 + 제시어', banner1);
+  check(await chooser.evaluate(() => window.__vib) >= 1, 'relay: 내 차례 진동 호출');
+  await chooser.waitForSelector('#overlay-choosing', { state: 'hidden', timeout: 5000 });
+  await chooser.waitForSelector('#relay-banner', { state: 'hidden', timeout: 3000 }).catch(() => {});
+  check(await chooser.locator('#relay-banner').isHidden(), 'relay: 배너는 잠깐 뒤 사라짐');
+
+  const ids = await Promise.all(pages.map((pg) => pg.evaluate(() => window.__dg.myId())));
+  const relay = await pa.evaluate(() => window.__dg.state.relay);
+  check(!!relay && relay.order.length === 2 && ids.indexOf(relay.guesserId) !== -1, 'relay: 주자 2명 + 맞히는 사람 1명', relay);
+  if (!relay) return;
+  const pageOf = (id) => pages[ids.indexOf(id)];
+  const first = pageOf(relay.order[0]), second = pageOf(relay.order[1]), guesser = pageOf(relay.guesserId);
+  const nickOf = (pg) => nicks[pages.indexOf(pg)];
+  check(first === chooser, 'relay: 제시어를 고른 사람이 첫 주자');
+  check(await guesser.locator('#relay-banner').isHidden() && await second.locator('#relay-banner').isHidden(), 'relay: 배너는 차례인 사람에게만');
+  const view = async (pg) => pg.evaluate(() => {
+    const tb = document.getElementById('toolbar'), lk = document.getElementById('toolbar-lock');
+    const rb = document.getElementById('relay-band');
+    return {
+      role: document.getElementById('view-room').getAttribute('data-role'),
+      tbShown: !tb.hidden && tb.offsetParent !== null, tbDisabled: tb.getAttribute('aria-disabled'),
+      lock: !lk.hidden ? lk.textContent : '', word: document.getElementById('word-area').textContent,
+      boxes: document.querySelectorAll('#word-area .mask-box').length, seps: document.querySelectorAll('#word-area .mask-sep').length,
+      band: rb.hidden ? '' : rb.textContent,
+      round: document.getElementById('round-indicator').textContent, ph: document.getElementById('chat-input').placeholder,
+      timer: document.getElementById('timer').textContent,
+    };
+  });
+  const u1 = await view(first), u2 = await view(second), ug = await view(guesser);
+  check(u1.role === 'drawer' && u1.tbShown && u1.tbDisabled === 'false' && !u1.lock && u1.word.includes(word), 'relay: 첫 주자 — 그리기 배치 · 툴바 활성 · 제시어 표시', u1);
+  check(u2.role === 'drawer' && u2.tbShown && u2.tbDisabled === 'true' && u2.lock.includes('🔒') && u2.lock.includes('2번째') && !u2.word.includes(word) && u2.boxes > 0 && u2.seps >= 1, 'relay: 다음 주자 — 그리기 배치 유지 · 툴바 잠김 "나는 2번째" · 차례 전엔 마스크', u2);
+  check(ug.role === 'guesser' && !ug.tbShown && !ug.word.includes(word) && ug.boxes > 0 && ug.seps >= 1, 'relay: 맞히는 사람 — 맞히기 배치 · 마스크(" · ")', ug);
+  check(u1.band.includes('🖍') && u1.band.includes('(1/2)') && u1.band.includes('다음 ' + nickOf(second)) && /\d+초/.test(u1.band) && ug.round.includes('문제 1 / 3'), 'relay: 상단 띠 "🖍 (1/2) · 다음 ○○님 · 구간 초" · "문제 1 / 3"', `${u1.band} | ${ug.round}`);
+  check(ug.band.includes(nickOf(first) + '님') && Number(ug.timer) > 15, 'relay: 맞히는 사람 띠에 현재 주자 · 오른쪽 타이머는 문제 전체 시간', `${ug.band} | ${ug.timer}`);
+  check(u2.ph.includes('주자끼리') && ug.ph.includes('정답'), 'relay: 입력창 안내(주자끼리 / 정답)', `${u2.ph} | ${ug.ph}`);
+  const gi = pages.indexOf(guesser);
+  const gBadge = await first.locator(`#player-list li[data-id="${ids[gi]}"] .badge-guesser`).textContent().catch(() => '');
+  check(gBadge === '🎯', 'relay: 플레이어 목록 맞히는 사람 아바타 🎯', gBadge);
+  await second.screenshot({ path: path.join(SHOTS, 'e2e-relay-runner-locked.png') });
+
+  // 주자 채팅은 주자끼리만
+  await say(second, '주자비밀말');
+  await sleep(400);
+  check((await first.locator('#chat-list .msg-runner').last().textContent().catch(() => '')).includes('주자비밀말'), 'relay: 주자 채팅 → 다른 주자에게 "주자" 표시로');
+  check(!(await guesser.locator('#chat-list').textContent()).includes('주자비밀말'), 'relay: 주자 채팅 → 맞히는 사람에게 안 보임');
+
+  // 첫 주자가 그리면 맞히는 사람·다음 주자에게 중계
+  await drawScribble(first);
+  await sleep(600);
+  const pxG = await nonWhitePixels(guesser), pxS = await nonWhitePixels(second);
+  check(pxG > 500 && pxS > 500, 'relay: 첫 주자 그림이 맞히는 사람·다음 주자에게 중계', `${pxG} / ${pxS}`);
+  // 차례 전 주자는 그릴 수 없다(툴바·입력 잠김)
+  const before = await nonWhitePixels(second);
+  // (drawScribble 은 굵기 버튼을 누르는데 잠긴 툴바에선 click 이 30초 기다리므로 마우스로만 긋는다)
+  const sb = await second.locator('#canvas').boundingBox();
+  await second.mouse.move(sb.x + sb.width / 2 - 100, sb.y + sb.height / 2);
+  await second.mouse.down();
+  await second.mouse.move(sb.x + sb.width / 2 + 100, sb.y + sb.height / 2 + 40, { steps: 10 });
+  await second.mouse.up();
+  await sleep(400);
+  check(Math.abs((await nonWhitePixels(guesser)) - pxG) < 50 && (await nonWhitePixels(second)) - before < 50, 'relay: 차례가 아닌 주자는 그려지지 않음');
+  // 전체 지우기(relay): 서버가 내 구간만 지우고 draw:sync — 첫 구간이라 모두 빈 캔버스
+  await first.click('#btn-clear');
+  await sleep(500);
+  const clr1 = await nonWhitePixels(first), clrG = await nonWhitePixels(guesser);
+  check(clr1 < 50 && clrG < 50, 'relay: 첫 주자 전체 지우기 → draw:sync 로 양쪽 빈 캔버스', `${clr1} / ${clrG}`);
+  await drawScribble(first);
+  await sleep(400);
+  await guesser.screenshot({ path: path.join(SHOTS, 'e2e-relay-guesser.png') });
+
+  // 구간 교대(game:baton, 15초): 두 번째 주자가 차례를 받는다
+  const vib2 = await second.evaluate(() => window.__vib);
+  await second.waitForFunction(() => window.__dg.state.drawerId === window.__dg.myId(), null, { timeout: 20000 }).catch(() => {});
+  const banner2 = await second.waitForSelector('#relay-banner:not([hidden])', { timeout: 2000 }).then(() => second.textContent('#relay-banner')).catch(() => '');
+  check(banner2.includes('내 차례!') && banner2.includes(word), 'relay: 구간 교대 → 두 번째 주자 "내 차례!" 배너 + 제시어', banner2);
+  check(await second.evaluate(() => window.__vib) > vib2, 'relay: 구간 교대 진동');
+  await sleep(300);
+  const v1 = await view(first), v2 = await view(second), vg = await view(guesser);
+  check(v2.tbDisabled === 'false' && !v2.lock && v2.word.includes(word) && v2.band.includes('(2/2)') && v2.band.includes('마지막'), 'relay: 새 주자 — 툴바 풀림 · 제시어 공개 · 띠 "(2/2) · 마지막"', v2);
+  check(v1.role === 'drawer' && v1.tbDisabled === 'true' && v1.lock.includes(nickOf(second)) && v1.word.includes(word), 'relay: 앞 주자 — 그리기 배치 그대로 · 툴바 잠김 · 제시어는 계속 보임', v1);
+  const toast1 = await first.textContent('#toasts').catch(() => '');
+  check(toast1.includes('다음은 ' + nickOf(second) + '님'), 'relay: 앞 주자에게 "다음은 ○○님"', toast1);
+  check(!vg.word.includes(word) && vg.boxes > 0 && vg.band.includes(nickOf(second) + '님'), 'relay: 맞히는 사람은 여전히 마스크 · 띠에 새 주자', vg);
+  // 앞사람 그림은 되돌릴 수 없다(로컬도 서버도 그대로)
+  const pxBeforeUndo = await nonWhitePixels(guesser);
+  await second.click('#btn-undo');
+  await sleep(400);
+  check(Math.abs((await nonWhitePixels(guesser)) - pxBeforeUndo) < 50 && Math.abs((await nonWhitePixels(second)) - pxBeforeUndo) < 50, 'relay: 새 주자가 되돌리기 → 앞 주자 그림 그대로');
+  check((await second.textContent('#toasts')).includes('앞사람 그림은 되돌릴 수 없어요'), 'relay: 되돌리기 안내 토스트');
+  // 같은 자리에 같은 모양을 그리므로 픽셀 대신 op 수로 본다
+  const opsBefore = await guesser.evaluate(() => window.__dg.ops().length);
+  await drawScribble(second);
+  await sleep(500);
+  const opsAfter = await guesser.evaluate(() => window.__dg.ops().length);
+  check(opsAfter === opsBefore + 2, 'relay: 두 번째 주자 그림이 앞 그림 위에 이어서 중계', `${opsBefore} → ${opsAfter}`);
+  await second.screenshot({ path: path.join(SHOTS, 'e2e-relay-second-leg.png') });
+
+  // 맞히는 사람이 요소를 모두 입력 → turnEnd
+  await say(guesser, word.split(' · ').join(' '));
+  await guesser.waitForSelector('#overlay-turnend:not([hidden])', { timeout: 5000 }).catch(() => {});
+  const reason = await guesser.textContent('#turnend-reason').catch(() => '');
+  const reasonOther = await first.textContent('#turnend-reason').catch(() => '');
+  check(reason.includes('🎯') && reason.includes('맞혔어요') && reasonOther.includes(nicks[gi]), 'relay: 정답 → 턴 종료 "🎯 ○○님이 맞혔어요!"', `${reason} | ${reasonOther}`);
+  check((await first.textContent('#turnend-word')).includes(word), 'relay: 턴 종료 오버레이에 조합 제시어', await first.textContent('#turnend-word'));
+  // 다음 문제: 순서가 한 칸 밀려 맞히는 사람이 바뀌고, 배치도 문제 단위로 바뀐다
+  const relay2 = await guesser.waitForFunction((g) => { const r = window.__dg.state.relay; return r && window.__dg.state.round === 2 && r.guesserId !== g ? r : null; }, relay.guesserId, { timeout: 12000 }).then((h) => h.jsonValue()).catch(() => null);
+  check(!!relay2 && relay2.guesserId === relay.order[0], 'relay: 2번 문제는 첫 주자였던 사람이 맞힘', relay2);
+  if (relay2) {
+    const g2 = pageOf(relay2.guesserId);
+    check(await g2.evaluate(() => document.getElementById('view-room').getAttribute('data-role')) === 'guesser'
+      && await guesser.evaluate(() => document.getElementById('view-room').getAttribute('data-role')) === 'drawer', 'relay: 2번 문제 배치 전환(맞히는 사람 ↔ 주자)');
+  }
+  await Promise.all(rctx.map((c) => c.close().catch(() => {})));
+}
+
 (async () => {
   const server = await startServer();
   const browser = await chromium.launch({ channel: 'chrome', headless: !process.env.HEADFUL });
@@ -572,6 +754,8 @@ async function say(page, text) {
     check(await host.locator('#view-landing').isVisible(), '나가기 후 랜딩 복귀');
     check(!(await p2.locator('#set-rounds').isDisabled()), '호스트 이전(다음 사람이 설정 가능)');
     check((await p2.locator(PLAYER_SEL).count()) === 3, '퇴장 후 플레이어 3명');
+
+    await relayScenario(browser);
   } catch (e) {
     console.log('FAIL  예외:', e.message);
     failures++;
