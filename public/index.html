@@ -143,6 +143,16 @@
 
         <div id="join-divider" class="divider"><span id="join-divider-text">또는</span></div>
 
+        <!-- 받은 단어 세트 링크(#ws=): 방을 만들면 이 단어로 시작. 단어는 보여 주지 않고 이름·개수만 -->
+        <div id="wordset-card" class="wordset-card" hidden>
+          <div class="wordset-card-text">
+            <span class="wordset-card-label">📦 받은 단어 세트</span>
+            <strong id="wordset-card-name" class="wordset-card-name"></strong>
+            <span id="wordset-card-note" class="wordset-card-note"></span>
+          </div>
+          <button id="btn-wordset-card-drop" class="link-btn link-muted" type="button">안 쓸래</button>
+        </div>
+
         <button id="btn-create" class="btn btn-outline btn-lg btn-block btn-plus" type="button">방 만들기</button>
 
         <button id="btn-invite-dismiss" class="link-btn link-muted invite-dismiss" type="button" hidden>다른 방 코드 입력하기</button>
@@ -351,6 +361,10 @@
                   <input id="set-customWordsOnly" type="checkbox">
                   <span>우리 단어만 쓰기 <small>단어가 모자라면 고른 카테고리에서 채워요</small></span>
                 </label>
+                <div id="wordset-share" class="wordset-share" hidden>
+                  <button id="btn-wordset-link" class="btn btn-ghost btn-sm" type="button">🔗 이 단어로 방 만들기 링크</button>
+                  <small>링크를 받은 사람이 방을 만들면 이 단어가 채워져요</small>
+                </div>
               </div>
             </div>
 

@@ -531,6 +531,16 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await p.locator('#wordset-form').isHidden(), '새 세트: 저장 후 폼 닫힘');
     check((await p.locator('#wordset-list .ws-apply').count()) === 0, '내 정보: "이 세트로 방 설정" 버튼 없음(방 밖 화면)');
     check(await p.evaluate(() => window.__mockAuth.tables.word_sets.length === 1 && window.__mockAuth.tables.word_sets[0].owner_id === 'mock-user-1'), '새 세트: DB 행에 owner_id 포함');
+    // F8 단어 세트 링크: 세트마다 "🔗 링크" → #ws= 에 이름·단어·우리 단어만(o=1)
+    await p.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: URL });
+    await p.click('#wordset-list .ws-link');
+    await sleep(300);
+    const wsPayload = await p.evaluate(async () => {
+      const t = await navigator.clipboard.readText(); const m = /#ws=([A-Za-z0-9_-]+)/.exec(t); if (!m) return null;
+      let s = m[1].replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '=';
+      return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s), (c) => c.charCodeAt(0))));
+    });
+    check(wsPayload && wsPayload.n === '과일' && JSON.stringify(wsPayload.w) === '["사과","바나나","포도"]' && wsPayload.o === 1, '내 정보: 세트 "링크" → #ws= 에 이름·단어 3개·우리 단어만', JSON.stringify(wsPayload));
 
     // 빈 폼 검증
     await p.click('#btn-wordset-new');

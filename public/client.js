@@ -1596,6 +1596,7 @@
     var hasWords = !!String(s.customWords || '').trim();
     if (uc) { if (!ui.customOpen && hasWords) ui.customOpen = true; uc.checked = !!ui.customOpen; uc.disabled = !editable; }
     if (cb0) cb0.hidden = !ui.customOpen;
+    var wsl = $('wordset-share'); if (wsl) wsl.hidden = !hasWords || !editable;
     // 기본 단어 카테고리 칩. 우리 단어만 쓰고 단어가 wordCount 이상이면 기본 단어가 안 나오므로 숨긴다(모자라면 고른 카테고리에서 채우니 보여준다)
     var cats = selectedCategories(), catBlock = $('cat-block');
     if (catBlock) {
@@ -1937,8 +1938,13 @@
     var inv = landing.invite;
     var card = $('invite-card'), bc = $('btn-create'), bj = $('btn-join'), dv = $('join-divider'), jr = $('join-row'), dm = $('btn-invite-dismiss');
     var meCard = sr ? sr.querySelector('.me-card') : null, head = card ? card.querySelector('.invite-head') : null;
-    if (inv) { orderChildren(card, [head, jr]); orderChildren(sr, [meCard, card, dv, bc, dm]); }
-    else { orderChildren(sr, [meCard, card, jr, dv, bc, dm]); }
+    var wc = $('wordset-card'), ws = landing.wordSet;
+    if (inv) { orderChildren(card, [head, jr]); orderChildren(sr, [meCard, card, dv, wc, bc, dm]); }
+    else { orderChildren(sr, [meCard, card, jr, dv, wc, bc, dm]); }
+    // 받은 단어 세트 링크: 이름·개수만 보여 준다(단어는 방을 만들면 설정에서 보인다)
+    if (wc) wc.hidden = !ws;
+    var wn = $('wordset-card-name'); if (wn) wn.textContent = ws ? ws.name || '이름 없는 세트' : '';
+    var wnt = $('wordset-card-note'); if (wnt) wnt.textContent = ws ? '단어 ' + ws.words.length + '개' + (ws.only ? ' · 이 단어로만 출제' : '') + ' — 방을 만들면 이 단어로 시작해요' : '';
     if (card) card.hidden = !inv;
     var ic = $('invite-code'); if (ic) ic.textContent = inv || '';
     var full = $('invite-full'); if (full) { full.hidden = !(inv && landing.fullMsg); full.textContent = landing.fullMsg || ''; }
@@ -1978,6 +1984,103 @@
     } catch (e) { /* ignore */ }
   }
   function getRef() { try { return sessionStorage.getItem(REF_KEY) || ''; } catch (e) { return ''; } }
+
+  // ---------- 공개 단어 세트 링크(#ws=…): "이 단어 세트로 방 만들기" ----------
+  // 단어는 주소 해시에 base64url(UTF-8 JSON { v:1, n?, w:[…], o })로 담는다 → 서버 저장소가 없고, 해시라 서버 로그에도 안 남는다.
+  // 받은 쪽은 읽자마자 sessionStorage 에 두고 주소에서 지운 뒤(로그인 리다이렉트를 다녀와도 남는다), 이 탭에서 방을 만들면 그 단어로 설정을 채운다
+  var WS_KEY = 'drawguess.wordSetLink';
+  var WS_MAX_LEN = 2000, WS_MAX_NAME = 30; // 서버 customWords 원문 상한과 같음 · 세트 이름 상한(내 정보 단어 세트와 같음)
+  function b64urlEncode(str) {
+    var bytes = new TextEncoder().encode(str), bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function b64urlDecode(s) {
+    s = String(s || '').replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    var bin = atob(s), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  }
+  /** 단어 배열 → customWords 규칙(각 1~20자 · 중복 제거 · 쉼표로 이은 원문 2000자 이하)에 맞춘 세트. 남는 단어가 없으면 null. cut = 길이 상한 때문에 뺀 개수 */
+  function normWordSet(name, words, only) {
+    var out = [], seen = {}, len = 0, cut = 0;
+    (Array.isArray(words) ? words : []).forEach(function (raw) {
+      var w = String(raw == null ? '' : raw);
+      try { w = w.normalize('NFC'); } catch (e) { /* ignore */ }
+      w = w.replace(/[,\u0000-\u001F\u007F]/g, ' ').trim().replace(/\s+/g, ' ');
+      var n = Array.from(w).length;
+      if (n < 1 || n > 20) return;
+      var key = w.toLowerCase(); if (seen[key]) return;
+      var add = (out.length ? 2 : 0) + w.length; // ', ' 로 잇는다
+      if (len + add > WS_MAX_LEN) { cut++; return; }
+      seen[key] = 1; out.push(w); len += add;
+    });
+    if (!out.length) return null;
+    var nm = String(name == null ? '' : name).replace(/[\u0000-\u001F\u007F]/g, ' ').trim().replace(/\s+/g, ' ');
+    return { name: Array.from(nm).slice(0, WS_MAX_NAME).join(''), words: out, only: !!only, cut: cut };
+  }
+  function wordSetUrl(set) {
+    var payload = { v: 1, w: set.words, o: set.only ? 1 : 0 };
+    if (set.name) payload.n = set.name;
+    return location.origin + '/#ws=' + b64urlEncode(JSON.stringify(payload));
+  }
+  function pendingWordSet() {
+    try {
+      var v = JSON.parse(sessionStorage.getItem(WS_KEY) || 'null');
+      return v && typeof v === 'object' ? normWordSet(v.name, v.words, v.only) : null;
+    } catch (e) { return null; }
+  }
+  function clearPendingWordSet() { landing.wordSet = null; try { sessionStorage.removeItem(WS_KEY); } catch (e) { /* ignore */ } }
+  /** 주소의 #ws= 를 읽어 이 탭에 기억하고 주소에서 지운다 */
+  function readWordSetHash() {
+    var m = null;
+    try { m = /(?:^#|&)ws=([A-Za-z0-9_-]*)/.exec(location.hash || ''); } catch (e) { /* ignore */ }
+    if (!m) { landing.wordSet = pendingWordSet(); return; }
+    try { history.replaceState(history.state, '', location.pathname + location.search); } catch (e) { /* ignore */ }
+    var set = null;
+    try {
+      var d = m[1].length <= 40000 ? JSON.parse(b64urlDecode(m[1])) : null;
+      if (d && typeof d === 'object') set = normWordSet(d.n, d.w, d.o);
+    } catch (e) { set = null; }
+    if (set) { try { sessionStorage.setItem(WS_KEY, JSON.stringify({ name: set.name, words: set.words, only: set.only })); } catch (e) { /* ignore */ } }
+    else toast('단어 세트 링크를 읽지 못했어요. 주소가 잘렸는지 확인해 줘', 'error');
+    landing.wordSet = set || pendingWordSet();
+  }
+  /** 방을 만든 직후(호스트): 받은 단어 세트로 우리만의 단어를 채운다 */
+  function applyPendingWordSet() {
+    var ws = landing.wordSet || pendingWordSet(); clearPendingWordSet();
+    if (!ws) return;
+    var patch = { customWords: ws.words.join(', '), customWordsOnly: !!ws.only };
+    state.settings = Object.assign({}, state.settings, patch);
+    ui.customOpen = true; ui.setSource = { name: ws.name, key: ws.words.join(',') };
+    emit('room:settings', { settings: patch });
+    toast((ws.name ? '"' + ws.name + '" ' : '') + '단어 세트(' + ws.words.length + '개)를 우리만의 단어에 넣었어요', 'ok');
+    renderAll();
+  }
+  /** 단어 세트 링크 보내기: 모바일은 공유 시트, PC 는 문구 + 링크 복사 */
+  function shareWordSet(set) {
+    if (!set) { toast('링크로 만들 단어가 없어요', 'error'); return; }
+    var url = wordSetUrl(set);
+    var text = '이뭔그 ' + (set.name ? '"' + set.name + '" ' : '') + '단어 세트 ' + set.words.length + '개 🎨 이 단어로 방 만들기';
+    var note = set.cut ? ' 단어가 많아서 ' + set.words.length + '개만 담았어요' : '';
+    if (canShareInvite()) {
+      navigator.share({ title: '이뭔그', text: text, url: url }).then(function () { if (note) toast(note.trim()); }, function (err) {
+        if (err && err.name === 'AbortError') return;
+        copyText(text + ' → ' + url, '단어 세트 링크를 복사했어요!' + note, '복사에 실패했어요');
+      });
+      return;
+    }
+    copyText(text + ' → ' + url, '단어 세트 링크를 복사했어요!' + note, '복사에 실패했어요');
+  }
+  /** 방 설정의 "이 단어로 방 만들기 링크": 불러온 세트 그대로면 그 이름도 담는다 */
+  function shareRoomWordSet() {
+    if (!isHost() || state.phase !== 'lobby') return;
+    var ta = $('set-customWords'), cb = $('set-customWordsOnly');
+    var words = parseWords(ta ? ta.value : state.settings.customWords || '').words;
+    var src = ui.setSource, name = src && src.key === words.join(',') ? src.name : '';
+    shareWordSet(normWordSet(name, words, cb ? cb.checked : state.settings.customWordsOnly));
+  }
   var GUEST_STARTED_KEY = 'drawguess.guestStarted'; // sessionStorage: 이 탭에서 게스트로 시작했는가
   function guestStarted() { try { return sessionStorage.getItem(GUEST_STARTED_KEY) === '1'; } catch (e) { return false; } }
   function setGuestStarted(v) { try { if (v) sessionStorage.setItem(GUEST_STARTED_KEY, '1'); else sessionStorage.removeItem(GUEST_STARTED_KEY); } catch (e) { /* ignore */ } }
@@ -2193,8 +2296,10 @@
     }
     var bc = $('btn-create'); if (bc) bc.addEventListener('click', createRoom);
     var bj = $('btn-join'); if (bj) bj.addEventListener('click', joinRoom);
+    var wd = $('btn-wordset-card-drop'); if (wd) wd.addEventListener('click', function () { clearPendingWordSet(); renderLanding(); toast('받은 단어 세트를 뺐어요'); });
 
     rememberRef();
+    readWordSetHash();
     // ?room=CODE → 초대받은 방. 없으면 OAuth 리다이렉트 전에 임시 저장해 둔 코드(redirectTo 에는 쿼리가 없다)
     var rc = '';
     try { rc = cleanCode(new URLSearchParams(location.search).get('room')); } catch (e) { /* ignore */ }
@@ -2251,7 +2356,7 @@
     syncAccountProfile(false);
     p.token = getToken();
     var ref = getRef(); if (ref) p.ref = ref;
-    withAck('room:create', p, function (ack) { setToken(ack.token); enterRoom(ack.roomCode, ack.playerId); });
+    withAck('room:create', p, function (ack) { setToken(ack.token); enterRoom(ack.roomCode, ack.playerId); applyPendingWordSet(); });
   }
   function joinRoom() {
     var code = codeInput();
@@ -2334,7 +2439,7 @@
     state.roomCode = null; state.hostId = null; state.phase = 'lobby'; state.round = 0; state.totalRounds = 0;
     state.drawerId = null; state.players = []; state.settings = Object.assign({}, DEFAULT_SETTINGS);
     ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null; ui.optionsKey = '';
-    ui.gallery = null; ui.galleryThumbs = []; ui.galleryOpen = false; ui.saveStatus = null; ui.saveJob = null; ui.customOpen = false; ui.customStash = null;
+    ui.gallery = null; ui.galleryThumbs = []; ui.galleryOpen = false; ui.saveStatus = null; ui.saveJob = null; ui.customOpen = false; ui.customStash = null; ui.setSource = null;
     state.lobbyStep = 'mode'; state.fixedDrawerId = null;
     setTimeLeft(null);
     resetCanvasState(); clearChat();
@@ -2433,19 +2538,20 @@
   function canShareInvite() {
     try { return !!navigator.share && window.matchMedia('(pointer: coarse)').matches; } catch (e) { return false; }
   }
-  function copyInviteText(text) {
-    function ok() { toast('초대 문구와 링크를 복사했어요!', 'ok'); }
+  function copyText(text, okMsg, failMsg) {
+    function ok() { toast(okMsg, 'ok'); }
     function fallback() {
       try {
         var ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', '');
         ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select();
         var done = document.execCommand && document.execCommand('copy'); document.body.removeChild(ta);
-        if (done) ok(); else toast('복사에 실패했어요. 방 코드: ' + state.roomCode, 'error');
-      } catch (e) { toast('복사에 실패했어요. 방 코드: ' + state.roomCode, 'error'); }
+        if (done) ok(); else toast(failMsg, 'error');
+      } catch (e) { toast(failMsg, 'error'); }
     }
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback);
     else fallback();
   }
+  function copyInviteText(text) { copyText(text, '초대 문구와 링크를 복사했어요!', '복사에 실패했어요. 방 코드: ' + state.roomCode); }
   function copyInvite() {
     if (!state.roomCode) return;
     var url = inviteUrl(), text = INVITE_TEXT + ' → ' + url;
@@ -2523,6 +2629,7 @@
     });
     var cw = $('set-customWords');
     if (cw) { cw.addEventListener('input', sendSettingsDebounced); cw.addEventListener('blur', sendSettings); }
+    var wsb = $('btn-wordset-link'); if (wsb) wsb.addEventListener('click', function () { sendSettings(); shareRoomWordSet(); });
     // 기본 단어 카테고리 칩: 기본은 13개 전부 켜진 상태(settings.categories = [] = 전체)에서 빼는 식으로 쓴다.
     // 전부 켜면 [] 로 정규화(서버 규칙과 같음), 마지막 하나는 못 끈다. "모두 선택"=[], "모두 해제"=첫 카테고리 하나만 남김
     var catRow = $('cat-row');
@@ -3260,7 +3367,9 @@
         ed.addEventListener('click', function () { openWordSetForm(s); });
         var dl = el('button', 'btn btn-ghost btn-sm ws-delete', '삭제'); dl.type = 'button';
         dl.addEventListener('click', function () { deleteWordSet(s); });
-        acts.appendChild(ed); acts.appendChild(dl);
+        var lk = el('button', 'btn btn-ghost btn-sm ws-link', '🔗 링크'); lk.type = 'button'; lk.title = '이 단어로 방 만들기 링크';
+        lk.addEventListener('click', function () { shareWordSet(normWordSet(s.name, s.words, true)); });
+        acts.appendChild(lk); acts.appendChild(ed); acts.appendChild(dl);
         li.appendChild(acts);
         list.appendChild(li);
       });
@@ -3327,6 +3436,7 @@
     var ta = $('set-customWords'), cb = $('set-customWordsOnly');
     if (ta) ta.value = s.words.join(', ');
     if (cb) cb.checked = true;
+    ui.setSource = { name: s.name, key: parseWords(s.words.join(',')).words.join(',') }; // 링크에 세트 이름을 담는 데 쓴다
     sendSettings();
     toast('"' + s.name + '" 세트를 방 설정에 적용했어요', 'ok');
   }
