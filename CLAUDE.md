@@ -7,7 +7,7 @@
 - **날짜는 시계로 확인한다.** 세션은 하루가 지나도 모르니 날짜가 걸린 일(일정, D-day, 로드맵)은 먼저 `date`를 실행해 오늘을 구한다. 문서에는 "내일"·"다음 주" 대신 절대 날짜와 요일을 쓴다.
 - **운영자에게 "직접 확인해 달라"고 요청할 때는 접속 주소를 반드시 같이 준다.** 말로만 "폰에서 봐 주세요"라고 끝내지 않는다. 로컬 서버면 `node scripts/local-urls.js <포트>`를 실행해 나온 `localhost` 주소와 **LAN IP 주소**(폰·다른 기기용)를 함께 적고, 서버 실행 명령(`ALLOW_SOLO=1`, `PORT` 지정)과 해당 폴더 경로를 붙인다. develop에 push해 스테이징에 올라간 변경이면 스테이징 주소(https://draw-guess-staging.onrender.com)도 적는다.
 - 클라이언트·서버 계약은 `PROTOCOL.md`가 권위 문서다. 이벤트·필드를 바꾸면 먼저 문서를 고친다.
-- 변경 뒤 `npm test`와 `npm run test:browser`를 둘 다 통과시킨다(모바일 화면을 건드리면 `npm run test:mobile`도).
+- 변경은 `npm test`와 `npm run test:browser`를 둘 다 통과해야 한다(모바일 화면을 건드리면 `npm run test:mobile`도). **전체 테스트는 builder가 아니라 QA가 돌린다**(builder는 빠른 확인 뒤 먼저 올려 운영자가 화면을 일찍 보게 한다). 수동 작업은 직접 전체를 돌린다.
 - 배포 검증은 `node test/asset-version.js <ref>` 값과 `/healthz`의 `version`을 비교한다(Windows CRLF 때문에 워킹 카피 해시는 서버 값과 다르다).
 
 ## 브랜치와 배포
