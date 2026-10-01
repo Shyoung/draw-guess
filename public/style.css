@@ -789,6 +789,19 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 .relay-hint:hover:not(:disabled) { background: #ffe6b3; }
 .relay-hint:disabled { opacity: .45; }
 .relay-hint .rh-short { display: none; }
+/* 힌트 버튼 안내 말풍선(처음 한 번): body 바로 아래 fixed. left/top·꼬리 위치(--arrow-x)는 client.js 가 버튼 기준으로, 화면 밖으로 안 나가게 */
+.relay-hint-tip {
+  position: fixed; z-index: 90; left: 0; top: 0; max-width: calc(100vw - 16px); padding: 8px 12px; border-radius: 12px;
+  background: var(--text); color: #fff; font-size: 13px; font-weight: 800; line-height: 1.35; white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .22); cursor: pointer; animation: tip-pop .25s ease-out;
+}
+.relay-hint-tip[hidden] { display: none; }
+.relay-hint-tip::before {
+  content: ''; position: absolute; top: -6px; left: var(--arrow-x, 50%); width: 12px; height: 12px; margin-left: -6px;
+  background: inherit; transform: rotate(45deg); border-radius: 2px;
+}
+@keyframes tip-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .relay-hint-tip { animation: none; } }
 /* 조합 마스크: 요소 묶음 사이에 가운뎃점. 맞힌 요소(본인 화면)는 초록, 방금 맞혔으면 한 번 튀어 오른다 */
 .mask-part { display: inline-flex; align-items: flex-end; gap: 5px; }
 .mask-part.solved .mask-box { background: #d6f5e3; color: #1e9a62; border-bottom-color: #1e9a62; }

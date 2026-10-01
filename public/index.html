@@ -712,6 +712,8 @@
   </div>
 
   <div id="toasts" class="toasts" aria-live="assertive"></div>
+  <!-- 이어 그리기: 맞히는 사람이 처음 힌트 버튼을 볼 때 한 번(계정별) 버튼 아래에 붙는 안내. 위치는 client.js 가 버튼 기준으로 잡는다 -->
+  <div id="relay-hint-tip" class="relay-hint-tip" role="status" hidden>여기서 초성 힌트를 볼 수 있어요!</div>
 
   <script src="/socket.io/socket.io.js"></script>
   <!-- 공개 설정(window.APP_CONFIG): 로그인이 켜져 있으면 { supabaseUrl, supabaseAnonKey }, 아니면 {} -->

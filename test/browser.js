@@ -103,6 +103,8 @@ async function say(page, text) {
  * 툴바 활성 · 다른 주자 툴바 잠김 · 차례 전 주자와 맞히는 사람은 마스크(' · ') → 상단 띠 → 주자 채팅은 주자끼리 →
  * 구간 교대(game:baton): 앞 주자 툴바 잠김 · "다음은 ○○님" · 새 주자 배너 · 제시어 공개 · 앞사람 그림 되돌리기 불가 →
  * 맞히는 사람이 요소를 모두 입력하면 turnEnd → 2번 문제에서 배치 전환.
+ * R10 힌트 안내 말풍선: 처음 맞히는 사람에게 버튼 아래 한 번(게스트 'guest' 기록) · 버튼을 누르면 사라짐 · 새로고침 뒤 다시 안 뜸 ·
+ * localStorage 키를 지우면 다시 뜸 · 말풍선을 누르면 사라짐 · 다른 사람이 처음 맞힐 때 6초 뒤 저절로 사라짐.
  */
 /** relay 첫 주자: 후보 칩 i, j 를 차례로 눌러 "이 두 개로 그리기". 제시어 "a · b"(고른 순서)를 돌려준다 */
 async function relayPick(pg, i = 0, j = 1) {
@@ -271,7 +273,22 @@ async function relayScenario(browser) {
   check(h0.shown && !h0.disabled && h0.text.includes('초성 힌트 (남은 3회 · −25%)') && h0.below, 'relay 맞히는 사람: 마스크 아래 "초성 힌트 (남은 3회 · −25%)" 버튼(활성)', JSON.stringify(h0));
   check(h0.status.includes('🎯') && h0.status.includes(nickOf(first)), 'relay 맞히는 사람: 상태 띠 "🎯 내가 맞혀요 · 🖍 ○○님이 이어 그리는 중"', h0.status);
   check(!(await hintView(first)).shown && !(await hintView(second)).shown, 'relay: 주자에게는 힌트 버튼 없음');
+  // R10: 처음 맞히는 사람이 되면 힌트 버튼 바로 아래 안내 말풍선(한 번, 게스트는 'guest' 로 기록)
+  const tipView = (pg) => pg.evaluate(() => {
+    const tip = document.getElementById('relay-hint-tip'), b = document.getElementById('btn-relay-hint');
+    const r = tip.getBoundingClientRect(), br = b.getBoundingClientRect();
+    let saved = null; try { saved = JSON.parse(localStorage.getItem('drawguess.relayHintTip') || 'null'); } catch (e) { /* ignore */ }
+    return { shown: !tip.hidden && r.width > 0, text: tip.textContent.trim(), below: r.top >= br.bottom - 1, near: r.top - br.bottom < 24,
+      inView: r.left >= 0 && r.right <= document.documentElement.clientWidth && r.bottom <= innerHeight, underBtn: r.left <= br.right && r.right >= br.left, saved,
+      box: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)], btn: [Math.round(br.left), Math.round(br.bottom), Math.round(br.width)] };
+  });
+  const tp0 = await tipView(guesser);
+  check(tp0.shown && tp0.text === '여기서 초성 힌트를 볼 수 있어요!' && tp0.below && tp0.near && tp0.underBtn && tp0.inView && tp0.saved && tp0.saved.guest > 0,
+    'relay 힌트 말풍선: 처음 맞히는 사람에게 버튼 바로 아래 "여기서 초성 힌트를 볼 수 있어요!" · 화면 안 · localStorage 에 guest 기록', JSON.stringify(tp0));
+  check(!(await tipView(first)).shown && !(await tipView(second)).shown, 'relay 힌트 말풍선: 주자에게는 없음');
+  await guesser.screenshot({ path: path.join(SHOTS, 'e2e-relay-hint-tip.png') });
   await guesser.click('#btn-relay-hint');
+  check(!(await tipView(guesser)).shown, 'relay 힌트 말풍선: 힌트 버튼을 누르면 사라짐');
   await guesser.waitForFunction(() => window.__dg.ui.relayInfo && window.__dg.ui.relayInfo.hintsUsed === 1, null, { timeout: 3000 }).catch(() => {});
   await sleep(200);
   const h1 = await hintView(guesser);
@@ -288,6 +305,12 @@ async function relayScenario(browser) {
   const hr = await hintView(guesser);
   check(hr.shown && hr.used === 1 && hr.text.includes('남은 2회') && !hr.disabled, 'relay 힌트 후 새로고침: 버튼 "남은 2회"로 복원(활성)', JSON.stringify(hr));
   check(hr.revealed === h1.revealed && (await maskOf(guesser)) === maskBeforeReload, 'relay 힌트 후 새로고침: 마스크의 공개 칸 그대로', `${maskBeforeReload} → ${await maskOf(guesser)}`);
+  check(!(await tipView(guesser)).shown, 'relay 힌트 말풍선: 새로고침 뒤에는 다시 안 뜸');
+  await guesser.evaluate(() => { localStorage.removeItem('drawguess.relayHintTip'); window.__dg.renderAll(); });
+  const tpAgain = await tipView(guesser);
+  check(tpAgain.shown && tpAgain.saved && tpAgain.saved.guest > 0, 'relay 힌트 말풍선: localStorage 키를 지우면 다시 뜸(다시 기록)', JSON.stringify(tpAgain));
+  await guesser.click('#relay-hint-tip');
+  check(!(await tipView(guesser)).shown, 'relay 힌트 말풍선: 말풍선을 누르면 사라짐');
   for (let n = 2; n <= 3; n++) {
     await guesser.click('#btn-relay-hint');
     await guesser.waitForFunction((k) => window.__dg.ui.relayInfo && window.__dg.ui.relayInfo.hintsUsed === k, n, { timeout: 3000 }).catch(() => {});
@@ -413,6 +436,10 @@ async function relayScenario(browser) {
         const hq = await hintView(gq);
         check(hq.shown && !hq.disabled && hq.text.includes('남은 3회'), 'relay: 다음 문제 맞히는 사람 힌트 버튼 "남은 3회"로 새로', JSON.stringify(hq));
         check(!(await hintView(guesser)).shown, 'relay: 이번엔 주자가 된 지난 맞히는 사람에게 힌트 버튼 없음');
+        // 이 사람도 처음 맞히는 사람 → 말풍선. 아무것도 안 누르면 6초 뒤 저절로 사라진다
+        check((await tipView(gq)).shown, 'relay 힌트 말풍선: 다음 문제의 (처음) 맞히는 사람에게도 한 번');
+        await sleep(6300);
+        check(!(await tipView(gq)).shown && (await hintView(gq)).shown, 'relay 힌트 말풍선: 6초 뒤 사라짐(버튼은 그대로)');
       }
       await drawScribble(ch);
       await sleep(300);

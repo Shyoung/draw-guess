@@ -1622,6 +1622,7 @@
     var show = isRelayGuesser() && (ph === 'drawing' || ph === 'choosing') && hs.max > 0;
     b.hidden = !show;
     var tb = document.querySelector('#view-room .topbar'); if (tb) tb.classList.toggle('has-relay-hint', show);
+    renderHintTip(show && ph === 'drawing'); // 처음 한 번 안내 말풍선(choosing 중 비활성 버튼에는 안 띄운다)
     if (!show) return;
     b.disabled = !(ph === 'drawing' && hs.left > 0 && !ui.hintPending && maskHasHidden(ui.wordMask));
     var long = hs.left > 0 ? '초성 힌트 (남은 ' + hs.left + '회 · −' + HINT_PENALTY + '%)' : '초성 힌트 (남은 0회)';
@@ -1634,12 +1635,51 @@
       + (hs.used ? ' · 지금까지 ' + hs.used + '번(−' + Math.min(100, hs.used * HINT_PENALTY) + '%)' : '');
   }
   function requestRelayHint() {
+    hideHintTip();
     var b = $('btn-relay-hint'); if (!b || b.hidden || b.disabled) return;
     emit('hint:request'); // ack 없음 — 응답은 game:hint { wordMask, hintsUsed }
     ui.hintPending = true; // 연타로 두 번 쓰지 않게 응답(또는 2초)까지 잠근다
     if (ui.hintPendingTimer) clearTimeout(ui.hintPendingTimer);
     ui.hintPendingTimer = setTimeout(function () { ui.hintPending = false; ui.hintPendingTimer = null; renderRelayHint(); }, 2000);
     renderRelayHint();
+  }
+  // ---- 힌트 버튼 안내 말풍선 "여기서 초성 힌트를 볼 수 있어요!" — 계정별 1회(이 브라우저 localStorage: 로그인은 계정 id, 게스트는 'guest') ----
+  var HINT_TIP_KEY = 'drawguess.relayHintTip'; // { [userId|'guest']: 처음 띄운 시각 }
+  var HINT_TIP_MS = 6000;
+  var hintTipMem = {}; // localStorage 를 못 쓰는 브라우저에서도 이 탭에서는 한 번만
+  function hintTipOwner() { return acctLoggedIn() && acct.user.id ? String(acct.user.id) : 'guest'; }
+  function hintTipMap() {
+    try { var m = JSON.parse(localStorage.getItem(HINT_TIP_KEY) || '{}'); return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; } catch (e) { return {}; }
+  }
+  function renderHintTip(canShow) {
+    var tip = $('relay-hint-tip'); if (!tip) return;
+    if (!canShow) { hideHintTip(); return; }
+    if (tip.hidden) {
+      var owner = hintTipOwner();
+      if (hintTipMem[owner] || hintTipMap()[owner]) return;
+      // 띄우는 순간 기록한다(새로고침·다음 게임에서는 다시 안 뜬다)
+      hintTipMem[owner] = true;
+      var m = hintTipMap(); m[owner] = Date.now();
+      try { localStorage.setItem(HINT_TIP_KEY, JSON.stringify(m)); } catch (e) { /* ignore */ }
+      tip.hidden = false;
+      if (ui.hintTipTimer) clearTimeout(ui.hintTipTimer);
+      ui.hintTipTimer = setTimeout(hideHintTip, HINT_TIP_MS);
+    }
+    placeHintTip();
+  }
+  function hideHintTip() {
+    if (ui.hintTipTimer) { clearTimeout(ui.hintTipTimer); ui.hintTipTimer = null; }
+    var tip = $('relay-hint-tip'); if (tip && !tip.hidden) tip.hidden = true;
+  }
+  /** 버튼 바로 아래 가운데, 화면 좌우 8px 안으로. 꼬리는 버튼 가운데를 가리킨다 */
+  function placeHintTip() {
+    var tip = $('relay-hint-tip'), b = $('btn-relay-hint'); if (!tip || tip.hidden || !b) return;
+    var r = b.getBoundingClientRect(); if (!r.width) return;
+    var vw = document.documentElement.clientWidth || window.innerWidth, w = tip.offsetWidth, pad = 8;
+    var cx = r.left + r.width / 2, left = Math.max(pad, Math.min(vw - w - pad, cx - w / 2));
+    tip.style.left = Math.round(left) + 'px';
+    tip.style.top = Math.round(r.bottom + 9) + 'px';
+    tip.style.setProperty('--arrow-x', Math.round(Math.max(14, Math.min(w - 14, cx - left))) + 'px');
   }
   function clearHintPending() {
     ui.hintPending = false;
@@ -2914,7 +2954,7 @@
   function resetToLanding(sendLeave) {
     if (sendLeave) emit('room:leave');
     inRoom = false;
-    closeWordWindow(); ui.streamerWas = null;
+    closeWordWindow(); ui.streamerWas = null; hideHintTip();
     rejoinTarget = null;
     closeSheet(true);
     clearLastRoom();
@@ -3190,6 +3230,8 @@
     });
     renderPrefSwitches();
     var rh = $('btn-relay-hint'); if (rh) rh.addEventListener('click', requestRelayHint); // 이어 그리기 맞히는 사람 초성 힌트
+    var rht = $('relay-hint-tip'); if (rht) rht.addEventListener('click', hideHintTip);
+    window.addEventListener('resize', placeHintTip);
     var go = $('btn-gallery-open'); if (go) go.addEventListener('click', openGallery);
     var rd = $('btn-results-done'); if (rd) rd.addEventListener('click', function () {
       ui.resultsPending = false; ui.ranking = null; emit('results:done'); renderAll();

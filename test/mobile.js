@@ -519,6 +519,12 @@ async function relayRun() {
     const hb = await box(m, '#btn-relay-hint'), tm = await box(m, '#timer'), mn = await box(m, '#btn-menu'), ri = await box(m, '#round-indicator'), wa2 = await box(m, '#word-area');
     check(s2.role === 'guesser' && inRect(hb, RW, RH) && hb.height >= 30, 'relay 360px 맞히는 사람: 힌트 버튼 화면 안 · 높이 ≥ 30px', fmt(hb));
     check(hb && wa2 && hb.y + hb.height <= wa2.y + 0.5 && !overlaps(hb, tm) && !overlaps(hb, mn) && !overlaps(hb, ri), 'relay 360px 맞히는 사람: 힌트 버튼은 헤더 1행(라운드·타이머·⋯와 안 겹침, 마스크 위)', `${fmt(ri)} ${fmt(hb)} ${fmt(tm)} ${fmt(mn)}`);
+    // R10: 처음 맞히는 사람 → 헤더 힌트 버튼 아래 안내 말풍선, 360px 화면 안
+    const tip = await m.evaluate(() => { const r = document.getElementById('relay-hint-tip').getBoundingClientRect(), b = document.getElementById('btn-relay-hint').getBoundingClientRect();
+      return { shown: !document.getElementById('relay-hint-tip').hidden && r.width > 0, l: r.left, r: r.right, t: r.top, b: r.bottom, bb: b.bottom, bl: b.left, br: b.right }; });
+    check(tip.shown && tip.l >= 0 && tip.r <= RW && tip.b <= RH && tip.t >= tip.bb - 1 && tip.t - tip.bb < 24 && tip.l <= tip.br && tip.r >= tip.bl,
+      'relay 360px 힌트 말풍선: 헤더 힌트 버튼 바로 아래 · 화면 안(좌우 넘침 없음)', JSON.stringify(tip));
+    await m.screenshot({ path: require('path').join(__dirname, 'shots', 'm-relay-hint-tip.png') }).catch(() => {});
     check((await m.textContent('#btn-relay-hint')).includes('힌트 3 · −25%') && (await m.getAttribute('#btn-relay-hint', 'aria-label')).includes('초성 힌트 (남은 3회 · −25%)'), 'relay 360px: 짧은 문구 "힌트 3 · −25%"(aria-label 은 전체)', await m.textContent('#btn-relay-hint'));
     check(inRect(await box(m, '#canvas'), RW, RH) && inRect(await box(m, '#chat-input'), RW, RH) && (await m.textContent('#draw-status-text')).includes('🎯'), 'relay 360px 맞히는 사람: 캔버스·입력창 화면 안 · 상태 띠 🎯');
     await m.locator('#btn-relay-hint').tap();
