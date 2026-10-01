@@ -11,7 +11,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 2. `docs/ops/TEST-LOG.md`에서 상태가 `열림`인 항목을 심각도 순(막힘 → 높음 → 낮음)으로 처리한다. 한 번에 **막힘·높음은 전부, 낮음은 3개까지**.
 3. 고치기 전에 재현한다(해당 테스트 실행 또는 코드 추적). 재현이 안 되면 상태를 `재현 안 됨`으로 바꾸고 이유를 적는다.
 4. 최소 범위로 고친다. `PROTOCOL.md`에 영향이 있으면 같이 고친다. 회귀를 막는 테스트를 `test/`에 추가할 수 있으면 추가한다.
-5. `npm test`, `npm run test:browser` 통과 확인 뒤 커밋(`수정: ...` 형식 한국어 한 줄)하고 `git add`는 변경한 경로를 명시하고(`-A` 금지), push 직전에 `git pull --rebase origin develop`을 한 뒤 `origin develop`에 push한다.
+5. 결함과 관련된 테스트를 돌려 확인한 뒤 커밋(전체 테스트는 직후 QA가 돌린다)(`수정: ...` 형식 한국어 한 줄)하고 `git add`는 변경한 경로를 명시하고(`-A` 금지), push 직전에 `git pull --rebase origin develop`을 한 뒤 `origin develop`에 push한다.
 6. TEST-LOG 항목 상태를 `수정됨(커밋 해시 앞 7자리)`로 바꾼다.
 
 ## 판단이 필요한 결함

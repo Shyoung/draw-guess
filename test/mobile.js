@@ -418,12 +418,174 @@ async function longWordRun() {
   }, { onPageError: () => { failures++; }, customWords: LONG_WORDS, wordCount: 2 });
 }
 
+/**
+ * 3회차: 이어 그리기(relay) 360px 폰 + 데스크톱 2명. 시작 순서 = 참가 순서(모바일·D1·D2)라
+ *   1번 문제 모바일→D1 / D2 맞힘 · 2번 D1→D2 / 모바일 맞힘 · 3번 D2→모바일 / D1 맞힘.
+ * 확인: 주자(현재 · 차례 전 잠김)와 맞히는 사람 배치가 360px 에서 넘치지 않음, 맞히는 사람 헤더 1행의 힌트 버튼(키보드가 올라와도 보임),
+ *   부분 정답 문구 · 마스크 공개, data-role 이 문제마다 한 번씩만 바뀜(깜빡임 없음), 갤러리 공동 작가 캡션 한 줄.
+ */
+async function relayRun() {
+  const { chromium, devices } = require('playwright');
+  const { startServer, scribble, URL } = require('./mobile-lib');
+  const RW = 360, RH = 640, RKB = 400;
+  const inRect = (b, w, h) => !!b && b.width > 0 && b.height > 0 && b.x >= -0.5 && b.y >= -0.5 && b.x + b.width <= w + 0.5 && b.y + b.height <= h + 0.5;
+  const server = await startServer();
+  const browser = await chromium.launch({ channel: 'chrome', headless: !process.env.HEADFUL });
+  const timeout = setTimeout(() => { console.log('FAIL  relay 타임아웃'); process.exit(2); }, 150000);
+  try {
+    const mctx = await browser.newContext({ ...devices['iPhone 13'], viewport: { width: RW, height: RH } });
+    const m = await mctx.newPage();
+    const ds = [];
+    for (const nick of ['데스크톱1', '데스크톱2']) ds.push(await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage());
+    for (const [nick, pg] of [['모바일', m], ['데스크톱1', ds[0]], ['데스크톱2', ds[1]]]) pg.on('pageerror', (e) => { console.log(`[${nick}] pageerror: ${e.message}`); failures++; });
+    await m.goto(URL + '/');
+    await m.waitForSelector('#landing-step-profile:not([hidden])');
+    await m.fill('#nick', '모바일');
+    await m.click('#btn-profile-next');
+    await m.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    await m.click('#btn-create');
+    await m.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
+    const code = (await m.textContent('#room-code')).trim().replace(/[^A-Z]/g, '');
+    for (const [i, pg] of ds.entries()) {
+      await pg.goto(`${URL}/?room=${code}`);
+      await pg.waitForSelector('#landing-step-profile:not([hidden])');
+      await pg.fill('#nick', '데스크톱' + (i + 1));
+      await pg.click('#btn-profile-next');
+      await pg.waitForSelector('#invite-card:not([hidden])', { timeout: 3000 });
+      await pg.click('#btn-join');
+      await pg.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
+    }
+    await m.waitForFunction(() => window.__dg.state.players.length === 3, null, { timeout: 5000 });
+    await m.click('#mode-panel .mode-card[data-mode="relay"]');
+    await m.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
+    check(await m.locator('#btn-start').isEnabled(), 'relay 360px: 3명이면 시작 버튼 풀림');
+    await m.click('#settings-details > summary');
+    await m.selectOption('#set-drawTime', '15');
+    await m.selectOption('#set-wordCount', '8'); // 가장 많은 후보(8개)로 360px 한 화면 검사
+    await sleep(400);
+    await m.evaluate(() => {
+      const v = document.getElementById('view-room'); window.__roles = [];
+      new MutationObserver(() => window.__roles.push({ role: v.getAttribute('data-role'), ph: v.getAttribute('data-phase') })).observe(v, { attributes: true, attributeFilter: ['data-role', 'data-phase'] });
+    });
+    const shell = async (label) => {
+      const mm = await m.evaluate(() => ({ sh: document.documentElement.scrollHeight, sw: document.documentElement.scrollWidth, ih: window.innerHeight, iw: window.innerWidth, role: document.getElementById('view-room').getAttribute('data-role') }));
+      check(mm.sw <= RW && mm.sh <= mm.ih + 1, `relay 360px ${label}: 가로·세로 페이지 스크롤 없음`, JSON.stringify(mm));
+      const tb = await box(m, '.topbar'), wa = await box(m, '#word-area');
+      check(tb && tb.height <= 120 && inRect(wa, RW, RH), `relay 360px ${label}: 헤더 ≤ 120px · 마스크/제시어 화면 안`, `${fmt(tb)} / ${fmt(wa)}`);
+      return mm;
+    };
+    /** 첫 주자: 후보 칩 2개를 눌러 "이 두 개로 그리기" → 제시어 "a · b" */
+    const pick2 = async (pg, timeout) => {
+      await pg.waitForSelector('#word-options .pick-option:not([disabled])', { timeout });
+      const o = pg.locator('#word-options .pick-option');
+      const a = (await o.nth(0).locator('.pick-text').textContent()).trim(), b = (await o.nth(1).locator('.pick-text').textContent()).trim();
+      await o.nth(0).click(); await o.nth(1).click(); await pg.click('#btn-relay-pick');
+      return a + ' · ' + b;
+    };
+    const answer = async (pg, w) => { await say(pg, w.split(' · ').join(' ')); await m.waitForSelector('#overlay-turnend:not([hidden])', { timeout: 6000 }).catch(() => {}); };
+
+    // 1번 문제: 모바일이 첫 주자(고르고 그림) · D2 가 맞힘
+    await m.click('#btn-start');
+    await m.waitForSelector('#word-options .pick-option:not([disabled])', { timeout: 8000 });
+    // 후보 8개: 2열로 칩·미리보기·버튼이 한 화면에(카드 안 스크롤 없음)
+    await m.locator('#word-options .pick-option').nth(0).tap();
+    await m.locator('#word-options .pick-option').nth(1).tap();
+    await sleep(150);
+    const pk = await m.evaluate(() => {
+      const bs = [...document.querySelectorAll('#word-options .pick-option')].map((b) => b.getBoundingClientRect());
+      const card = document.querySelector('#overlay-choosing .card'), go = document.getElementById('btn-relay-pick').getBoundingClientRect();
+      return { n: bs.length, cols: new Set(bs.map((r) => Math.round(r.left))).size, maxBottom: Math.max(...bs.map((r) => r.bottom)), maxRight: Math.max(...bs.map((r) => r.right)),
+        minLeft: Math.min(...bs.map((r) => r.left)), goBottom: go.bottom, goOn: !document.getElementById('btn-relay-pick').disabled, cardScroll: card.scrollHeight - card.clientHeight, iw: innerWidth, ih: innerHeight };
+    });
+    check(pk.n === 8 && pk.cols === 2 && pk.minLeft >= 0 && pk.maxRight <= pk.iw && pk.maxBottom <= pk.ih && pk.goBottom <= pk.ih && pk.cardScroll <= 1 && pk.goOn,
+      'relay 360px 고르기: 후보 8개 2열 · 칩·"이 두 개로 그리기" 한 화면 · 카드 스크롤 없음 · 2개 고르면 버튼 켜짐', JSON.stringify(pk));
+    await m.screenshot({ path: require('path').join(__dirname, 'shots', 'm-relay-pick.png') }).catch(() => {});
+    const o1 = m.locator('#word-options .pick-option .pick-text');
+    const w1 = (await o1.nth(0).textContent()).trim() + ' · ' + (await o1.nth(1).textContent()).trim();
+    await m.locator('#btn-relay-pick').tap();
+    await m.waitForSelector('#view-room[data-phase="drawing"][data-role="drawer"]', { timeout: 5000 });
+    await sleep(1700); // 내 차례 배너가 사라질 때까지
+    const s1 = await shell('주자(내 차례)');
+    check(s1.role === 'drawer' && inRect(await box(m, '#toolbar'), RW, RH) && inRect(await box(m, '#canvas'), RW, RH), 'relay 360px 주자(내 차례): 그리기 배치 · 툴바·캔버스 화면 안');
+    check(await m.locator('#btn-relay-hint').isHidden(), 'relay 360px 주자: 힌트 버튼 없음');
+    await scribble(m);
+    await answer(ds[1], w1);
+
+    // 2번 문제: D1 이 고름 · 모바일이 맞히는 사람
+    const w2 = await pick2(ds[0], 12000);
+    await m.waitForSelector('#view-room[data-phase="drawing"][data-role="guesser"]', { timeout: 6000 });
+    await sleep(400);
+    const s2 = await shell('맞히는 사람');
+    const hb = await box(m, '#btn-relay-hint'), tm = await box(m, '#timer'), mn = await box(m, '#btn-menu'), ri = await box(m, '#round-indicator'), wa2 = await box(m, '#word-area');
+    check(s2.role === 'guesser' && inRect(hb, RW, RH) && hb.height >= 30, 'relay 360px 맞히는 사람: 힌트 버튼 화면 안 · 높이 ≥ 30px', fmt(hb));
+    check(hb && wa2 && hb.y + hb.height <= wa2.y + 0.5 && !overlaps(hb, tm) && !overlaps(hb, mn) && !overlaps(hb, ri), 'relay 360px 맞히는 사람: 힌트 버튼은 헤더 1행(라운드·타이머·⋯와 안 겹침, 마스크 위)', `${fmt(ri)} ${fmt(hb)} ${fmt(tm)} ${fmt(mn)}`);
+    // R10: 처음 맞히는 사람 → 헤더 힌트 버튼 아래 안내 말풍선, 360px 화면 안
+    const tip = await m.evaluate(() => { const r = document.getElementById('relay-hint-tip').getBoundingClientRect(), b = document.getElementById('btn-relay-hint').getBoundingClientRect();
+      return { shown: !document.getElementById('relay-hint-tip').hidden && r.width > 0, l: r.left, r: r.right, t: r.top, b: r.bottom, bb: b.bottom, bl: b.left, br: b.right }; });
+    check(tip.shown && tip.l >= 0 && tip.r <= RW && tip.b <= RH && tip.t >= tip.bb - 1 && tip.t - tip.bb < 24 && tip.l <= tip.br && tip.r >= tip.bl,
+      'relay 360px 힌트 말풍선: 헤더 힌트 버튼 바로 아래 · 화면 안(좌우 넘침 없음)', JSON.stringify(tip));
+    await m.screenshot({ path: require('path').join(__dirname, 'shots', 'm-relay-hint-tip.png') }).catch(() => {});
+    check((await m.textContent('#btn-relay-hint')).includes('힌트 3 · −25%') && (await m.getAttribute('#btn-relay-hint', 'aria-label')).includes('초성 힌트 (남은 3회 · −25%)'), 'relay 360px: 짧은 문구 "힌트 3 · −25%"(aria-label 은 전체)', await m.textContent('#btn-relay-hint'));
+    check(inRect(await box(m, '#canvas'), RW, RH) && inRect(await box(m, '#chat-input'), RW, RH) && (await m.textContent('#draw-status-text')).includes('🎯'), 'relay 360px 맞히는 사람: 캔버스·입력창 화면 안 · 상태 띠 🎯');
+    await m.locator('#btn-relay-hint').tap();
+    await m.waitForFunction(() => window.__dg.ui.relayInfo && window.__dg.ui.relayInfo.hintsUsed === 1, null, { timeout: 3000 }).catch(() => {});
+    await sleep(150);
+    check((await m.textContent('#btn-relay-hint')).includes('힌트 2') && (await m.locator('#word-area .mask-box.revealed').count()) >= 1, 'relay 360px: 힌트 탭 → "힌트 2" · 초성 공개', await m.textContent('#btn-relay-hint'));
+    const p2 = w2.split(' · ');
+    await say(m, p2[0]);
+    await m.waitForSelector('#chat-list .msg-partial', { timeout: 3000 }).catch(() => {});
+    await sleep(200);
+    check((await m.locator('#chat-list .msg-partial').last().textContent().catch(() => '')).includes(p2.length + '개 중 1개 맞았어요!') && (await m.locator('#word-area .mask-part.solved').count()) === 1, 'relay 360px 부분 정답: 문구 · 맞힌 요소 공개', p2[0]);
+    check(inRect(await box(m, '#word-area'), RW, RH) && (await m.evaluate(() => document.documentElement.scrollWidth)) <= RW, 'relay 360px 부분 정답: 마스크 넘침 없음', fmt(await box(m, '#word-area')));
+    // 키보드(컴팩트): 상태 띠가 숨어도 헤더의 힌트 버튼은 그대로 보이고, 말풍선에 부분 정답 문구
+    await m.setViewportSize({ width: RW, height: RKB });
+    await m.waitForSelector('#view-room[data-compact="1"]', { timeout: 3000 }).catch(() => {});
+    await sleep(250);
+    check(inRect(await box(m, '#btn-relay-hint'), RW, RKB) && inRect(await box(m, '#chat-input'), RW, RKB), 'relay 360px 키보드: 힌트 버튼 · 입력창 화면 안', fmt(await box(m, '#btn-relay-hint')));
+    check((await m.locator('#chat-bubbles').textContent()).includes('맞았어요'), 'relay 360px 키보드: 말풍선에 부분 정답 문구', await m.locator('#chat-bubbles').textContent());
+    await m.screenshot({ path: require('path').join(__dirname, 'shots', 'm-relay-guesser-keyboard.png') }).catch(() => {});
+    await m.setViewportSize({ width: RW, height: RH });
+    await sleep(250);
+    await m.screenshot({ path: require('path').join(__dirname, 'shots', 'm-relay-guesser.png') }).catch(() => {});
+    await answer(m, w2);
+
+    // 3번 문제: D2 가 고름 · 모바일은 두 번째 주자(차례 전엔 잠김)
+    const w3 = await pick2(ds[1], 12000);
+    await m.waitForSelector('#view-room[data-phase="drawing"][data-role="drawer"]', { timeout: 6000 });
+    await sleep(400);
+    const s3 = await shell('주자(차례 전)');
+    const lk = await box(m, '#toolbar-lock');
+    check(s3.role === 'drawer' && inRect(await box(m, '#toolbar'), RW, RH) && inRect(lk, RW, RH) && (await m.textContent('#toolbar-lock')).includes('2번째'), 'relay 360px 차례 전 주자: 툴바 잠김 안내 화면 안', fmt(lk));
+    check(await m.locator('#btn-relay-hint').isHidden() && !(await m.textContent('#word-area')).includes(w3), 'relay 360px 차례 전 주자: 힌트 버튼 없음 · 마스크만');
+    await m.screenshot({ path: require('path').join(__dirname, 'shots', 'm-relay-runner-locked.png') }).catch(() => {});
+    await answer(ds[0], w3);
+
+    const seen = (await m.evaluate(() => window.__roles)).filter((x) => x.ph === 'choosing' || x.ph === 'drawing' || x.ph === 'turnEnd').map((x) => x.role).filter((v, i, a) => i === 0 || v !== a[i - 1]);
+    check(seen.join('→') === 'drawer→guesser→drawer', 'relay 360px: 문제마다 배치가 한 번씩만 바뀜(깜빡임 없음)', seen.join('→'));
+
+    // 결과 갤러리: 카드 메타 한 줄(공동 작가는 말줄임)
+    await m.waitForSelector('#overlay-gameover:not([hidden])', { timeout: 15000 });
+    await m.click('#btn-gallery-open');
+    await m.waitForSelector('#overlay-gallery:not([hidden])', { timeout: 3000 });
+    await sleep(300);
+    const gal = await m.$$eval('#gallery-grid .gallery-item', (els) => els.map((e) => { const by = e.querySelector('.gallery-by'), r = by.getBoundingClientRect(), c = e.getBoundingClientRect(); return { relay: by.classList.contains('relay'), text: by.textContent, oneLine: r.height <= parseFloat(getComputedStyle(by).lineHeight || '18') * 1.6 + 2, fits: r.right <= c.right + 0.5 }; }));
+    check(gal.length === 3 && gal.every((g) => g.relay && g.oneLine && g.fits) && (await m.evaluate(() => document.documentElement.scrollWidth)) <= RW, 'relay 360px 갤러리: 3장 · 공동 작가 캡션 한 줄 · 카드 안', JSON.stringify(gal));
+    check(gal[0] && gal[0].text.includes('🖍 모바일') && gal[0].text.includes('🎯 데스크톱2'), 'relay 360px 갤러리: 1번 문제 "🖍 모바일…" · "🎯 데스크톱2"', gal[0] && gal[0].text);
+  } finally {
+    clearTimeout(timeout);
+    await browser.close();
+    server.kill();
+  }
+}
+
 (async () => {
   try {
     console.log('== 1회차: 기본 단어 ==');
     await mainRun();
     console.log('\n== 2회차: 긴 사용자 단어 ==');
     await longWordRun();
+    console.log('\n== 3회차: 이어 그리기 360px ==');
+    await relayRun();
   } catch (e) {
     console.log('FAIL  예외:', e.message);
     failures++;

@@ -8,10 +8,16 @@
  *   categoryOf(word)          : 단어 → 카테고리명 (사용자 단어는 null)
  *   parseCustomWords(str)     : 쉼표 구분 사용자 단어 문자열 → 정제된 배열
  *   pickWords(settings, exclude, count) : 사용자 단어 설정을 반영해 후보 count개 반환
+ *   pickRelayWords(settings, exclude, count) : 이어 그리기 단어 후보 count개(3~8) — 첫 주자가 2개를 골라 "A · B" 제시어
+ *   maskParts(parts, revealedByPart)    : 요소별 마스크를 ' · '로 이은 문자열
+ *   revealPartsAll(parts, solvedIdx, revealedByPart) : 맞힌 요소만 글자로, 나머지는 마스크
+ *   matchParts(text, parts)   : 채팅 한 줄에서 맞힌 요소·근접 요소 인덱스 → { solved, close }
  *
  * 카테고리 순서가 소속을 결정한다: 여러 카테고리에 같은 단어가 있으면 먼저 나온 카테고리로 본다
  * (예: '자전거'는 사물보다 앞선 탈것).
  */
+
+const { normalizeAnswer, levenshtein, maskWord, revealAll } = require('./textmatch');
 
 const CATEGORIES = {
   // 동물 (187)
@@ -492,4 +498,169 @@ function pickWords(settings, exclude, count) {
   return unused.concat(used).slice(0, n);
 }
 
-module.exports = { ko, CATEGORIES, CATEGORY_NAMES, baseWords, categoryOf, parseCustomWords, pickWords, shuffle, dedupe };
+// ─────────────────────────────────────────────────────────────
+// 이어 그리기(relay) 제시어 — docs/product/2026-10-relay-drawing.md §3-1
+// 첫 주자가 단어 후보 wordCount개 중 2개를 골라 "A · B" 제시어를 만든다(요소 수 항상 2)
+// ─────────────────────────────────────────────────────────────
+
+/** 제시어 표시용 구분자(가운뎃점 U+00B7 양쪽 공백 1개) */
+const PART_SEP = ' · ';
+/** relay 제시어 요소 수(10-02 운영자 결정 — 인원 무관 2개) */
+const RELAY_PART_COUNT = 2;
+
+/** 풀이 전부 비는 등 최후의 경우에 쓰는 고정 후보(relay wordCount 최대 8개까지 서로 다르게) */
+const FALLBACK_PARTS = ['사과', '고양이', '바다', '자동차', '우산', '기린', '피아노', '축구'];
+
+// 카테고리별 "소속" 단어(categoryOf 기준). 여러 카테고리에 있는 단어는 앞 카테고리에만 들어간다
+// → 후보의 categoryOf가 그 자리의 카테고리와 항상 같다.
+// 한 글자 단어(곰·소·말·게 등)는 요소로 쓰지 않는다 — 부분 문자열 판정이라 "축구하게"의 "게"처럼 흔한 문장에서 오탐한다.
+// 가운뎃점(·)이 든 사용자 단어도 뺀다 — 요소 구분자(' · ')와 헷갈린다
+const isPartWord = (w) => Array.from(String(w)).length >= 2 && !String(w).includes('·');
+const OWNED_WORDS = {};
+for (const name of CATEGORY_NAMES) {
+  OWNED_WORDS[name] = dedupe(CATEGORIES[name]).filter((w) => categoryOf(w) === name && isPartWord(w));
+}
+/** 후보 최후 풀(전체 사전 중 두 글자 이상) */
+const KO_MULTI = ko.filter(isPartWord);
+
+const wordKey = (w) => String(w).normalize('NFC').toLowerCase();
+
+function randomOf(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+/**
+ * relay 단어 후보 선택(첫 주자가 이 중 2개를 고른다).
+ *  - 두 글자 이상 단어만(기본 사전·사용자 단어 모두 — 부분 문자열 판정 오탐 방지)
+ *  - 켜진 카테고리(categories, 빈 배열 = 전체)를 섞은 순서로 돌아가며 하나씩 → 가능한 한 서로 다른 카테고리.
+ *    카테고리 수보다 후보가 많으면 다시 섞어 한 바퀴 더(같은 카테고리에서 다른 단어)
+ *  - customWords가 있으면 각 자리마다 (사용자 단어 수 / (사용자 단어 수 + 그 카테고리 단어 수)) 확률로 사용자 단어를 쓴다
+ *  - customWordsOnly이고 사용자 단어가 count개 이상이면 사용자 단어만. 모자라면 사용자 단어를 전부 넣고 나머지를 카테고리 풀에서 채운다
+ *  - exclude(이미 쓰였거나 제시된 단어)는 가능하면 피하고, 풀이 모자라면 재사용한다
+ *  - 반환 단어는 서로 다르다. settings가 없거나 이상해도 예외 없이 count개(3~8로 clamp, 기본 6)를 돌려준다
+ * @param {object} settings { categories, customWords, customWordsOnly }
+ * @param {Set<string>} exclude
+ * @param {number} count
+ * @returns {string[]}
+ */
+function pickRelayWords(settings, exclude, count) {
+  const c = Math.floor(Number(count));
+  const n = Number.isFinite(c) ? Math.min(8, Math.max(3, c)) : 6;
+  try {
+    return pickRelayWordsInner(settings, exclude, n);
+  } catch (_) {
+    return FALLBACK_PARTS.slice(0, n);
+  }
+}
+
+function pickRelayWordsInner(settings, exclude, n) {
+  const s = settings && typeof settings === 'object' ? settings : {};
+  const ex = new Set();
+  if (exclude instanceof Set) for (const v of exclude) if (typeof v === 'string') ex.add(wordKey(v));
+
+  const out = [];
+  const taken = new Set(); // 이번 후보에 이미 넣은 단어
+  const push = (w) => { out.push(w); taken.add(wordKey(w)); };
+  /** 풀에서 하나: 이번 후보와 안 겹치는 것 중 exclude 에 없는 것 우선 */
+  function pickFrom(pool) {
+    const avail = pool.filter((w) => !taken.has(wordKey(w)));
+    if (!avail.length) return null;
+    const fresh = avail.filter((w) => !ex.has(wordKey(w)));
+    return randomOf(fresh.length ? fresh : avail);
+  }
+
+  const custom = parseCustomWords(s.customWords).filter(isPartWord);
+  if (s.customWordsOnly) {
+    if (custom.length >= n) {
+      // 사용자 단어만: 안 쓴 것 먼저
+      const unused = shuffle(custom.filter((w) => !ex.has(wordKey(w))));
+      const used = shuffle(custom.filter((w) => ex.has(wordKey(w))));
+      return unused.concat(used).slice(0, n);
+    }
+    for (const w of shuffle(custom)) push(w); // 모자라면 전부 넣고 나머지는 아래 카테고리 풀에서
+  }
+
+  const enabled = Array.isArray(s.categories) ? CATEGORY_NAMES.filter((name) => s.categories.includes(name)) : [];
+  const cats = enabled.length ? enabled : CATEGORY_NAMES.slice();
+  const mixCustom = !s.customWordsOnly && custom.length > 0;
+  let order = [];
+  while (out.length < n) {
+    if (!order.length) order = shuffle(cats); // 한 바퀴 돌면 다시 섞는다
+    const cat = order.shift();
+    const own = OWNED_WORDS[cat] || [];
+    const useCustom = mixCustom && Math.random() < custom.length / (custom.length + own.length);
+    let w = pickFrom(useCustom ? custom : own) || pickFrom(useCustom ? own : custom);
+    if (!w) w = pickFrom([].concat(...cats.map((x) => OWNED_WORDS[x] || []))) || pickFrom(KO_MULTI) || pickFrom(FALLBACK_PARTS);
+    if (!w) break;
+    push(w);
+  }
+  return out;
+}
+
+/** 요소별 공개 인덱스 Set(없거나 이상하면 빈 Set) */
+function revealedAt(revealedByPart, i) {
+  const r = Array.isArray(revealedByPart) ? revealedByPart[i] : null;
+  return r instanceof Set ? r : new Set();
+}
+
+/**
+ * 조합 마스크. 각 요소는 maskWord 규칙(글자 '_', 글자 사이 공백 1개, 공개 글자는 초성), 요소 사이는 ' · '.
+ * 예) ['고양이','축구'] → '_ _ _ · _ _'
+ * @param {string[]} parts
+ * @param {Array<Set<number>>} [revealedByPart] 요소별 공개 인덱스
+ */
+function maskParts(parts, revealedByPart) {
+  const list = Array.isArray(parts) ? parts : [];
+  return list.map((p, i) => maskWord(p, revealedAt(revealedByPart, i))).join(PART_SEP);
+}
+
+/**
+ * 부분 정답 표시: 맞힌 요소(solvedIdx)는 실제 글자(글자 사이 공백 1개), 나머지는 마스크(힌트 공개분 반영).
+ * 예) ['고양이','축구'], {0} → '고 양 이 · _ _'
+ * @param {string[]} parts
+ * @param {Set<number>} solvedIdx
+ * @param {Array<Set<number>>} [revealedByPart]
+ */
+function revealPartsAll(parts, solvedIdx, revealedByPart) {
+  const list = Array.isArray(parts) ? parts : [];
+  const solved = solvedIdx instanceof Set ? solvedIdx : new Set();
+  return list
+    .map((p, i) => (solved.has(i) ? revealAll(p) : maskWord(p, revealedAt(revealedByPart, i))))
+    .join(PART_SEP);
+}
+
+/**
+ * 채팅 한 줄 판정. text와 각 요소를 normalizeAnswer로 정규화한 뒤
+ *  - solved: 요소가 text에 부분 문자열로 들어 있으면(순서·조사 무관). 공백을 모두 뺀 판끼리도 비교한다('아이스 크림' ↔ '아이스크림')
+ *  - close: solved가 아닌 요소 중 3글자 이상이고, text 전체나 공백으로 나눈 토큰 하나와 Levenshtein ≤ 1
+ * @param {string} text
+ * @param {string[]} parts
+ * @returns {{ solved: number[], close: number[] }}
+ */
+function matchParts(text, parts) {
+  const solved = [];
+  const close = [];
+  const list = Array.isArray(parts) ? parts : [];
+  const g = normalizeAnswer(text);
+  if (!g) return { solved, close };
+  const gFlat = g.replace(/ /g, '');
+  const tokens = g.split(' ');
+  list.forEach((part, i) => {
+    const a = normalizeAnswer(part);
+    if (!a) return;
+    const aFlat = a.replace(/ /g, '');
+    if (g.includes(a) || (aFlat && gFlat.includes(aFlat))) {
+      solved.push(i);
+      return;
+    }
+    if (Array.from(a).length >= 3 && (levenshtein(g, a) <= 1 || tokens.some((t) => levenshtein(t, a) <= 1))) {
+      close.push(i);
+    }
+  });
+  return { solved, close };
+}
+
+module.exports = {
+  ko, CATEGORIES, CATEGORY_NAMES, baseWords, categoryOf, parseCustomWords, pickWords, shuffle, dedupe,
+  PART_SEP, RELAY_PART_COUNT, pickRelayWords, maskParts, revealPartsAll, matchParts,
+};

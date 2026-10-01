@@ -535,6 +535,23 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 }
 .word-option:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--primary); background: var(--primary-soft); }
 .word-option.chosen { border-color: var(--green); background: var(--green-soft); }
+/* 이어 그리기: 단어 후보 중 2개 고르기. 칸 폭에 맞춰 3열(PC)·2열(폰 360px), 고른 칩은 순서 번호 */
+.word-options.relay-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; width: 100%; }
+.pick-option { position: relative; font-size: 16px; padding: 10px 10px; min-height: 44px; overflow-wrap: anywhere; line-height: 1.25; }
+.pick-option.picked { border-color: var(--primary); background: var(--primary-soft); }
+.pick-option.dim { opacity: .55; }
+.pick-option .pick-num:empty { display: none; }
+.pick-option .pick-num {
+  position: absolute; top: -7px; left: -7px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--primary); color: #fff; font-size: 12px; font-weight: 900; box-shadow: 0 1px 3px rgba(0, 0, 0, .2);
+}
+.relay-pick-bar { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
+.relay-pick-preview { font-size: 18px; font-weight: 900; min-height: 1.4em; color: var(--primary-dark); overflow-wrap: anywhere; }
+.relay-pick-preview .pick-sep { color: var(--muted); }
+.relay-pick-preview .pick-empty { font-size: 14px; font-weight: 700; color: var(--muted); }
+.relay-pick-bar .btn { min-width: 180px; }
+.relay-pick-bar.blurred .relay-pick-preview { filter: blur(6px); user-select: none; }
+.relay-pick-bar.blurred .btn { pointer-events: none; }
 
 .delta-list { width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .delta-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 12px; background: #f8f6fc; }
@@ -685,6 +702,12 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 .gallery-by { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .gallery-by .gallery-av { width: 20px; height: 20px; font-size: 12px; flex: 0 0 auto; box-shadow: none; }
 .gallery-drawer { font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 이어 그리기 갤러리: "1번 · 🖍 A·B·C  🎯 D 맞힘" 한 줄, 좁으면 공동 작가부터 말줄임(전체는 카드 title) */
+.gallery-by.relay { overflow: hidden; white-space: nowrap; gap: 5px; }
+.gallery-by.relay .gallery-no { flex: 0 0 auto; }
+.gallery-by.relay .gallery-drawer { flex: 0 1 auto; min-width: 0; }
+.gallery-guesser { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.gallery-guesser.got { color: #1e9a62; }
 @media (max-width: 640px) { .gallery-grid { grid-template-columns: repeat(2, 1fr); } .modal { padding: 10px; } .modal-card { padding: 14px; } }
 
 /* =====================================================================
@@ -735,8 +758,8 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
     grid-template-areas: "tools color . sizes edit" "palette palette palette palette palette";
     gap: 4px 6px; padding: 5px 6px; align-items: center; border-radius: 12px;
   }
-  body.tablet-shell .toolbar .tool-group:first-child { grid-area: tools; }
-  body.tablet-shell .toolbar .tool-group:last-child { grid-area: edit; justify-self: end; }
+  body.tablet-shell .toolbar .tool-group:first-of-type { grid-area: tools; }
+  body.tablet-shell .toolbar .tool-group:last-of-type { grid-area: edit; justify-self: end; }
   body.tablet-shell .toolbar .tool-group { gap: 3px; }
   body.tablet-shell .toolbar .tool { width: 32px; height: 32px; border-radius: 9px; }
   body.tablet-shell .toolbar .tool svg { width: 18px; height: 18px; }
@@ -747,6 +770,74 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
   body.tablet-shell .sizes { grid-area: sizes; gap: 3px; justify-self: end; }
   body.tablet-shell .size-btn { width: 28px; height: 28px; }
 }
+
+/* ---------- 이어 그리기(relay) ---------- */
+/* 상단 띠(데스크톱): "🖍 민수님 (1/2) · 다음 지은님 · 12초" */
+.relay-band { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; font-size: 13px; font-weight: 700; color: var(--text); background: #f8f6fc; border-radius: 999px; padding: 3px 12px; white-space: nowrap; }
+.relay-band[hidden] { display: none; }
+.relay-band b { font-weight: 900; }
+.relay-band .rb-sep { color: var(--muted); font-weight: 500; }
+.relay-band .rb-next { color: var(--muted); }
+.relay-band .rb-leg, .ts-leg { font-family: var(--mono); font-weight: 800; color: var(--secondary-dark); }
+.relay-band .rb-leg.urgent, .ts-leg.urgent { color: var(--red); }
+/* 마스크 아래 줄: 상단 띠 + 맞히는 사람의 초성 힌트 버튼(같은 줄이라 주자↔맞히는 사람이 바뀌어도 헤더 높이가 같다) */
+.relay-row { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; max-width: 100%; }
+.relay-hint {
+  padding: 3px 12px; gap: 4px; font-size: 13px; font-weight: 800; color: #7a4a00;
+  background: var(--amber-soft); box-shadow: inset 0 0 0 1.5px rgba(244, 163, 0, .55);
+}
+.relay-hint:hover:not(:disabled) { background: #ffe6b3; }
+.relay-hint:disabled { opacity: .45; }
+.relay-hint .rh-short { display: none; }
+/* 힌트 버튼 안내 말풍선(처음 한 번): body 바로 아래 fixed. left/top·꼬리 위치(--arrow-x)는 client.js 가 버튼 기준으로, 화면 밖으로 안 나가게 */
+.relay-hint-tip {
+  position: fixed; z-index: 90; left: 0; top: 0; max-width: calc(100vw - 16px); padding: 8px 12px; border-radius: 12px;
+  background: var(--text); color: #fff; font-size: 13px; font-weight: 800; line-height: 1.35; white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .22); cursor: pointer; animation: tip-pop .25s ease-out;
+}
+.relay-hint-tip[hidden] { display: none; }
+.relay-hint-tip::before {
+  content: ''; position: absolute; top: -6px; left: var(--arrow-x, 50%); width: 12px; height: 12px; margin-left: -6px;
+  background: inherit; transform: rotate(45deg); border-radius: 2px;
+}
+@keyframes tip-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .relay-hint-tip { animation: none; } }
+/* 조합 마스크: 요소 묶음 사이에 가운뎃점. 맞힌 요소(본인 화면)는 초록, 방금 맞혔으면 한 번 튀어 오른다 */
+.mask-part { display: inline-flex; align-items: flex-end; gap: 5px; }
+.mask-part.solved .mask-box { background: #d6f5e3; color: #1e9a62; border-bottom-color: #1e9a62; }
+.mask-part.just-solved { animation: cat-pop .45s ease-out; }
+/* 부분 정답 안내(보낸 사람만): "3개 중 1개 맞았어요!" */
+.msg-close.msg-partial { background: #e6f7ee; color: #17784c; }
+.mask-sep { align-self: center; font-weight: 900; font-size: 18px; color: var(--muted); padding: 0 3px; }
+.word-secret.relay-word .word { font-size: 21px; }
+/* 차례가 아닌 주자: 툴바는 흐리게 잠그고 안내만 또렷하게 */
+.toolbar { position: relative; }
+.toolbar.relay-locked[aria-disabled="true"] { opacity: 1; filter: none; }
+.toolbar.relay-locked > :not(.toolbar-lock) { opacity: .28; filter: grayscale(.8); }
+.toolbar-lock {
+  position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; padding: 0 12px;
+  text-align: center; font-size: 14px; font-weight: 900; color: var(--text); pointer-events: none; border-radius: inherit;
+  background: rgba(248, 246, 252, .55); /* 흐린 도구 위에서도 안내 글자가 또렷하게 */
+}
+.toolbar-lock[hidden] { display: none; }
+/* 플레이어 목록: 맞히는 사람 🎯, 이번 문제 주자 🖍 */
+.player.relay-guesser { outline: 1.5px dashed var(--amber); outline-offset: -1.5px; }
+.runner-tag { font-size: 11px; }
+/* 주자끼리 채팅(맞히는 사람은 못 본다) */
+.msg-runner { background: var(--amber-soft); color: #7a4a00; }
+.msg-tag { margin-left: 6px; font-size: 10px; font-weight: 800; padding: 0 6px; border-radius: 8px; background: rgba(122, 74, 0, .1); vertical-align: 1px; }
+/* 내 차례 배너: 1.5초. 입력은 막지 않는다(pointer-events: none) */
+.relay-banner { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 20px; background: rgba(43, 45, 66, .32); pointer-events: none; }
+.relay-banner[hidden] { display: none; }
+.relay-banner.show { animation: relay-fade 1.5s ease-out forwards; }
+.relay-banner.show .relay-banner-card { animation: relay-pop .35s ease-out; }
+.relay-banner-card { background: var(--card); border-radius: 24px; padding: 20px 30px; text-align: center; box-shadow: var(--shadow); max-width: min(92vw, 520px); }
+.relay-banner-title { font-family: var(--font-display); font-size: 44px; font-weight: 900; line-height: 1.1; color: var(--primary-dark); }
+.relay-banner-time { margin-top: 2px; font-size: 20px; font-weight: 800; font-family: var(--mono); color: var(--secondary-dark); }
+.relay-banner-word { margin-top: 10px; font-size: 28px; font-weight: 900; line-height: 1.25; color: var(--text); overflow-wrap: anywhere; }
+@keyframes relay-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes relay-pop { from { transform: scale(.75); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .relay-banner.show, .relay-banner.show .relay-banner-card { animation: none; } }
 
 /* =====================================================================
    모바일 전용 컴포넌트 — 데스크톱/태블릿에서는 존재하지만 렌더링되지 않는다(display:none).
@@ -935,8 +1026,8 @@ body.sheet-open { overflow: hidden; }
     grid-template-areas: "tools color . edit" "palette palette palette sizes";
     gap: 6px 8px; padding: 8px; align-items: center; border-radius: 12px;
   }
-  .toolbar .tool-group:first-child { grid-area: tools; }
-  .toolbar .tool-group:last-child { grid-area: edit; justify-self: end; }
+  .toolbar .tool-group:first-of-type { grid-area: tools; } /* of-type: 잠김 안내 span(#toolbar-lock)이 끼어도 그대로 */
+  .toolbar .tool-group:last-of-type { grid-area: edit; justify-self: end; }
   .toolbar .tool-group { gap: 4px; }
   .toolbar .tool { width: 36px; height: 36px; border-radius: 10px; }
   .toolbar .tool svg { width: 20px; height: 20px; }
@@ -1119,6 +1210,7 @@ body.sheet-open { overflow: hidden; }
   .card-wide { width: min(100%, 560px); }
   .card-title { font-size: 20px; }
   .word-option { font-size: 17px; padding: 11px 16px; max-width: 100%; overflow-wrap: anywhere; }
+  .pick-option { font-size: 16px; padding: 9px 8px; } /* 이어 그리기 후보 8개도 2열로 한 화면에 */
   .ranking-list { max-height: none; overflow: visible; }
   .podium-slot .avatar { width: 40px; height: 40px; font-size: 22px; }
   .podium-slot .pname { font-size: 13px; }
@@ -1377,4 +1469,22 @@ img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cove
   .me-main .btn-sm, .me-account .btn-sm { min-height: 38px; padding: 8px 12px; }
   .me-account .link-btn, .invite-dismiss, .wordset-card .link-btn { min-height: 38px; padding: 8px 6px; }
   .invite-code { font-size: 30px; }
+}
+
+/* 이어 그리기 — 모바일(위 모바일 블록과 같은 조건). 상단 띠는 턴 띠가 대신하고, 조합 마스크·제시어는 360px 에서 넘치지 않게 줄인다 */
+@media (max-width: 639px), (max-width: 767px) and (orientation: portrait), (max-width: 767px) and (pointer: fine), (max-width: 1099px) and (orientation: portrait) and (pointer: coarse) {
+  .relay-band { display: none !important; }
+  /* 맞히는 사람의 힌트 버튼은 헤더 1행(라운드 · 힌트 · 타이머 · ⋯)에 — 키보드가 올라와 상태 띠가 숨어도 누를 수 있고 헤더 높이가 늘지 않는다 */
+  .relay-row { display: contents; }
+  .room:not([data-phase="lobby"]) .topbar.has-relay-hint { grid-template-columns: minmax(0, 1fr) auto auto auto; grid-template-areas: "round hint timer menu" "word word word word"; }
+  .relay-hint { grid-area: hint; padding: 6px 10px; font-size: 12px; min-height: 32px; }
+  .relay-hint .rh-long { display: none; }
+  .relay-hint .rh-short { display: inline; }
+  .mask-part { flex-wrap: nowrap; gap: 3px; }
+  .mask-combo .mask { column-gap: 2px; }
+  .mask-sep { font-size: 14px; padding: 0 1px; }
+  .word-secret.relay-word .word { font-size: clamp(15px, 4.6vw, 20px); word-break: keep-all; }
+  .toolbar-lock { font-size: 13px; padding: 0 8px; }
+  .relay-banner-title { font-size: 38px; }
+  .relay-banner-word { font-size: 23px; }
 }
