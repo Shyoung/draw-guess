@@ -1875,6 +1875,18 @@
   function nickValue() { var n = $('nick'); return (n ? n.value : profile.name).trim().slice(0, 12); }
   function updateNextBtn() { var b = $('btn-profile-next'); if (b) b.disabled = !nickValue() || photo.uploading; }
   function focusNode(n) { if (n) { try { n.focus({ preventScroll: true }); } catch (e) { /* ignore */ } } }
+  /** 화면에 보이고 누를 수 있는가(hidden·display:none 조상·disabled 면 false) */
+  function focusableNow(n) { return !!(n && !n.disabled && !n.hidden && n.getClientRects().length); }
+  /** 모달 포커스 트랩: Tab·Shift+Tab 이 box 밖으로 나가지 않게 처음↔끝을 잇는다. keydown 에서 부른다 */
+  function trapTab(box, e) {
+    if (!box || e.key !== 'Tab') return;
+    var list = Array.prototype.filter.call(box.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'), focusableNow);
+    if (!list.length) { e.preventDefault(); return; }
+    var first = list[0], last = list[list.length - 1], cur = document.activeElement;
+    var inside = box.contains(cur);
+    if (e.shiftKey && (cur === first || !inside)) { e.preventDefault(); focusNode(last); }
+    else if (!e.shiftKey && (cur === last || !inside)) { e.preventDefault(); focusNode(first); }
+  }
   function authConfigured() {
     var c = window.APP_CONFIG;
     return !!(c && typeof c.supabaseUrl === 'string' && c.supabaseUrl && typeof c.supabaseAnonKey === 'string' && c.supabaseAnonKey);
@@ -3282,7 +3294,7 @@
     var tools = $('wordset-tools'); if (tools) tools.hidden = !logged;
     var wlb = $('btn-wordset-load');
     if (wlb) { wlb.hidden = !acct.sets.length; wlb.disabled = !canApplySet(); }
-    if (wsLoadOpen()) { if (!logged || !acct.sets.length) closeWsLoad(); else renderWsLoad(); }
+    if (wsLoadOpen()) { if (!logged || !acct.sets.length || !canApplySet()) closeWsLoad(); else renderWsLoad(); }
     if (acct.open) renderAccountPanel();
     renderMePage();
   }
@@ -3437,6 +3449,10 @@
   function wsLoadOpen() { var d = $('overlay-wsload'); return !!(d && !d.hidden); }
   function renderWsLoad() {
     var box = $('wsload-list'); if (!box) return;
+    // 상태가 올 때마다 불리므로 목록이 그대로면 다시 그리지 않는다(행에 둔 포커스를 지킨다)
+    var key = JSON.stringify(acct.sets.map(function (s) { return [s.id, s.name, s.words.length]; }));
+    if (box.getAttribute('data-key') === key && box.childElementCount) return;
+    box.setAttribute('data-key', key);
     box.innerHTML = '';
     acct.sets.forEach(function (s) {
       var b = el('button', 'wsload-item'); b.type = 'button';
@@ -3449,9 +3465,14 @@
   function openWsLoad() {
     var d = $('overlay-wsload'); if (!d || !acctLoggedIn() || !acct.sets.length || !canApplySet()) return;
     renderWsLoad(); d.hidden = false;
-    var first = d.querySelector('.wsload-item'); if (first) { try { first.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+    focusNode(d.querySelector('.wsload-item') || $('btn-wsload-close')); // 첫 행, 없으면 닫기
   }
-  function closeWsLoad() { var d = $('overlay-wsload'); if (d) d.hidden = true; }
+  /** 닫으면 [📂 불러오기] 로 포커스를 돌려놓는다(버튼이 숨었거나 비활성이면 그대로 둔다) */
+  function closeWsLoad() {
+    var d = $('overlay-wsload'); if (!d || d.hidden) return;
+    d.hidden = true;
+    var wlb = $('btn-wordset-load'); if (focusableNow(wlb)) focusNode(wlb);
+  }
   function pickWsLoad(s) {
     closeWsLoad();
     if (!canApplySet()) return;
@@ -3590,7 +3611,11 @@
     var ww = $('ws-words'); if (ww) ww.addEventListener('input', updateWordCount);
     var wlb = $('btn-wordset-load'); if (wlb) wlb.addEventListener('click', openWsLoad);
     var wlc = $('btn-wsload-close'); if (wlc) wlc.addEventListener('click', closeWsLoad);
-    var wlo = $('overlay-wsload'); if (wlo) wlo.addEventListener('click', function (e) { if (e.target === wlo) closeWsLoad(); });
+    var wlo = $('overlay-wsload');
+    if (wlo) {
+      wlo.addEventListener('click', function (e) { if (e.target === wlo) closeWsLoad(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Tab' && wsLoadOpen()) trapTab(wlo, e); }); // 포커스가 body 로 빠졌어도 dialog 안으로
+    }
     var sv = $('btn-wordset-save'); if (sv) sv.addEventListener('click', openQuickSave);
     var qsv = $('btn-ws-quick-save'); if (qsv) qsv.addEventListener('click', submitQuickSave);
     var qcn = $('btn-ws-quick-cancel'); if (qcn) qcn.addEventListener('click', closeQuickSave);
