@@ -201,7 +201,9 @@ const byId = (list, id) => list.find((p) => p.id === id);
   check('catch-up game:drawing to rejoined P2 (mask, no word)', dBack.word === undefined && dBack.wordMask === d2.wordMask && dBack.timeLeft <= 60, dBack);
   const sync = await waitFor(c2b, 'draw:sync', undefined, 5000, 'catch-up sync');
   check('catch-up draw:sync restores ops (stroke + fill)', Array.isArray(sync.ops) && sync.ops.length === 2 && sync.ops[0].type === 'stroke' && sync.ops[1].type === 'fill', sync.ops);
-  check('system message announces reconnect', c1.log.some((e) => e.ev === 'chat:message' && e.payload.kind === 'system' && /다시 연결되었습니다/.test(e.payload.text)));
+  // c1 은 다른 소켓이라 c2b 이벤트보다 늦게 도착할 수 있다 → 즉시 검사하지 않고 기다린다
+  const reconnMsg = await waitFor(c1, 'chat:message', (m) => m.kind === 'system' && /다시 연결되었습니다/.test(m.text), 3000, 'reconnect system message').catch(() => null);
+  check('system message announces reconnect', !!reconnMsg);
 
   // ── 복귀한 P2가 정답 → 점수 누적, 출제자에게 guessed-chat 라우팅 정상 ──
   const correctP = waitFor(c1, 'chat:message', (m) => m.kind === 'correct' && m.id === p2Id, 5000, 'correct');
