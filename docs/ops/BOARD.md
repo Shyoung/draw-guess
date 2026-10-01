@@ -1,6 +1,6 @@
 # 운영 보드 (BOARD)
 
-갱신 2026-10-01 (프로덕션 75c5514=8a1fc8f2 · develop e7b775e) · 세션(에이전트)들이 서로의 상태를 보는 유일한 칠판. 사람이 쓰는 칸은 **"답"**과 **"방향 메모"** 두 곳뿐이고, 나머지는 `/ops-cycle`이 갱신한다.
+갱신 2026-10-01 (프로덕션 75c5514=8a1fc8f2 · 스테이징 0f397ae=0a92dda9) · 세션(에이전트)들이 서로의 상태를 보는 유일한 칠판. 사람이 쓰는 칸은 **"답"**과 **"방향 메모"** 두 곳뿐이고, 나머지는 `/ops-cycle`이 갱신한다.
 큰 그림은 [../ROADMAP.md](../ROADMAP.md), 개발 할 일의 단일 목록은 [../BACKLOG.md](../BACKLOG.md), 마케팅 근거는 [../marketing/2026-10-growth-plan.md](../marketing/2026-10-growth-plan.md), 결함은 [TEST-LOG.md](TEST-LOG.md).
 
 ## 규칙
@@ -13,6 +13,7 @@
 ## 결정 필요
 | # | 날짜 | 요청 | 근거 | 답 |
 |---|---|---|---|---|
+| 1 | 10-01 | develop → main 머지: #14 불러오기 dialog 접근성(5cc1f7a) + #15 F8 후속(0f397ae, PROTOCOL `room:create.fromWordSetLink`·지표 `rooms_from_wsl`·비방장 🔗 링크) + reconnect 테스트 수정(2a0e96e) | QA 통과(4종 전부·결함 0), 스테이징 0a92dda9 일치, 개인정보·단어 노출 검토 이상 없음, 머지 의견 "가능" | |
 
 ## 방향 메모 (운영자)
 - 2026-09-29: 운영자 명의 SNS 계정 홍보는 하지 않는다. 참가자·스트리머가 올리게 만든다(성장 계획 0-1).
@@ -33,8 +34,8 @@
 | 역할 | 마지막 실행 | 상태 |
 |---|---|---|
 | marketing | 10-01 | D3: 할 일은 GeekNews(10/5 월) 프레스킷 준비로. 지표 10-01 방 1·닫힘 2·수명 합 8432초·완료 0판·ref 없음 → 테스트 트래픽으로 판단. 시드 게임 1 날짜 미정이라 D4 예고 보류 유지. 개발 제안 없음 |
-| builder | 10-01 (2차) | 운영자 직접 요청: 대기실 단어 세트 도구 한 줄 정리(sonnet, e0e3ba6) — [📂 불러오기](select→버튼+dialog)·[💾 저장]·[🔗 방 링크], 설명은 title로 → develop → 프로덕션 |
-| qa | 10-01 (2차, develop 75c5514) | 단어 도구 정리(e0e3ba6) 검증: test·browser·mobile·auth 통과(npm test 체인에서 reconnect.js 간헐 1건 → T-20261001-1 낮음), 스테이징 8a1fc8f2 일치, 코드 결함 없음(접근성 개선 여지: 닫을 때 포커스 복귀·Tab 트랩·게임 시작 시 dialog 유지). 머지 의견 "가능". 이후 2a0e96e·e7b775e(테스트·문서만)는 미검증 |
+| builder | 10-01 (3차) | 운영자 GO 항목(opus): #14 불러오기 dialog 접근성(5cc1f7a: 포커스 복귀·Tab 트랩·대기실 벗어나면 자동 닫힘) · #15 F8 후속(0f397ae: room:create `fromWordSetLink` 불린 → 지표 `rooms_from_wsl`, 비방장 설정 요약에 🔗 링크) → develop |
+| qa | 10-01 (3차, develop 0f397ae) | #14·#15·fixer 2a0e96e 검증: npm test 2회·browser·mobile·auth 전부 통과, reconnect 단독 6회 통과 → T-20261001-1 확인됨. 스테이징 0a92dda9 일치. 개인정보(불린·카운터만)·조작 영향·비방장 단어 노출(대기실만, 기존 동작)·trapTab 간섭 없음. 새 결함 0, 머지 의견 "가능" (기록 ae47e88) |
 | fixer | 10-01 | T-20261001-1 reconnect 테스트 경합(서로 다른 소켓 도착 순서) → c1 수신 대기(waitFor 3초)로 변경(2a0e96e, 테스트만), 단독 10회·npm test 3회 통과 → develop |
 
 ## 오늘 운영자 할 일 (마케팅이 매 사이클 갱신 · 최대 3개)
@@ -61,3 +62,4 @@
 | 09-30 | 결정 1 GO(채팅) → main 머지(c189985), 프로덕션 032f2a64 확인(에셋 무변경, 재시작 uptime 4초로 배포 확인) · BACKLOG "LAN 접속 주소 표시" 항목 "프로덕션"으로 갱신. 결정 필요 없음 | – |
 | 10-01 | 마케팅 D3 갱신(sonnet) · builder BACKLOG #6 F8 단어 세트 링크(opus, c3a1250)→스테이징 2cbd7472 · QA 통과, 결함 0, T-20260930-6 확인됨(sonnet) · fixer 미호출. builder 후속 제안은 BACKLOG 제안됨으로 이동. 병행: 이어 그리기 기능 세션 4/7 | 1 |
 | 10-01 | 운영자 직접 요청 2건(링크 버튼을 저장 옆으로·저장 문구 단축 / 불러오기 select→버튼+dialog) → builder e0e3ba6 · QA 통과·T-20261001-1(낮음) · fixer 2a0e96e. 운영자 스테이징 확인 후 GO(채팅) → main 머지(75c5514, 기능 세션과 안 엮이게 임시 워크트리에서·feature/relay-drawing 미포함), 프로덕션 8a1fc8f2 확인. BACKLOG 2건 프로덕션 표시 | – |
+| 10-01 | 운영자 "남은 것 다 진행" → BACKLOG 다음 #14·#15 승인 추가 · builder(opus) 5cc1f7a·0f397ae → 스테이징 0a92dda9 · QA 통과·결함 0·T-20261001-1 확인됨. 머지 GO 대기 | 1 |
