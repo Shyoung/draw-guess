@@ -1587,6 +1587,11 @@
             var wl = el('div', 'sum-words-list');
             cwList.forEach(function (w) { wl.appendChild(el('span', 'sum-word', w)); });
             box.appendChild(wl);
+            // 같이 논 사람이 이 단어를 가져가 자기 방을 만들 수 있게(세트 이름은 담지 않는다). 목록이 보일 때만 있다
+            var sl = el('button', 'btn btn-ghost btn-sm sum-words-link', '🔗 이 단어로 방 만들기 링크'); sl.type = 'button'; sl.id = 'btn-sum-wordset-link';
+            sl.title = '링크를 받은 사람이 방을 만들면 이 단어가 채워져요';
+            sl.addEventListener('click', shareSummaryWordSet);
+            box.appendChild(sl);
             sum.appendChild(box);
           }
         }
@@ -2093,6 +2098,12 @@
     var src = ui.setSource, name = src && src.key === words.join(',') ? src.name : '';
     shareWordSet(normWordSet(name, words, cb ? cb.checked : state.settings.customWordsOnly));
   }
+  /** 방장이 아닌 사람의 설정 요약 "이 단어로 방 만들기 링크": 지금 방의 우리만의 단어(이름 없이) */
+  function shareSummaryWordSet() {
+    if (!inRoom || isHost() || state.phase !== 'lobby') return;
+    var words = parseWords(state.settings.customWords || '').words;
+    shareWordSet(normWordSet('', words, state.settings.customWordsOnly));
+  }
   var GUEST_STARTED_KEY = 'drawguess.guestStarted'; // sessionStorage: 이 탭에서 게스트로 시작했는가
   function guestStarted() { try { return sessionStorage.getItem(GUEST_STARTED_KEY) === '1'; } catch (e) { return false; } }
   function setGuestStarted(v) { try { if (v) sessionStorage.setItem(GUEST_STARTED_KEY, '1'); else sessionStorage.removeItem(GUEST_STARTED_KEY); } catch (e) { /* ignore */ } }
@@ -2368,6 +2379,7 @@
     syncAccountProfile(false);
     p.token = getToken();
     var ref = getRef(); if (ref) p.ref = ref;
+    if (landing.wordSet || pendingWordSet()) p.fromWordSetLink = true; // 지표용 불린만(PROTOCOL room:create)
     withAck('room:create', p, function (ack) { setToken(ack.token); enterRoom(ack.roomCode, ack.playerId); applyPendingWordSet(); });
   }
   function joinRoom() {

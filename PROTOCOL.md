@@ -54,7 +54,7 @@
 
 | event | payload | ack / 비고 |
 |---|---|---|
-| `room:create` | `{ name, avatar, token?, ref? }` | ack `{ ok:true, roomCode, playerId, token }` 또는 `{ ok:false, error }`. `token`(영숫자·`_-` 8~64자)은 재접속용이며 없으면 서버가 발급. `ref`(선택, 영숫자·`_-` 1~24자)는 유입 경로 코드 — 클라이언트가 `?ref=` 로 받아 sessionStorage 에 두었다가 보낸다. 지표에만 쓰고 방 상태에는 들어가지 않는다 |
+| `room:create` | `{ name, avatar, token?, ref?, fromWordSetLink? }` | ack `{ ok:true, roomCode, playerId, token }` 또는 `{ ok:false, error }`. `token`(영숫자·`_-` 8~64자)은 재접속용이며 없으면 서버가 발급. `ref`(선택, 영숫자·`_-` 1~24자)는 유입 경로 코드 — 클라이언트가 `?ref=` 로 받아 sessionStorage 에 두었다가 보낸다. 지표에만 쓰고 방 상태에는 들어가지 않는다. `fromWordSetLink`(선택, 불린)는 이 탭에서 받은 공개 단어 세트 링크(`#ws=`)로 방을 만들면 `true` — 지표(`room_created`)에만 쓰고, `true` 가 아닌 값은 모두 `false` 로 본다. 단어·세트 이름은 보내지 않는다 |
 | `room:rejoin` | `{ roomCode, token }` | 같은 `token`을 가진 플레이어가 방에 있으면(연결 상태 무관) 그 자리로 복귀: 같은 `playerId`·점수·순서 유지. 옛 소켓이 아직 살아 있으면 그쪽에 `session:replaced`를 보내고 떼어낸다(새로고침 경합·다른 탭). 유예 시간(기본 60초, `RECONNECT_GRACE_MS`)이 지나 퇴장된 뒤에는 실패. ack 형식은 create와 동일. 성공 시 `room:state`와 진행 상황(catch-up)이 개별 전송된다 |
 | `react:send` | `{ kind:'up'\|'down' }` | drawing 중 비출제자. 기록되지 않고 방 전체에 `react:show`로 중계. 플레이어당 초당 8회 제한 |
 | `room:join` | `{ roomCode, name, avatar, token?, ref?, via? }` | `via`(선택) `'link'`(초대 링크 `?room=` 로 들어옴) \| `'code'`(코드 직접 입력, 기본). `ref` 는 create 와 같음. 둘 다 지표용. 같은 `token`이 이미 그 방에 있으면 새 자리를 만들지 않고 그 자리로 복귀(이름·아바타는 새 값으로 갱신, ack의 `playerId`는 기존 id). ack 동일. 방 없음/게임 중 아님이면 join 허용(진행 중 참가 가능, 관전 후 다음 턴부터 참여). 최대 12명(가득 차면 `{ ok:false, error:'방이 가득 찼어요 (최대 12명). 자리가 나면 다시 참가하기를 눌러 주세요.' }`, 초대 링크로 온 클라이언트는 초대 카드 안에 이 안내를 남긴다). roomCode는 대문자 정규화 |
@@ -179,11 +179,11 @@
 - 호스트가 오프라인인데 접속 중인 사람이 있으면(끊김 · 새로고침 · 서버 재시작 복원 직후) `HOST_RETURN_MS`(기본 10초) 기다렸다가 접속 중인 첫 사람에게 호스트를 넘기고 시스템 메시지("방장이 돌아오지 않아 …")를 보낸다. 그 안에 돌아오면 그대로. `hostId` 가 목록에 없는 사람을 가리키면 즉시 바로잡는다.
 - URL `?room=CODE` 로 접속하면 클라이언트는 방 코드 입력란을 자동으로 채운다.
 - URL `?ref=코드` 는 유입 경로(홍보 채널) 표시. 클라이언트가 sessionStorage 에 기억하고 주소에서 지운 뒤 `room:create`/`room:join` 에 `ref` 로 실어 보낸다.
-- URL `#ws=<base64url>` 은 공개 단어 세트 링크("이 단어 세트로 방 만들기", 클라이언트 전용 — 해시라 서버는 보지 않는다). 내용은 UTF-8 JSON `{ v:1, n?:세트 이름(1~30자), w:[단어…], o:0|1 }`(`o` = 우리 단어만 쓰기). 클라이언트는 읽자마자 sessionStorage 에 두고 주소에서 지운다. 단어는 `customWords` 규칙(각 1~20자, 중복 제거, 쉼표로 이은 원문 2000자 이하)으로 다시 거르고, 남는 단어가 없으면 버린다. 그 탭에서 `room:create` 가 성공하면 호스트 클라이언트가 곧바로 `room:settings { settings:{ customWords, customWordsOnly } }` 를 보낸다(새 이벤트·필드 없음). 링크 만들기는 방장 설정의 우리만의 단어 · 내 정보의 단어 세트에서 한다.
+- URL `#ws=<base64url>` 은 공개 단어 세트 링크("이 단어 세트로 방 만들기", 클라이언트 전용 — 해시라 서버는 보지 않는다). 내용은 UTF-8 JSON `{ v:1, n?:세트 이름(1~30자), w:[단어…], o:0|1 }`(`o` = 우리 단어만 쓰기). 클라이언트는 읽자마자 sessionStorage 에 두고 주소에서 지운다. 단어는 `customWords` 규칙(각 1~20자, 중복 제거, 쉼표로 이은 원문 2000자 이하)으로 다시 거르고, 남는 단어가 없으면 버린다. 그 탭에서 방을 만들 때 `room:create` 에 `fromWordSetLink: true` 를 싣고(지표용), 성공하면 호스트 클라이언트가 곧바로 `room:settings { settings:{ customWords, customWordsOnly } }` 를 보낸다(새 이벤트 없음). 링크 만들기는 방장 설정의 우리만의 단어 · 방장이 아닌 사람의 설정 요약(우리만의 단어 목록이 보일 때만, 세트 이름 없이) · 내 정보의 단어 세트에서 한다.
 
 ## 이용 지표 (서버 전용, 닉네임·IP·채팅 내용 없음)
 - 서버는 stdout 에 `[metric] {"ev","ts",...}` 한 줄씩 남기고 일별 누적을 저장소에 쌓는다(Redis 해시 `draw-guess:stats:YYYY-MM-DD`, 한국 시간 기준, 40일 보관). 필드 목록은 `server/metrics.js` 머리 주석.
-- 이벤트: `room_created` · `player_joined`(via link|code, midGame, size) · `game_started` · `game_completed`(turns, durationSec, bytesOut) · `game_aborted`(reason host|notEnoughPlayers) · `room_closed`(gamesPlayed, peakPlayers, lifetimeSec) · `room_full_rejected`.
+- 이벤트: `room_created`(ref, loggedIn, fromWordSetLink — 일별 `rooms_from_wsl`) · `player_joined`(via link|code, midGame, size) · `game_started` · `game_completed`(turns, durationSec, bytesOut) · `game_aborted`(reason host|notEnoughPlayers) · `room_closed`(gamesPlayed, peakPlayers, lifetimeSec) · `room_full_rejected`.
 - `bytesOut` 은 그 방에 보낸 socket.io 패킷 길이 × 받는 사람 수의 합(근사). 게임 시작 때 0 으로, 게임이 끝나면 기록하고 다시 0 으로.
 - `GET /admin/stats?key=<ADMIN_KEY>&days=30` → `{ ok, today, rooms, store, days:[{ day, ...counters }] }`(최신순, 기록 있는 날만). `ADMIN_KEY` 가 없으면 404, 틀리면 403. 공개 `/healthz` 에는 통계를 넣지 않는다.
 
