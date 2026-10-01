@@ -1,6 +1,6 @@
 /**
  * 이용 지표 시뮬레이션 (socket.io-client)
- *  - [metric] 로그 한 줄: room_created(ref) · player_joined(via/ref/midGame/size) · game_started · game_completed(turns/bytesOut)
+ *  - [metric] 로그 한 줄: room_created(ref · fromWordSetLink) · player_joined(via/ref/midGame/size) · game_started · game_completed(turns/bytesOut)
  *    · game_aborted(host · notEnoughPlayers) · room_closed · room_full_rejected
  *  - 로그에 닉네임이 없다
  *  - /admin/stats: 키 없음/틀림 → 403, 맞으면 오늘 누적 = 이벤트 합. ADMIN_KEY 없는 서버는 404
@@ -92,13 +92,14 @@ const stats = (key, days) => fetch(`${URL}/admin/stats?key=${encodeURIComponent(
 
   // ── 방 생성 · 참가 (ref / via) ─────────────────────────────────
   const c1 = await connect(), c2 = await connect(), c3 = await connect();
-  const created = await emitAck(c1, 'room:create', { name: '방장닉네임', avatar: {}, token: 'tok-m1-000000001', ref: ' GN ' });
+  const created = await emitAck(c1, 'room:create', { name: '방장닉네임', avatar: {}, token: 'tok-m1-000000001', ref: ' GN ', fromWordSetLink: 'true' });
   const code = created.roomCode;
   await emitAck(c2, 'room:join', { roomCode: code, name: '둘째', avatar: {}, token: 'tok-m2-000000002', via: 'link', ref: 'bad ref!' });
   await emitAck(c3, 'room:join', { roomCode: code, name: '셋째', avatar: {}, token: 'tok-m3-000000003' });
   await sleep(300);
   const rc = last('room_created');
   check('room_created: room · ref 정규화(소문자·trim) · loggedIn=false · ts', rc && rc.room === code && rc.ref === 'gn' && rc.loggedIn === false && typeof rc.ts === 'string', rc);
+  check('room_created: fromWordSetLink 가 불린 true 가 아니면(문자열 "true") false', rc && rc.fromWordSetLink === false, rc);
   const joins = metrics.filter((m) => m.ev === 'player_joined');
   check('player_joined ×2: via link(ref 무효→"") size 2 · via code(기본) size 3 · midGame false',
     joins.length === 2 && joins[0].via === 'link' && joins[0].ref === '' && joins[0].size === 2 && joins[1].via === 'code' && joins[1].size === 3 && joins.every((j) => j.midGame === false), joins);
@@ -170,7 +171,10 @@ const stats = (key, days) => fetch(`${URL}/admin/stats?key=${encodeURIComponent(
 
   // ── 12명 가득 참 → room_full_rejected ──────────────────────────
   const h = await connect();
-  const full = await emitAck(h, 'room:create', { name: '가득방장', avatar: {}, token: 'tok-full-h-000001' });
+  const full = await emitAck(h, 'room:create', { name: '가득방장', avatar: {}, token: 'tok-full-h-000001', fromWordSetLink: true });
+  await sleep(100);
+  const rcw = last('room_created');
+  check('room_created: 단어 세트 링크로 만든 방 → fromWordSetLink true · 단어·이름 필드 없음', rcw && rcw.room === full.roomCode && rcw.fromWordSetLink === true && Object.keys(rcw).sort().join(',') === 'ev,fromWordSetLink,loggedIn,ref,room,ts', rcw);
   for (let i = 0; i < 11; i++) {
     const c = await connect();
     const r = await emitAck(c, 'room:join', { roomCode: full.roomCode, name: 'p' + i, avatar: {}, token: 'tok-full-' + String(i).padStart(9, '0') });
@@ -190,8 +194,8 @@ const stats = (key, days) => fetch(`${URL}/admin/stats?key=${encodeURIComponent(
   const today = body.days && body.days[0];
   check('/admin/stats: ok · today · store memory · 오늘 행', okRes.status === 200 && body.ok && body.today === today.day && body.store === 'memory', body);
   const bytesFromLog = metrics.filter((m) => m.ev === 'game_completed' || m.ev === 'game_aborted').reduce((s, m) => s + m.bytesOut, 0);
-  check('오늘 누적: rooms 2 · ref:gn 1 · joins 13(link 1 · code 12) · starts 3 · completes 1 · aborts 2(host 1 · notEnoughPlayers 1) · turns 3 · full 1 · closed 1',
-    today.rooms === 2 && today['ref:gn'] === 1 && today.joins === 13 && today.joins_link === 1 && today.joins_code === 12 && today.starts === 3 && today.starts_classic === 3
+  check('오늘 누적: rooms 2 · rooms_from_wsl 1 · ref:gn 1 · joins 13(link 1 · code 12) · starts 3 · completes 1 · aborts 2(host 1 · notEnoughPlayers 1) · turns 3 · full 1 · closed 1',
+    today.rooms === 2 && today.rooms_from_wsl === 1 && today['ref:gn'] === 1 && today.joins === 13 && today.joins_link === 1 && today.joins_code === 12 && today.starts === 3 && today.starts_classic === 3
       && today.completes === 1 && today.aborts === 2 && today.aborts_host === 1 && today.aborts_notEnoughPlayers === 1 && today.turns === 3 && today.full === 1 && today.closed === 1
       && today.players_start === 3 + 3 + 2 && today.players_complete === 3, today);
   check('오늘 누적 bytes_out = 로그의 bytesOut 합 (> 0)', today.bytes_out === bytesFromLog && bytesFromLog > 0, { stats: today.bytes_out, log: bytesFromLog });

@@ -1919,6 +1919,11 @@
             var wl = el('div', 'sum-words-list');
             cwList.forEach(function (w) { wl.appendChild(el('span', 'sum-word', w)); });
             box.appendChild(wl);
+            // 같이 논 사람이 이 단어를 가져가 자기 방을 만들 수 있게(세트 이름은 담지 않는다). 목록이 보일 때만 있다
+            var sl = el('button', 'btn btn-ghost btn-sm sum-words-link', '🔗 이 단어로 방 만들기 링크'); sl.type = 'button'; sl.id = 'btn-sum-wordset-link';
+            sl.title = '링크를 받은 사람이 방을 만들면 이 단어가 채워져요';
+            sl.addEventListener('click', shareSummaryWordSet);
+            box.appendChild(sl);
             sum.appendChild(box);
           }
         }
@@ -2249,6 +2254,18 @@
   function nickValue() { var n = $('nick'); return (n ? n.value : profile.name).trim().slice(0, 12); }
   function updateNextBtn() { var b = $('btn-profile-next'); if (b) b.disabled = !nickValue() || photo.uploading; }
   function focusNode(n) { if (n) { try { n.focus({ preventScroll: true }); } catch (e) { /* ignore */ } } }
+  /** 화면에 보이고 누를 수 있는가(hidden·display:none 조상·disabled 면 false) */
+  function focusableNow(n) { return !!(n && !n.disabled && !n.hidden && n.getClientRects().length); }
+  /** 모달 포커스 트랩: Tab·Shift+Tab 이 box 밖으로 나가지 않게 처음↔끝을 잇는다. keydown 에서 부른다 */
+  function trapTab(box, e) {
+    if (!box || e.key !== 'Tab') return;
+    var list = Array.prototype.filter.call(box.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'), focusableNow);
+    if (!list.length) { e.preventDefault(); return; }
+    var first = list[0], last = list[list.length - 1], cur = document.activeElement;
+    var inside = box.contains(cur);
+    if (e.shiftKey && (cur === first || !inside)) { e.preventDefault(); focusNode(last); }
+    else if (!e.shiftKey && (cur === last || !inside)) { e.preventDefault(); focusNode(first); }
+  }
   function authConfigured() {
     var c = window.APP_CONFIG;
     return !!(c && typeof c.supabaseUrl === 'string' && c.supabaseUrl && typeof c.supabaseAnonKey === 'string' && c.supabaseAnonKey);
@@ -2454,6 +2471,12 @@
     var words = parseWords(ta ? ta.value : state.settings.customWords || '').words;
     var src = ui.setSource, name = src && src.key === words.join(',') ? src.name : '';
     shareWordSet(normWordSet(name, words, cb ? cb.checked : state.settings.customWordsOnly));
+  }
+  /** 방장이 아닌 사람의 설정 요약 "이 단어로 방 만들기 링크": 지금 방의 우리만의 단어(이름 없이) */
+  function shareSummaryWordSet() {
+    if (!inRoom || isHost() || state.phase !== 'lobby') return;
+    var words = parseWords(state.settings.customWords || '').words;
+    shareWordSet(normWordSet('', words, state.settings.customWordsOnly));
   }
   var GUEST_STARTED_KEY = 'drawguess.guestStarted'; // sessionStorage: 이 탭에서 게스트로 시작했는가
   function guestStarted() { try { return sessionStorage.getItem(GUEST_STARTED_KEY) === '1'; } catch (e) { return false; } }
@@ -2730,6 +2753,7 @@
     syncAccountProfile(false);
     p.token = getToken();
     var ref = getRef(); if (ref) p.ref = ref;
+    if (landing.wordSet || pendingWordSet()) p.fromWordSetLink = true; // 지표용 불린만(PROTOCOL room:create)
     withAck('room:create', p, function (ack) { setToken(ack.token); enterRoom(ack.roomCode, ack.playerId); applyPendingWordSet(); });
   }
   function joinRoom() {
@@ -3659,7 +3683,7 @@
     var tools = $('wordset-tools'); if (tools) tools.hidden = !logged;
     var wlb = $('btn-wordset-load');
     if (wlb) { wlb.hidden = !acct.sets.length; wlb.disabled = !canApplySet(); }
-    if (wsLoadOpen()) { if (!logged || !acct.sets.length) closeWsLoad(); else renderWsLoad(); }
+    if (wsLoadOpen()) { if (!logged || !acct.sets.length || !canApplySet()) closeWsLoad(); else renderWsLoad(); }
     if (acct.open) renderAccountPanel();
     renderMePage();
   }
@@ -3814,6 +3838,10 @@
   function wsLoadOpen() { var d = $('overlay-wsload'); return !!(d && !d.hidden); }
   function renderWsLoad() {
     var box = $('wsload-list'); if (!box) return;
+    // 상태가 올 때마다 불리므로 목록이 그대로면 다시 그리지 않는다(행에 둔 포커스를 지킨다)
+    var key = JSON.stringify(acct.sets.map(function (s) { return [s.id, s.name, s.words.length]; }));
+    if (box.getAttribute('data-key') === key && box.childElementCount) return;
+    box.setAttribute('data-key', key);
     box.innerHTML = '';
     acct.sets.forEach(function (s) {
       var b = el('button', 'wsload-item'); b.type = 'button';
@@ -3826,9 +3854,14 @@
   function openWsLoad() {
     var d = $('overlay-wsload'); if (!d || !acctLoggedIn() || !acct.sets.length || !canApplySet()) return;
     renderWsLoad(); d.hidden = false;
-    var first = d.querySelector('.wsload-item'); if (first) { try { first.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+    focusNode(d.querySelector('.wsload-item') || $('btn-wsload-close')); // 첫 행, 없으면 닫기
   }
-  function closeWsLoad() { var d = $('overlay-wsload'); if (d) d.hidden = true; }
+  /** 닫으면 [📂 불러오기] 로 포커스를 돌려놓는다(버튼이 숨었거나 비활성이면 그대로 둔다) */
+  function closeWsLoad() {
+    var d = $('overlay-wsload'); if (!d || d.hidden) return;
+    d.hidden = true;
+    var wlb = $('btn-wordset-load'); if (focusableNow(wlb)) focusNode(wlb);
+  }
   function pickWsLoad(s) {
     closeWsLoad();
     if (!canApplySet()) return;
@@ -3967,7 +4000,11 @@
     var ww = $('ws-words'); if (ww) ww.addEventListener('input', updateWordCount);
     var wlb = $('btn-wordset-load'); if (wlb) wlb.addEventListener('click', openWsLoad);
     var wlc = $('btn-wsload-close'); if (wlc) wlc.addEventListener('click', closeWsLoad);
-    var wlo = $('overlay-wsload'); if (wlo) wlo.addEventListener('click', function (e) { if (e.target === wlo) closeWsLoad(); });
+    var wlo = $('overlay-wsload');
+    if (wlo) {
+      wlo.addEventListener('click', function (e) { if (e.target === wlo) closeWsLoad(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Tab' && wsLoadOpen()) trapTab(wlo, e); }); // 포커스가 body 로 빠졌어도 dialog 안으로
+    }
     var sv = $('btn-wordset-save'); if (sv) sv.addEventListener('click', openQuickSave);
     var qsv = $('btn-ws-quick-save'); if (qsv) qsv.addEventListener('click', submitQuickSave);
     var qcn = $('btn-ws-quick-cancel'); if (qcn) qcn.addEventListener('click', closeQuickSave);

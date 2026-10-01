@@ -617,19 +617,33 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.locator('#set-customWords').blur();
     await p.click('#btn-wordset-load');
     check(await p.locator('#overlay-wsload').isVisible() && (await p.locator('#wsload-list .wsload-item').count()) === 1, '불러오기 dialog: 세트 1행');
+    check(await p.evaluate(() => document.activeElement && document.activeElement.classList.contains('wsload-item')), '불러오기 dialog: 열면 첫 행에 포커스');
+    // Tab · Shift+Tab 이 dialog 밖으로 나가지 않는다(닫기 버튼 ↔ 행)
+    {
+      const seen = [];
+      for (const k of ['Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab', 'Shift+Tab']) {
+        await p.keyboard.press(k);
+        seen.push(await p.evaluate(() => { const a = document.activeElement; return !!a && document.getElementById('overlay-wsload').contains(a) ? (a.id || a.className) : 'OUT:' + (a && (a.id || a.tagName)); }));
+      }
+      check(seen.every((x) => !x.startsWith('OUT')) && seen.includes('btn-wsload-close') && seen.includes('wsload-item'), '불러오기 dialog: Tab·Shift+Tab 포커스 트랩', seen.join(','));
+    }
     await p.keyboard.press('Escape');
     check(await p.locator('#overlay-wsload').isHidden(), '불러오기 dialog: Esc로 닫힘');
+    check((await p.evaluate(() => document.activeElement && document.activeElement.id)) === 'btn-wordset-load', '불러오기 dialog: Esc로 닫으면 포커스가 [📂 불러오기]로', await p.evaluate(() => document.activeElement && document.activeElement.id));
     await p.click('#btn-wordset-load');
     await p.locator('#overlay-wsload').click({ position: { x: 4, y: 4 } });
     check(await p.locator('#overlay-wsload').isHidden(), '불러오기 dialog: 바깥 클릭으로 닫힘');
+    check((await p.evaluate(() => document.activeElement && document.activeElement.id)) === 'btn-wordset-load', '불러오기 dialog: 바깥 클릭 → 포커스 복귀', await p.evaluate(() => document.activeElement && document.activeElement.id));
     await p.click('#btn-wordset-load');
     await p.click('#btn-wsload-close');
     check(await p.locator('#overlay-wsload').isHidden(), '불러오기 dialog: 닫기 버튼');
+    check((await p.evaluate(() => document.activeElement && document.activeElement.id)) === 'btn-wordset-load', '불러오기 dialog: 닫기 버튼 → 포커스 복귀', await p.evaluate(() => document.activeElement && document.activeElement.id));
     await p.click('#btn-wordset-load');
     await p.click('#wsload-list .wsload-item');
     await sleep(300);
     check((await val(p, '#set-customWords')) === '사과, 바나나, 포도', 'dialog 불러오기: 텍스트 영역 채움', await val(p, '#set-customWords'));
     check(await p.locator('#overlay-wsload').isHidden(), 'dialog 불러오기: 고르면 dialog 닫힘');
+    check((await p.evaluate(() => document.activeElement && document.activeElement.id)) === 'btn-wordset-load', 'dialog 불러오기: 행 선택 → 포커스 복귀', await p.evaluate(() => document.activeElement && document.activeElement.id));
     await p.waitForFunction(() => /사과/.test(window.__dg.state.settings.customWords), null, { timeout: 3000 }).catch(() => {});
     check(await p.evaluate(() => /사과/.test(window.__dg.state.settings.customWords)), 'dialog 불러오기: room:settings 전송 → state 반영');
 
@@ -648,6 +662,21 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.keyboard.press('Escape');
     check(nSets === 2 && await p.locator('#wordset-quick').isHidden(), '현재 단어 저장: 세트 2개 · 입력칸 닫힘', nSets);
     check(await p.evaluate(() => { const r = window.__mockAuth.tables.word_sets.find((x) => x.name === '동물'); return !!r && JSON.stringify(r.words) === JSON.stringify(['고양이', '강아지']); }), '현재 단어 저장: DB 에 단어 그대로');
+
+    // dialog 를 연 채 게임이 시작되면(대기실을 벗어나면) 저절로 닫힌다 → "게임 끝내기"로 대기실에 돌아온다
+    await p.click('#btn-wordset-load');
+    check(await p.locator('#overlay-wsload').isVisible(), '불러오기 dialog: 게임 시작 전 열림');
+    await p.evaluate(() => document.getElementById('btn-start').click()); // dialog 가 화면을 덮고 있어 키보드 대신 직접 누른다(다른 기기의 시작과 같은 상황)
+    await p.waitForFunction(() => window.__dg.state.phase !== 'lobby', null, { timeout: 5000 }).catch(() => {});
+    await sleep(200);
+    check(await p.evaluate(() => window.__dg.state.phase !== 'lobby') && await p.locator('#overlay-wsload').isHidden(), '불러오기 dialog: 게임이 시작되면 자동으로 닫힘', await p.evaluate(() => window.__dg.state.phase));
+    await p.waitForSelector('#btn-end-game:not([hidden])', { timeout: 3000 }).catch(() => {});
+    await p.click('#btn-end-game');
+    await p.waitForSelector('#overlay-leave:not([hidden])', { timeout: 3000 });
+    await p.click('#btn-leave-confirm');
+    await p.waitForFunction(() => window.__dg.state.phase === 'lobby', null, { timeout: 5000 }).catch(() => {});
+    await p.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 }).catch(() => {});
+    check(await p.evaluate(() => window.__dg.state.phase === 'lobby') && await p.locator('#btn-wordset-load').isEnabled(), '게임 끝내기 → 대기실, [📂 불러오기] 다시 활성');
 
     // 방 안 프로필 수정(대기실) — 데스크톱 모달
     console.log('\n== 방 안 프로필 수정 (가짜 Supabase, 데스크톱) ==');

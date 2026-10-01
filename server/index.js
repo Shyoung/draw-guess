@@ -393,7 +393,7 @@ io.on('connection', (socket) => {
     return [data && typeof data === 'object' ? data : {}, typeof ack === 'function' ? ack : () => {}];
   };
 
-  // room:create { name, avatar, token?, ref? } → ack { ok, roomCode, playerId } | { ok:false, error }
+  // room:create { name, avatar, token?, ref?, fromWordSetLink? } → ack { ok, roomCode, playerId } | { ok:false, error }
   on('room:create', (rawData, rawAck) => {
     const [data, ack] = normalizeArgs(rawData, rawAck);
     const name = sanitizeName(data.name);
@@ -417,7 +417,8 @@ io.on('connection', (socket) => {
     ack({ ok: true, roomCode: code, playerId: socket.id, token });
     room.addPlayer({ id: socket.id, name, avatar, token, socketId: socket.id, user: socket.data.user });
     console.log(`[draw-guess] room ${code} created. rooms=${rooms.size}`);
-    room.metric('room_created', { ref: sanitizeRef(data.ref), loggedIn: !!socket.data.user });
+    // fromWordSetLink: 공개 단어 세트 링크(#ws=)로 받은 단어로 만든 방인가. 불린 true 만 인정(단어·세트 이름은 받지도 남기지도 않는다)
+    room.metric('room_created', { ref: sanitizeRef(data.ref), loggedIn: !!socket.data.user, fromWordSetLink: data.fromWordSetLink === true });
   });
 
   // room:join { roomCode, name, avatar, token?, ref?, via? } → ack 동일
