@@ -45,7 +45,7 @@ description: 이뭔그(draw-guess) 운영 사이클 한 바퀴. docs/ops/BOARD.m
 
 ## 3. 검증 → 수정 (순서대로)
 - **운영자 확인과 QA를 겹친다.** builder가 push한 직후 QA를 기다리지 않고, 먼저 운영자에게 중간 메시지로 아래를 출력한 다음
-  - **로컬 주소를 먼저 준다**(스테이징 배포를 기다리지 않아도 된다): 코드는 이미 메인 체크아웃 작업 폴더에 있으므로 `node scripts/local-urls.js 3200`의 `localhost`·**LAN IP** 주소와 실행 명령(`ALLOW_SOLO=1 PORT=3200 npm start`, 폴더 `E:/claude pj/개인/draw-guess`)을 적는다. 같은 Wi-Fi의 PC·폰에서 모두 열린다. 서버는 운영자가 켠다.
+  - **로컬 주소를 먼저 준다**(스테이징 배포를 기다리지 않아도 된다): 코드는 이미 메인 체크아웃 작업 폴더에 있으므로 `node scripts/local-urls.js 3200`의 `localhost`·**LAN IP** 주소와 실행 명령(`ALLOW_SOLO=1 PORT=3200 npm start`, 폴더 `E:/claude pj/개인/draw-guess`)을 적는다. 같은 Wi-Fi의 PC·폰에서 모두 열린다. 서버는 **사이클이 켠다**: 메인 체크아웃에서 `ALLOW_SOLO=1 PORT=3200 npm start`를 백그라운드로 띄워 `/healthz`로 확인한 뒤 주소를 알린다(이미 떠 있으면 재시작). 사이클 마지막 메시지를 쓰기 직전에 종료하되, 운영자가 계속 보고 싶다고 하면 두고 세션이 닫히면 꺼진다고 알린다.
   - 스테이징 주소 https://draw-guess-staging.onrender.com 는 "배포 중(몇 분)"이라고 덧붙인다. 로그인·OAuth처럼 로컬에서 안 되는 기능이거나 다른 망의 기기에서 볼 때는 스테이징을 쓴다.
   - 확인할 것 2~3줄. 이어서 같은 턴에 `qa-reviewer`를 백그라운드로 시작한다. 운영자가 보는 동안 QA가 돌고, QA 결과(결함·머지 의견)는 최종 메시지에서 합친다. 이 사이클 안에서 들어온 운영자 의견은 BOARD 방향 메모나 BACKLOG에 적어 두고 다음 사이클에 반영한다(사이클은 QA·fixer가 코드를 만지는 중이라 중간에 끼워 넣지 않는다).
 - 아래 중 하나라도 해당하면 `qa-reviewer`를 부른다. 스테이징 배포 확인·테스트 전부·TEST-LOG 기록·main 머지 의견을 받는다.
