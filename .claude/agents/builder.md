@@ -36,5 +36,6 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 ## 보고 형식 (마지막 메시지)
 - 만든 항목과 커밋 해시
 - 스테이징에서 사람이 확인해야 할 것(있으면 2~3줄)
+  - 확인 방법에는 접속 주소를 함께 적는다: 스테이징이면 https://draw-guess-staging.onrender.com, 로컬이면 `node scripts/local-urls.js 3200`을 실행한 `localhost`·LAN IP 주소와 실행 명령(`ALLOW_SOLO=1 PORT=3200 npm start`). 호출자(사이클·기능 세션)가 이를 운영자에게 전한다.
 - PROTOCOL 변경 여부
 - 막힌 것·운영자 결정이 필요한 것

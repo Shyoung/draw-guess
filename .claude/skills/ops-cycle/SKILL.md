@@ -71,6 +71,7 @@ description: 이뭔그(draw-guess) 운영 사이클 한 바퀴. docs/ops/BOARD.m
 3. 오늘 운영자 할 일 3개
 4. 열린 결함(막힘·높음만) 
 5. 지표 한 줄
+6. **운영자가 직접 확인할 것이 있으면 접속 주소를 같이 적는다** (CLAUDE.md "항상 지킬 것"). 스테이징에 올라간 변경은 스테이징 주소 https://draw-guess-staging.onrender.com 를, 로컬 서버가 필요한 확인은 메인 체크아웃에서 `node scripts/local-urls.js 3200`을 실행해 나온 `localhost`·**LAN IP** 주소와 실행 명령(`ALLOW_SOLO=1 PORT=3200 npm start`, 폴더 `E:/claude pj/개인/draw-guess`)을 적는다. 이 서버는 운영자가 직접 켠다(사이클이 띄워 두지 않는다). "폰에서 확인해 주세요"만 쓰고 주소를 빼지 않는다.
 
 ## 원칙
 - 서브에이전트의 보고는 요약해서 옮긴다. 파일 내용을 그대로 붙이지 않는다.

@@ -1235,15 +1235,22 @@ img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cove
 .has-img { position: relative; }
 .has-img > img.avatar-img { position: absolute; inset: 0; }
 /* 대기실 설정: 내 세트 도구 */
-.wordset-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: -4px; }
-.wordset-tools select { width: auto; flex: 1 1 200px; min-width: 0; padding: 8px 10px; font-size: 13px; font-weight: 600; }
-.wordset-tools .btn { flex: 0 0 auto; }
-.wordset-quick { display: flex; gap: 8px; align-items: center; flex: 1 1 100%; min-width: 0; }
+.wordset-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: -4px; }
+.wordset-row:not(:has(> :not([hidden]))) { display: none; }
+.wordset-tools { display: contents; }
+.wordset-row .btn { flex: 0 0 auto; }
+.wordset-quick { display: flex; gap: 8px; align-items: center; flex: 1 1 100%; min-width: 0; order: 3; }
 .wordset-quick input { flex: 1 1 auto; min-width: 0; padding: 8px 10px; font-size: 13px; }
-/* 대기실 설정: 단어 세트 링크(#ws=) 보내기 */
-.wordset-share { display: flex; gap: 4px 10px; align-items: center; flex-wrap: wrap; }
-.wordset-share .btn { flex: 0 0 auto; }
-.wordset-share small { font-size: 12px; color: var(--muted); line-height: 1.4; }
+/* 대기실 설정: 단어 세트 링크(#ws=) 보내기 — 저장 버튼 옆 */
+.wordset-share { display: contents; }
+
+/* 내 세트 불러오기 dialog: 세트가 많으면 목록 안에서 스크롤 */
+.modal-card.card-wsload { width: min(400px, 100%); gap: 10px; max-height: min(80vh, 520px); max-height: min(calc(var(--vvh, 100dvh) - 40px), 520px); }
+.wsload-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; padding: 2px; }
+.wsload-item { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; width: 100%; text-align: left; background: #f8f6fc; border: 0; border-radius: 14px; padding: 12px 14px; font: inherit; color: var(--text); cursor: pointer; }
+.wsload-item:hover, .wsload-item:focus-visible { background: var(--secondary-soft); }
+.wsload-name { font-size: 15px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wsload-count { font-size: 12px; color: var(--muted); white-space: nowrap; flex: 0 0 auto; }
 
 /* 내 정보 › 개인 설정(욕설 가리기 · 방송 모드) */
 .me-prefs { display: flex; flex-direction: column; gap: 12px; }
@@ -1343,7 +1350,6 @@ img.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cove
 @media (max-width: 639px), (max-width: 767px) and (orientation: portrait), (max-width: 767px) and (pointer: fine), (max-width: 1099px) and (orientation: portrait) and (pointer: coarse) {
   .sheet-panel-account { max-height: 92%; }
   .sheet-panel-account .account-body { padding: 2px 0 8px; gap: 16px; }
-  .wordset-tools select { flex-basis: 100%; }
 }
 
 /* =====================================================================

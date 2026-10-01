@@ -3107,6 +3107,7 @@
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
       if (leaveDialogOpen()) { closeLeaveDialog(); return; }
+      if (wsLoadOpen()) { closeWsLoad(); return; }
       var dd = $('overlay-delete'); if (dd && !dd.hidden) { closeDeleteDialog(); return; }
       if (vault.viewing) { closeDrawing(); return; }
       if (openSheetId) { closeSheet(false); return; }
@@ -3656,17 +3657,9 @@
     var slot = $('menu-slot-account'); if (slot) slot.hidden = !logged;
     // 대기실 설정: 내 세트 불러오기 / 현재 단어를 세트로 저장
     var tools = $('wordset-tools'); if (tools) tools.hidden = !logged;
-    var sel = $('wordset-load');
-    if (sel) {
-      sel.hidden = !acct.sets.length;
-      var key = acct.sets.map(function (s) { return s.id + ':' + s.name + ':' + s.words.length; }).join('|');
-      if (sel.getAttribute('data-key') !== key) {
-        sel.setAttribute('data-key', key); sel.innerHTML = '';
-        var o0 = el('option', null, '내 세트 불러오기…'); o0.value = ''; sel.appendChild(o0);
-        acct.sets.forEach(function (s) { var o = el('option', null, s.name + ' (' + s.words.length + '개)'); o.value = String(s.id); sel.appendChild(o); });
-      }
-      sel.disabled = !canApplySet();
-    }
+    var wlb = $('btn-wordset-load');
+    if (wlb) { wlb.hidden = !acct.sets.length; wlb.disabled = !canApplySet(); }
+    if (wsLoadOpen()) { if (!logged || !acct.sets.length) closeWsLoad(); else renderWsLoad(); }
     if (acct.open) renderAccountPanel();
     renderMePage();
   }
@@ -3817,6 +3810,33 @@
     sendSettings();
     toast('"' + s.name + '" 세트를 방 설정에 적용했어요', 'ok');
   }
+  /** 방 설정: "📂 불러오기" dialog — 내 세트를 행으로 보여 주고, 고르면 단어를 채운다 */
+  function wsLoadOpen() { var d = $('overlay-wsload'); return !!(d && !d.hidden); }
+  function renderWsLoad() {
+    var box = $('wsload-list'); if (!box) return;
+    box.innerHTML = '';
+    acct.sets.forEach(function (s) {
+      var b = el('button', 'wsload-item'); b.type = 'button';
+      b.appendChild(el('span', 'wsload-name', s.name));
+      b.appendChild(el('span', 'wsload-count', s.words.length + '개'));
+      b.addEventListener('click', function () { pickWsLoad(s); });
+      box.appendChild(b);
+    });
+  }
+  function openWsLoad() {
+    var d = $('overlay-wsload'); if (!d || !acctLoggedIn() || !acct.sets.length || !canApplySet()) return;
+    renderWsLoad(); d.hidden = false;
+    var first = d.querySelector('.wsload-item'); if (first) { try { first.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+  }
+  function closeWsLoad() { var d = $('overlay-wsload'); if (d) d.hidden = true; }
+  function pickWsLoad(s) {
+    closeWsLoad();
+    if (!canApplySet()) return;
+    var ta = $('set-customWords'); if (ta) ta.value = s.words.join(', ');
+    ui.setSource = { name: s.name, key: parseWords(s.words.join(',')).words.join(',') }; // 링크에 세트 이름을 담는 데 쓴다
+    sendSettings();
+    toast('"' + s.name + '" 세트를 불러왔어요', 'ok');
+  }
   /** 방 설정: 지금 사용자 단어를 이름만 받아 새 세트로 저장 */
   function openQuickSave() {
     if (!acctLoggedIn()) return;
@@ -3945,15 +3965,9 @@
     var wc = $('btn-ws-cancel'); if (wc) wc.addEventListener('click', function () { acct.formOpen = false; acct.editing = null; renderAccountPanel(); });
     var wf = $('wordset-form'); if (wf) wf.addEventListener('submit', function (e) { e.preventDefault(); submitWordSet(); });
     var ww = $('ws-words'); if (ww) ww.addEventListener('input', updateWordCount);
-    var sel = $('wordset-load');
-    if (sel) sel.addEventListener('change', function () {
-      var id = sel.value; sel.value = '';
-      var s = null; acct.sets.forEach(function (x) { if (String(x.id) === id) s = x; });
-      if (!s || !canApplySet()) return;
-      var ta = $('set-customWords'); if (ta) ta.value = s.words.join(', ');
-      sendSettings();
-      toast('"' + s.name + '" 세트를 불러왔어요', 'ok');
-    });
+    var wlb = $('btn-wordset-load'); if (wlb) wlb.addEventListener('click', openWsLoad);
+    var wlc = $('btn-wsload-close'); if (wlc) wlc.addEventListener('click', closeWsLoad);
+    var wlo = $('overlay-wsload'); if (wlo) wlo.addEventListener('click', function (e) { if (e.target === wlo) closeWsLoad(); });
     var sv = $('btn-wordset-save'); if (sv) sv.addEventListener('click', openQuickSave);
     var qsv = $('btn-ws-quick-save'); if (qsv) qsv.addEventListener('click', submitQuickSave);
     var qcn = $('btn-ws-quick-cancel'); if (qcn) qcn.addEventListener('click', closeQuickSave);
