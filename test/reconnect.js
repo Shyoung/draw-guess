@@ -323,6 +323,33 @@ const byId = (list, id) => list.find((p) => p.id === id);
   const xNext = await waitNext(x2, 'game:choosing', undefined, 8000, 'next drawer after drawerLeft');
   check('after drawerLeft the next connected player (X2) draws', xNext.drawerId === x2.id, xNext);
 
+  // ── R-20260930-2 회귀: turnEnd(5초) 중 재접속하면 catch-up game:turnEnd.deltas 에 같은 사람이 두 번 들어가지 않는다 ──
+  const y1 = await connect('Y1'), y2 = await connect('Y2');
+  const yc = await emitAck(y1, 'room:create', { name: '와이일', avatar: {}, token: 'tok-y1-turnend-00001' });
+  const Y2_TOKEN = 'tok-y2-turnend-00002';
+  await emitAck(y2, 'room:join', { roomCode: yc.roomCode, name: '와이이', avatar: {}, token: Y2_TOKEN });
+  y1.emit('room:settings', { settings: { rounds: 1, drawTime: 60, hints: 0, wordCount: 2, customWords: '자전거,냉장고,해바라기,고슴도치', customWordsOnly: true } });
+  await waitFor(y2, 'room:state', (s) => s.settings.customWordsOnly === true && s.players.length === 2, 3000, 'y settings');
+  y1.emit('game:start');
+  const ych = await waitFor(y1, 'game:choosing', (p) => Array.isArray(p.wordOptions), 5000, 'Y1 choosing');
+  y1.emit('word:choose', { word: ych.wordOptions[0] });
+  await waitFor(y2, 'game:drawing', undefined, 5000, 'Y2 drawing');
+  const yTeP = waitNext(y1, 'game:turnEnd', undefined, 8000, 'Y turnEnd');
+  y2.emit('chat:message', { text: ych.wordOptions[0] });
+  const yTe = await yTeP;
+  check('turnEnd(allGuessed) deltas 는 사람당 한 줄', yTe.reason === 'allGuessed' && new Set(yTe.deltas.map((d) => d.id)).size === yTe.deltas.length, yTe);
+  y2.disconnect();
+  await sleep(300);
+  const y2b = await connect('Y2-again');
+  const yCatchP = waitNext(y2b, 'game:turnEnd', undefined, 3000, 'Y2 catch-up turnEnd');
+  const yrj = await emitAck(y2b, 'room:rejoin', { roomCode: yc.roomCode, token: Y2_TOKEN });
+  const yCatch = await yCatchP.catch(() => null);
+  const yIds = yCatch ? yCatch.deltas.map((d) => d.id) : [];
+  check('turnEnd 중 재접속: catch-up deltas 에 같은 사람이 두 번 없음', yrj.ok && !!yCatch && new Set(yIds).size === yIds.length && yIds.length === 2, yCatch);
+  const y2d = yCatch && yCatch.deltas.find((d) => d.id === y2.playerId);
+  const y2Orig = yTe.deltas.find((d) => d.id === y2.playerId);
+  check('catch-up 의 재접속자 delta 는 실제 점수(+0 아님)', !!y2d && y2d.delta > 0 && y2Orig && y2d.delta === y2Orig.delta, { y2d, y2Orig });
+
   cleanup(failures ? 1 : 0);
 })().catch((err) => {
   check(`unexpected error: ${err && err.message}`, false, err && err.stack);

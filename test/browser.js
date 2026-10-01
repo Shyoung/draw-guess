@@ -22,14 +22,15 @@ function check(cond, label, extra) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PLAYER_SEL = '#player-list li, #player-list .player';
 
-async function startServer() {
+async function startServer(extraEnv = {}, port = PORT) {
+  const url = `http://localhost:${port}`;
   const child = spawn(process.execPath, ['server/index.js'], {
-    cwd: ROOT, env: { ...process.env, PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: ROOT, env: { ...process.env, PORT: String(port), ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.on('data', (d) => process.stdout.write('[server] ' + d));
   child.stderr.on('data', (d) => process.stderr.write('[server:err] ' + d));
   for (let i = 0; i < 50; i++) {
-    try { const r = await fetch(URL + '/'); if (r.ok) return child; } catch {}
+    try { const r = await fetch(url + '/'); if (r.ok) return child; } catch {}
     await sleep(100);
   }
   throw new Error('server did not start');
@@ -45,11 +46,11 @@ async function nonWhitePixels(page) {
   });
 }
 
-async function joinAs(context, nick, code) {
+async function joinAs(context, nick, code, base = URL) {
   const page = await context.newPage();
   page.on('pageerror', (e) => { console.log(`[${nick}] pageerror: ${e.message}`); failures++; });
   page.on('console', (m) => { if (m.type() === 'error') console.log(`[${nick}] console.error: ${m.text()}`); });
-  await page.goto(code ? `${URL}/?room=${code}` : URL + '/');
+  await page.goto(code ? `${base}/?room=${code}` : base + '/');
   // 랜딩: 로그인 꺼짐(Supabase 미설정)이라 시작 단계를 건너뛰고 프로필 설정 → "다음" → 방
   await page.waitForSelector('#landing-step-profile:not([hidden])', { timeout: 5000 });
   check(await page.locator('#landing-step-start').isHidden() && await page.locator('#avatar-mode').isHidden(), `${nick}: 로그인 꺼짐 → 시작 단계 없이 프로필 설정(사진 탭 없음)`);
@@ -148,7 +149,7 @@ async function relayScenario(browser) {
   })));
   await pa.click('#btn-start');
   const pages = [pa, pb, pc], nicks = ['릴레이A', '릴레이B', '릴레이C'];
-  let chooser = null, word = null, optTexts = [];
+  let chooser = null, word = null, optTexts = [], reloaded = null;
   for (let t = 0; t < 40 && !chooser; t++) {
     for (const pg of pages) {
       const btn = pg.locator('#word-options .word-option:not([disabled])');
@@ -220,6 +221,17 @@ async function relayScenario(browser) {
   const h1 = await hintView(guesser);
   check(h1.used === 1 && h1.text.includes('남은 2회') && h1.revealed >= 1 && !h1.disabled, 'relay 힌트 1회: "남은 2회" · 마스크에 초성 1칸', JSON.stringify(h1));
   check((await second.locator('#word-area .mask-box.revealed').count()) >= 1 && (await first.locator('#word-area .mask-box.revealed').count()) === 0, 'relay 힌트: 차례 전 주자 마스크도 갱신(현재 주자는 제시어라 그대로)');
+  // 힌트를 쓴 뒤 새로고침(재접속): 남은 횟수 · 마스크의 공개 칸이 그대로 복원된다
+  const maskOf = (pg) => pg.evaluate(() => [...document.querySelectorAll('#word-area .mask-box')].map((b) => b.classList.contains('revealed') ? b.textContent : '_').join(''));
+  const maskBeforeReload = await maskOf(guesser);
+  await guesser.reload();
+  reloaded = guesser; // 새로고침하면 배치 기록(__roles)이 사라지므로 깜빡임 검사에서 뺀다
+  await guesser.waitForSelector('#view-room:not([hidden])', { timeout: 8000 }).catch(() => {});
+  await guesser.waitForFunction(() => window.__dg.ui.relayInfo && window.__dg.ui.relayInfo.hintsUsed === 1 && document.querySelectorAll('#word-area .mask-box').length > 0, null, { timeout: 8000 }).catch(() => {});
+  await sleep(300);
+  const hr = await hintView(guesser);
+  check(hr.shown && hr.used === 1 && hr.text.includes('남은 2회') && !hr.disabled, 'relay 힌트 후 새로고침: 버튼 "남은 2회"로 복원(활성)', JSON.stringify(hr));
+  check(hr.revealed === h1.revealed && (await maskOf(guesser)) === maskBeforeReload, 'relay 힌트 후 새로고침: 마스크의 공개 칸 그대로', `${maskBeforeReload} → ${await maskOf(guesser)}`);
   for (let n = 2; n <= 3; n++) {
     await guesser.click('#btn-relay-hint');
     await guesser.waitForFunction((k) => window.__dg.ui.relayInfo && window.__dg.ui.relayInfo.hintsUsed === k, n, { timeout: 3000 }).catch(() => {});
@@ -347,6 +359,7 @@ async function relayScenario(browser) {
   // 배치 깜빡임 없음: 문제마다 data-role 이 (주자 → drawer / 맞히는 사람 → guesser) 로 한 번씩만 바뀐다(중간에 다른 값이 끼지 않음)
   if (probs.length === 3) {
     for (const pg of pages) {
+      if (pg === reloaded) continue;
       const me = ids[pages.indexOf(pg)];
       const want = probs.map((r) => (r.order.indexOf(me) !== -1 ? 'drawer' : 'guesser')).filter((v, i, a) => i === 0 || v !== a[i - 1]);
       const seen = (await pg.evaluate(() => window.__roles || [])).filter((x) => x.ph === 'choosing' || x.ph === 'drawing' || x.ph === 'turnEnd').map((x) => x.role).filter((v, i, a) => i === 0 || v !== a[i - 1]);
@@ -379,6 +392,35 @@ async function relayScenario(browser) {
   check(sheetTexts.some((t) => t.includes('🖍 ' + co) && t.includes('🎯 ' + nickOf(guesser))), 'relay 갤러리 시트 PNG: 칸마다 공동 작가 · 맞히는 사람', JSON.stringify(sheetTexts.slice(0, 6)));
   await pa.screenshot({ path: path.join(SHOTS, 'e2e-relay-gallery.png') });
   await Promise.all(rctx.map((c) => c.close().catch(() => {})));
+}
+
+/**
+ * relay 카드 인원 규칙(R6): ALLOW_SOLO 서버(스테이징·개발)는 2명부터 활성, 일반 서버(프로덕션)는 3명부터.
+ * 일반 서버의 2명 비활성은 relayScenario 가, 여기서는 ALLOW_SOLO 서버를 따로 띄워 2명이면 카드가 켜지고 시작까지 되는지 본다.
+ */
+async function soloRelayCardScenario(browser) {
+  const SOLO_PORT = PORT + 11;
+  const soloUrl = `http://localhost:${SOLO_PORT}`;
+  const solo = await startServer({ ALLOW_SOLO: '1' }, SOLO_PORT);
+  const ctx = await Promise.all([1, 2].map(() => browser.newContext({ viewport: { width: 1280, height: 860 } })));
+  try {
+    const pa = await joinAs(ctx[0], '솔로A', undefined, soloUrl);
+    const code = (await pa.textContent('#room-code')).trim().replace(/[^A-Z]/g, '');
+    const card = '#mode-panel .mode-card[data-mode="relay"]';
+    check(await pa.evaluate(() => window.__dg.state.allowSolo === true), 'ALLOW_SOLO 서버: state.allowSolo true');
+    check(await pa.locator(card).isDisabled(), 'ALLOW_SOLO 서버: 1명이면 relay 카드 비활성(주자가 0명)', await pa.textContent(card + ' .mode-meta'));
+    await joinAs(ctx[1], '솔로B', code, soloUrl);
+    await pa.waitForFunction(() => window.__dg.state.players.length === 2, null, { timeout: 3000 }).catch(() => {});
+    await pa.waitForFunction((sel) => !document.querySelector(sel).disabled, card, { timeout: 3000 }).catch(() => {});
+    const meta = await pa.textContent(card + ' .mode-meta');
+    check(await pa.locator(card).isEnabled() && meta.includes('2~6명'), 'ALLOW_SOLO 서버: 2명이면 relay 카드 활성 · "2~6명"', meta);
+    await pa.click(card);
+    await pa.waitForFunction(() => window.__dg.state.settings.mode === 'relay', null, { timeout: 3000 }).catch(() => {});
+    check(await pa.evaluate(() => window.__dg.state.settings.mode === 'relay'), 'ALLOW_SOLO 서버: 2명으로 relay 모드 선택');
+  } finally {
+    await Promise.all(ctx.map((c) => c.close().catch(() => {})));
+    solo.kill();
+  }
 }
 
 (async () => {
@@ -906,6 +948,7 @@ async function relayScenario(browser) {
     check((await p2.locator(PLAYER_SEL).count()) === 3, '퇴장 후 플레이어 3명');
 
     await relayScenario(browser);
+    await soloRelayCardScenario(browser);
   } catch (e) {
     console.log('FAIL  예외:', e.message);
     failures++;
