@@ -26,6 +26,10 @@
     .opt:hover:not(:disabled) { border-color: var(--primary); background: var(--primary-soft); }
     .opt:disabled { opacity: .5; cursor: default; }
     .opt.chosen { border-color: #2ec27e; background: #dff8ec; }
+    .opt.picked { border-color: var(--primary); background: var(--primary-soft); }
+    .word.small { font-size: 22px; min-height: 1.2em; }
+    .go { border: 0; border-radius: 12px; padding: 10px 18px; font: inherit; font-size: 15px; font-weight: 800; color: #fff; background: var(--primary); cursor: pointer; }
+    .go:disabled { opacity: .45; cursor: default; }
     .note { font-size: 11px; color: var(--muted); padding: 6px 12px 10px; text-align: center; line-height: 1.4; }
     .lost { color: var(--primary-dark); font-weight: 800; }
     [hidden] { display: none !important; }
@@ -54,6 +58,30 @@
         if (!s) { main.appendChild(el('p', 'hint', '게임 창과 연결하는 중…')); return; }
         if (!s.inRoom) { main.appendChild(el('p', 'hint', '게임 창이 방을 나갔어요. 이 창을 닫아도 돼요.')); return; }
         if (!s.streamer) { main.appendChild(el('p', 'hint', '방송 모드가 꺼져 있어요. 방장이 설정에서 켜면 여기에 단어가 떠요.')); return; }
+        if (s.phase === 'choosing' && s.isDrawer && s.options && s.options.length && s.relayPick) {
+          // 이어 그리기: 후보 중 2개 고르기. 고른 상태는 게임 창이 갖고(relayPick.picks), 여기서는 누른 것만 알린다
+          var rp = s.relayPick, picks = rp.picks || [], max = rp.max || 2, sent = !!s.chosen;
+          main.appendChild(el('div', 'label', '내 차례! 단어 ' + max + '개를 골라 주세요'));
+          var rbox = el('div', 'opts');
+          var rnote = el('p', 'hint', sent ? '골랐어요. 곧 그리기가 시작돼요' : '');
+          s.options.forEach(function (w) {
+            var i = picks.indexOf(w);
+            var b = el('button', 'opt' + (i >= 0 ? ' picked' : ''), (i >= 0 ? (i + 1) + '. ' : '') + w); b.type = 'button'; b.disabled = sent;
+            b.addEventListener('click', function () {
+              if (sent) return;
+              if (i < 0 && picks.length >= max) { rnote.textContent = max + '개까지 고를 수 있어요. 고른 걸 한 번 더 누르면 빠져요'; return; }
+              chan.postMessage({ type: 'pick', word: w });
+            });
+            rbox.appendChild(b);
+          });
+          main.appendChild(rbox);
+          main.appendChild(el('div', 'word small', picks.length ? picks[0] + ' · ' + (picks[1] || '?') : ''));
+          var go = el('button', 'go', sent ? '골랐어요!' : '이 두 개로 그리기'); go.type = 'button'; go.disabled = sent || picks.length !== max;
+          go.addEventListener('click', function () { if (!go.disabled) chan.postMessage({ type: 'submitPicks' }); });
+          main.appendChild(go);
+          main.appendChild(rnote);
+          return;
+        }
         if (s.phase === 'choosing' && s.isDrawer && s.options && s.options.length) {
           main.appendChild(el('div', 'label', '내 차례! 단어를 골라 주세요'));
           var box = el('div', 'opts');

@@ -461,6 +461,7 @@ async function relayRun() {
     check(await m.locator('#btn-start').isEnabled(), 'relay 360px: 3명이면 시작 버튼 풀림');
     await m.click('#settings-details > summary');
     await m.selectOption('#set-drawTime', '15');
+    await m.selectOption('#set-wordCount', '8'); // 가장 많은 후보(8개)로 360px 한 화면 검사
     await sleep(400);
     await m.evaluate(() => {
       const v = document.getElementById('view-room'); window.__roles = [];
@@ -473,13 +474,35 @@ async function relayRun() {
       check(tb && tb.height <= 120 && inRect(wa, RW, RH), `relay 360px ${label}: 헤더 ≤ 120px · 마스크/제시어 화면 안`, `${fmt(tb)} / ${fmt(wa)}`);
       return mm;
     };
+    /** 첫 주자: 후보 칩 2개를 눌러 "이 두 개로 그리기" → 제시어 "a · b" */
+    const pick2 = async (pg, timeout) => {
+      await pg.waitForSelector('#word-options .pick-option:not([disabled])', { timeout });
+      const o = pg.locator('#word-options .pick-option');
+      const a = (await o.nth(0).locator('.pick-text').textContent()).trim(), b = (await o.nth(1).locator('.pick-text').textContent()).trim();
+      await o.nth(0).click(); await o.nth(1).click(); await pg.click('#btn-relay-pick');
+      return a + ' · ' + b;
+    };
     const answer = async (pg, w) => { await say(pg, w.split(' · ').join(' ')); await m.waitForSelector('#overlay-turnend:not([hidden])', { timeout: 6000 }).catch(() => {}); };
 
     // 1번 문제: 모바일이 첫 주자(고르고 그림) · D2 가 맞힘
     await m.click('#btn-start');
-    await m.waitForSelector('#word-options .word-option:not([disabled])', { timeout: 8000 });
-    const w1 = (await m.locator('#word-options .word-option').first().textContent()).trim();
-    await m.locator('#word-options .word-option').first().click();
+    await m.waitForSelector('#word-options .pick-option:not([disabled])', { timeout: 8000 });
+    // 후보 8개: 2열로 칩·미리보기·버튼이 한 화면에(카드 안 스크롤 없음)
+    await m.locator('#word-options .pick-option').nth(0).tap();
+    await m.locator('#word-options .pick-option').nth(1).tap();
+    await sleep(150);
+    const pk = await m.evaluate(() => {
+      const bs = [...document.querySelectorAll('#word-options .pick-option')].map((b) => b.getBoundingClientRect());
+      const card = document.querySelector('#overlay-choosing .card'), go = document.getElementById('btn-relay-pick').getBoundingClientRect();
+      return { n: bs.length, cols: new Set(bs.map((r) => Math.round(r.left))).size, maxBottom: Math.max(...bs.map((r) => r.bottom)), maxRight: Math.max(...bs.map((r) => r.right)),
+        minLeft: Math.min(...bs.map((r) => r.left)), goBottom: go.bottom, goOn: !document.getElementById('btn-relay-pick').disabled, cardScroll: card.scrollHeight - card.clientHeight, iw: innerWidth, ih: innerHeight };
+    });
+    check(pk.n === 8 && pk.cols === 2 && pk.minLeft >= 0 && pk.maxRight <= pk.iw && pk.maxBottom <= pk.ih && pk.goBottom <= pk.ih && pk.cardScroll <= 1 && pk.goOn,
+      'relay 360px 고르기: 후보 8개 2열 · 칩·"이 두 개로 그리기" 한 화면 · 카드 스크롤 없음 · 2개 고르면 버튼 켜짐', JSON.stringify(pk));
+    await m.screenshot({ path: require('path').join(__dirname, 'shots', 'm-relay-pick.png') }).catch(() => {});
+    const o1 = m.locator('#word-options .pick-option .pick-text');
+    const w1 = (await o1.nth(0).textContent()).trim() + ' · ' + (await o1.nth(1).textContent()).trim();
+    await m.locator('#btn-relay-pick').tap();
     await m.waitForSelector('#view-room[data-phase="drawing"][data-role="drawer"]', { timeout: 5000 });
     await sleep(1700); // 내 차례 배너가 사라질 때까지
     const s1 = await shell('주자(내 차례)');
@@ -489,9 +512,7 @@ async function relayRun() {
     await answer(ds[1], w1);
 
     // 2번 문제: D1 이 고름 · 모바일이 맞히는 사람
-    await ds[0].waitForSelector('#word-options .word-option:not([disabled])', { timeout: 12000 });
-    const w2 = (await ds[0].locator('#word-options .word-option').first().textContent()).trim();
-    await ds[0].locator('#word-options .word-option').first().click();
+    const w2 = await pick2(ds[0], 12000);
     await m.waitForSelector('#view-room[data-phase="drawing"][data-role="guesser"]', { timeout: 6000 });
     await sleep(400);
     const s2 = await shell('맞히는 사람');
@@ -523,9 +544,7 @@ async function relayRun() {
     await answer(m, w2);
 
     // 3번 문제: D2 가 고름 · 모바일은 두 번째 주자(차례 전엔 잠김)
-    await ds[1].waitForSelector('#word-options .word-option:not([disabled])', { timeout: 12000 });
-    const w3 = (await ds[1].locator('#word-options .word-option').first().textContent()).trim();
-    await ds[1].locator('#word-options .word-option').first().click();
+    const w3 = await pick2(ds[1], 12000);
     await m.waitForSelector('#view-room[data-phase="drawing"][data-role="drawer"]', { timeout: 6000 });
     await sleep(400);
     const s3 = await shell('주자(차례 전)');

@@ -2,9 +2,10 @@
  * 이어 그리기(relay) 코어 테스트 — docs/product/2026-10-relay-drawing.md R1
  *  ① 순수 헬퍼 relayAssignment: 3명·4명 전 문제 배정(순서 밀기)
  *  ② Room 단위(가짜 io): 나간 주자 처리(차례 전 → order 에서 빠짐, 현재 → 곧바로 다음 구간), 갤러리 drawerIds·guesserId, 스냅샷 왕복
- *  ③ 소켓(3명, ALLOW_SOLO 없음): 인원 검사, 첫 주자 선택·조합 후보, 제시어 공개 범위, 권한, 구간 전환(game:baton·열린 획 닫기),
+ *  ⑥ R9 단어 2개 고르기(Room 단위): words 검증(1개·중복·후보 밖·{ word } 거절), 시간 초과 → 후보 앞 2개, wordCount 모드 전환·범위
+ *  ③ 소켓(3명, ALLOW_SOLO 없음): 인원 검사, 첫 주자 선택·단어 후보(2개 고르기), 제시어 공개 범위, 권한, 구간 전환(game:baton·열린 획 닫기),
  *     구간 보호(undo·clear → draw:sync), 주자 채팅, 구간 타이머, 순서 밀기(2번 문제)
- *  ④ R2 맞히기(소켓, 3명, hints 2·wordCount 2): 비주자 hint:request 무시, 힌트(받는 사람·감점 횟수·상한), 부분 정답(close + partial),
+ *  ④ R2 맞히기(소켓, 3명, hints 2·wordCount 3): 비주자 hint:request 무시, 힌트(받는 사람·감점 횟수·상한), 부분 정답(close + partial),
  *     누적 정답(correct·allGuessed·점수 ×0.5·구간 가진 주자 200), 두 구간 뒤 정답, 시간 초과 → game:over 점수 합·갤러리 guessed,
  *     guesserLeft(→ notEnoughPlayers 로 게임 종료). Room 단위: 스냅샷의 hintsUsed·revealedByPart·solvedIdx, 공개할 글자가 없으면 힌트 무시
  *  ⑤ R3 끊김·복원. Room 단위: 끊긴 주자의 구간은 비워 두고 경계에서 넘어감(안내), 맞히는 사람·주자가 모두 나간 문제 건너뛰기(round 증가),
@@ -90,12 +91,13 @@ function fakeIo(sent) {
   const sent = [];
   const room = new game.Room(fakeIo(sent), 'UNIT');
   for (const id of ['A', 'B', 'C', 'D', 'E']) room.addPlayer({ id, name: id + '님', avatar: {}, token: 'tok-' + id, socketId: id });
-  room.updateSettings('A', { mode: 'relay', drawTime: 15, wordCount: 2 });
+  room.updateSettings('A', { mode: 'relay', drawTime: 15 });
   check('② 6명 초과 아님 → 5명 시작', room.start('A') === null);
-  check('② 1번 문제: 주자 A,B,C,D / 맞히는 사람 E, 요소 3개',
-    same(room.relay.order, ['A', 'B', 'C', 'D']) && room.relay.guesserId === 'E' && room.wordOptions.every((w) => w.split(PART_SEP).length === 3),
+  check('② 1번 문제: 주자 A,B,C,D / 맞히는 사람 E, 후보는 단어 6개(조합 아님)',
+    same(room.relay.order, ['A', 'B', 'C', 'D']) && room.relay.guesserId === 'E' && room.wordOptions.length === 6 && room.wordOptions.every((w) => !w.includes(PART_SEP)),
     { relay: room.relay, options: room.wordOptions });
-  room.chooseWord('A', room.wordOptions[0]);
+  room.chooseWord('A', room.wordOptions.slice(0, 2));
+  check('② 5명(주자 4명)이어도 요소는 2개', room.parts.length === 2 && room.word === room.parts.join(PART_SEP), room.parts);
   check('② drawing: timeLeft = 15 × 4', room.phase === 'drawing' && room.timeLeft === 60 && room.relay.totalTime === 60);
   room.removePlayer('C', 'left'); // 차례 전 주자
   check('② 차례 전 주자가 나가면 order 에서 빠지고 문제 시간이 한 구간 준다',
@@ -110,8 +112,8 @@ function fakeIo(sent) {
   check('② 이때도 game:baton', baton && baton.p.drawerId === 'B' && baton.p.legIndex === 1);
   const snap = JSON.parse(JSON.stringify(room.toSnapshot()));
   const restored = game.Room.fromSnapshot(fakeIo([]), snap);
-  check('② 스냅샷 왕복: relay·parts·comboOptions 유지',
-    same(restored.relay, room.relay) && same(restored.parts, room.parts) && restored.comboOptions.size === room.comboOptions.size && restored.isRelay(),
+  check('② 스냅샷 왕복: relay·parts 유지(comboOptions 없음)',
+    same(restored.relay, room.relay) && same(restored.parts, room.parts) && snap.comboOptions === undefined && restored.isRelay(),
     { restored: restored.relay, parts: restored.parts });
   restored.destroy();
   for (let i = 0; i < 15; i++) room.tick(); // B 구간 끝 → D
@@ -136,6 +138,7 @@ function fakeIo(sent) {
   for (const id of ['A', 'B']) room.addPlayer({ id, name: id, avatar: {}, token: 'tok2-' + id, socketId: id });
   room.start('A');
   check('② classic choosing 안내는 그대로 "A님이 단어를 고르고 있습니다."', sentC.some((x) => x.ev === 'chat:message' && x.p && x.p.kind === 'system' && x.p.text === 'A님이 단어를 고르고 있습니다.'));
+  check('② classic 에 words 배열을 보내면 거절', room.chooseWord('A', room.wordOptions.slice(0, 2)) !== null && room.phase === 'choosing');
   room.chooseWord('A', room.wordOptions[0]);
   room.endTurn('time');
   const g = room.gallery[0];
@@ -160,11 +163,11 @@ function fakeIo(sent) {
   const sent = [];
   const room = new game.Room(fakeIo(sent), 'UNI4');
   for (const id of ['A', 'B', 'C']) room.addPlayer({ id, name: id, avatar: {}, token: 'tok4-' + id, socketId: id });
-  room.updateSettings('A', { mode: 'relay', drawTime: 15, wordCount: 2, hints: 5, customWords: '가나,다라,마바,사아,자차,카타', customWordsOnly: true });
+  room.updateSettings('A', { mode: 'relay', drawTime: 15, wordCount: 3, hints: 5, customWords: '가나,다라,마바,사아,자차,카타', customWordsOnly: true });
   room.start('A');
-  room.chooseWord('A', room.wordOptions[0]);
+  room.chooseWord('A', room.wordOptions.slice(0, 2));
   const parts = room.parts.slice();
-  check('② 사용자 단어끼리 조합(요소 2개, 두 글자)', parts.length === 2 && parts.every((w) => Array.from(w).length === 2), parts);
+  check('② 사용자 단어 후보에서 고른 2개(두 글자)', parts.length === 2 && parts.every((w) => Array.from(w).length === 2), parts);
   room.requestHint('A'); // 주자 → 무시
   check('② 주자의 hint:request 는 무시', room.relay.hintsUsed === 0);
   room.handleChat('C', parts[0]);
@@ -206,7 +209,7 @@ const sysTexts = (list) => list.filter((x) => x.ev === 'chat:message' && x.p && 
 function relayRoom(sent, code, ids, settings) {
   const room = new game.Room(fakeIo(sent), code);
   for (const id of ids) room.addPlayer({ id, name: id, avatar: {}, token: `tok-${code}-${id}`, socketId: id });
-  room.updateSettings(ids[0], { mode: 'relay', drawTime: 15, wordCount: 2, ...(settings || {}) });
+  room.updateSettings(ids[0], { mode: 'relay', drawTime: 15, wordCount: 3, ...(settings || {}) });
   return room;
 }
 /** 시간 불변식: 문제 전체 남은 시간 = 현재 구간 남은 시간 + 구간 시간 × 남은 뒤 구간 수 */
@@ -217,7 +220,7 @@ const legInvariant = (tl, r) => tl === r.legTimeLeft + r.legTime * (r.legCount -
   const room = relayRoom(sent, 'R3A', ['A', 'B', 'C']);
   room.start('A');
   check('⑤ relay choosing 안내: "A님이 제시어를 고르고 있어요."', sysTexts(sent).includes('A님이 제시어를 고르고 있어요.') && !sysTexts(sent).some((t) => t.includes('단어를 고르고')), sysTexts(sent));
-  room.chooseWord('A', room.wordOptions[0]);
+  room.chooseWord('A', room.wordOptions.slice(0, 2));
   room.handleDraw('A', 'start', { tool: 'pen', color: '#000000', size: 5, x: 1, y: 1 });
   const mark = sent.length;
   room.markDisconnected('A');
@@ -243,7 +246,7 @@ const legInvariant = (tl, r) => tl === r.legTimeLeft + r.legTime * (r.legCount -
   room.removePlayer('A', 'left');
   check('⑤ 4명 중 1번 문제 첫 주자 A 가 choosing 중 나감 → B 가 고른다', room.phase === 'choosing' && room.drawerId === 'B'
     && same(room.relay.order, ['B', 'C']) && room.relay.guesserId === 'D', room.relay);
-  room.chooseWord('B', room.wordOptions[0]);
+  room.chooseWord('B', room.wordOptions.slice(0, 2));
   room.handleChat('D', room.parts.join(' '));
   check('⑤ D 정답 → turnEnd(allGuessed)', room.phase === 'turnEnd' && room.lastTurnEnd.reason === 'allGuessed', room.lastTurnEnd);
   const mark = sent.length;
@@ -264,7 +267,7 @@ const legInvariant = (tl, r) => tl === r.legTimeLeft + r.legTime * (r.legCount -
   room.start('A');
   room.addPlayer({ id: 'D', name: 'D', avatar: {}, token: 'tok-R3C-D', socketId: 'D' }); // 중간 참가(관전)
   room.addPlayer({ id: 'E', name: 'E', avatar: {}, token: 'tok-R3C-E', socketId: 'E' });
-  room.chooseWord('A', room.wordOptions[0]);
+  room.chooseWord('A', room.wordOptions.slice(0, 2));
   room.handleChat('C', room.parts.join(' '));
   room.removePlayer('B', 'left'); // turnEnd 중 2번 문제 주자 B·C 가 나간다(맞히는 사람 A 는 남음)
   room.removePlayer('C', 'left');
@@ -281,7 +284,7 @@ const legInvariant = (tl, r) => tl === r.legTimeLeft + r.legTime * (r.legCount -
   const sent = [];
   const room = relayRoom(sent, 'R3D', ['A', 'B', 'C', 'D']);
   room.start('A');
-  room.chooseWord('A', room.wordOptions[0]);
+  room.chooseWord('A', room.wordOptions.slice(0, 2));
   room.markDisconnected('C'); // 차례 전 주자(유예 중)
   room.removePlayer('B', 'left'); // 차례 전 주자(퇴장) → 접속 2명(A·D), 전체 3명
   check('⑤ 접속 2명이라도 유예 중 포함 3명이면 문제 계속(B 는 order 에서 빠짐, 끊긴 C 는 남음)',
@@ -293,7 +296,7 @@ const legInvariant = (tl, r) => tl === r.legTimeLeft + r.legTime * (r.legCount -
   const sent2 = [];
   const r2 = relayRoom(sent2, 'R3E', ['A', 'B', 'C']);
   r2.start('A');
-  r2.chooseWord('A', r2.wordOptions[0]);
+  r2.chooseWord('A', r2.wordOptions.slice(0, 2));
   r2.markDisconnected('B');
   r2.endTurn('time');
   const mark = sent2.length;
@@ -310,10 +313,9 @@ const legInvariant = (tl, r) => tl === r.legTimeLeft + r.legTime * (r.legCount -
   const room = relayRoom([], 'R3F', ['A', 'B', 'C']);
   room.start('A');
   const opts = room.wordOptions.slice();
-  const combos = new Map(room.comboOptions);
   const snap = JSON.parse(JSON.stringify(room.toSnapshot()));
   room.destroy();
-  check('⑤ 스냅샷에 turnOrder·relay·comboOptions', same(snap.turnOrder, ['A', 'B', 'C']) && snap.relay && same(snap.relay.order, ['A', 'B']) && snap.comboOptions.length === opts.length, snap.relay);
+  check('⑤ 스냅샷에 turnOrder·relay·단어 후보', same(snap.turnOrder, ['A', 'B', 'C']) && snap.relay && same(snap.relay.order, ['A', 'B']) && same(snap.wordOptions, opts) && snap.comboOptions === undefined, snap.relay);
   const sent = [];
   const r2 = game.Room.fromSnapshot(fakeIo(sent), snap);
   r2.resumeAfterRestore();
@@ -323,15 +325,15 @@ const legInvariant = (tl, r) => tl === r.legTimeLeft + r.legTime * (r.legCount -
   const chB = sent.find((x) => x.ev === 'game:choosing' && x.t === 'B2');
   check('⑤ choosing 복원: 첫 주자 A 에게 같은 후보, B 에게는 후보 없음', chA && same(chA.p.wordOptions, opts) && chB && chB.p.wordOptions === undefined && chA.p.timeLeft > 0, { chA, chB });
   check('⑤ choosing 복원: room:state.relay 유지', same(r2.toState().relay, { order: ['A', 'B'], guesserId: 'C', legIndex: 0, legCount: 2 }), r2.toState().relay);
-  r2.chooseWord('A', opts[1]);
-  check('⑤ 복원 뒤 고르면 저장된 요소로 drawing(timeLeft 30)', r2.phase === 'drawing' && same(r2.parts, combos.get(opts[1])) && r2.timeLeft === 30 && r2.relay.totalTime === 30, r2.parts);
+  r2.chooseWord('A', [opts[2], opts[0]]);
+  check('⑤ 복원 뒤 고르면 고른 순서로 drawing(timeLeft 30)', r2.phase === 'drawing' && same(r2.parts, [opts[2], opts[0]]) && r2.word === opts[2] + ' · ' + opts[0] && r2.timeLeft === 30 && r2.relay.totalTime === 30, r2.parts);
   r2.destroy();
 }
 {
   // 구간 경계 바로 그때 저장된 스냅샷 → 복원하면 곧바로 다음 구간(시간 불변식 유지). 구간 중간이면 그 구간 남은 시간으로
   const room = relayRoom([], 'R3G', ['A', 'B', 'C', 'D']);
   room.start('A');
-  room.chooseWord('A', room.wordOptions[0]);
+  room.chooseWord('A', room.wordOptions.slice(0, 2));
   const snap = JSON.parse(JSON.stringify(room.toSnapshot()));
   room.destroy();
   const at = (secs) => { const now = Date.now(); return { ...JSON.parse(JSON.stringify(snap)), savedAt: now, phaseEndsAt: now + secs * 1000 }; };
@@ -345,6 +347,76 @@ const legInvariant = (tl, r) => tl === r.legTimeLeft + r.legTime * (r.legCount -
   r3.resumeAfterRestore();
   check('⑤ 남은 37초로 복원 → 1구간(A) 7초, 불변식', r3.relay.legIndex === 0 && r3.drawerId === 'A' && r3.relay.legTimeLeft === 7 && legInvariant(r3.timeLeft, r3.relay), { relay: r3.relay, timeLeft: r3.timeLeft });
   r3.destroy();
+}
+
+// ── ⑥ R9 단어 2개 고르기(Room 단위) ─────────────────────────────
+{
+  const sent = [];
+  const room = relayRoom(sent, 'R9A', ['A', 'B', 'C'], { wordCount: 6 });
+  room.start('A');
+  const opts = room.wordOptions.slice();
+  const toA = sent.filter((x) => x.ev === 'game:choosing' && x.t === 'A').pop();
+  check('⑥ 첫 주자에게 단어 후보 6개(서로 다름, 두 글자 이상)', opts.length === 6 && new Set(opts).size === 6 && opts.every((w) => Array.from(w).length >= 2) && toA && same(toA.p.wordOptions, opts), opts);
+  const errs = [
+    ['1개', [opts[0]]], ['3개', opts.slice(0, 3)], ['중복', [opts[0], opts[0]]], ['후보 밖', [opts[0], '없는단어']],
+    ['{ word } 문자열', opts[0]], ['조합 문자열', opts[0] + ' · ' + opts[1]], ['숫자 섞임', [opts[0], 7]], ['없음', undefined],
+  ];
+  for (const [label, choice] of errs) {
+    check(`⑥ ${label} → 거절, 여전히 choosing`, room.chooseWord('A', choice) === '후보 중에서 서로 다른 2개를 골라 주세요.' && room.phase === 'choosing');
+  }
+  check('⑥ 첫 주자가 아니면 거절', room.chooseWord('B', opts.slice(0, 2)) !== null && room.phase === 'choosing');
+  check('⑥ 서로 다른 후보 2개 → drawing, 표시 = 고른 순서 "b · a"', room.chooseWord('A', [opts[3], opts[1]]) === null && room.phase === 'drawing'
+    && same(room.parts, [opts[3], opts[1]]) && room.word === `${opts[3]} · ${opts[1]}`, { parts: room.parts, word: room.word });
+  const dA = sent.filter((x) => x.ev === 'game:drawing' && x.t === 'A').pop();
+  const dC = sent.filter((x) => x.ev === 'game:drawing' && x.t !== 'A').pop();
+  check('⑥ 첫 주자에게 word "b · a", 나머지는 요소 2개 마스크', dA && dA.p.word === room.word && dC && dC.p.word === undefined && dC.p.wordMask === maskParts(room.parts), { dA: dA && dA.p, dC: dC && dC.p });
+  room.destroy();
+}
+{
+  // 시간 초과(15초) → 서버가 후보 앞 2개로
+  const room = relayRoom([], 'R9B', ['A', 'B', 'C', 'D']);
+  room.start('A');
+  const opts = room.wordOptions.slice();
+  for (let i = 0; i < 15; i++) room.tick();
+  check('⑥ choosing 시간 초과 → 후보 앞 2개로 drawing(주자 3명이어도 요소 2개)', room.phase === 'drawing' && same(room.parts, opts.slice(0, 2)) && room.word === opts.slice(0, 2).join(PART_SEP), { phase: room.phase, parts: room.parts });
+  room.destroy();
+  // choosing 복원 때 이미 시간이 다 됐으면 앞 2개
+  const r0 = relayRoom([], 'R9C', ['A', 'B', 'C']);
+  r0.start('A');
+  const snap = { ...JSON.parse(JSON.stringify(r0.toSnapshot())), phaseEndsAt: Date.now() - 1000, savedAt: Date.now() };
+  const o0 = r0.wordOptions.slice();
+  r0.destroy();
+  const r1 = game.Room.fromSnapshot(fakeIo([]), snap);
+  r1.resumeAfterRestore();
+  check('⑥ choosing 복원 때 시간이 다 됐으면 후보 앞 2개로 drawing', r1.phase === 'drawing' && same(r1.parts, o0.slice(0, 2)), r1.parts);
+  r1.destroy();
+}
+{
+  // wordCount: relay 3..8(기본 6), 다른 모드 2..5(기본 3). relay 로/relay 에서 바뀌면 그 모드 기본값
+  const room = new game.Room(fakeIo([]), 'R9D');
+  room.addPlayer({ id: 'A', name: 'A', avatar: {}, token: 'tok-R9D-A', socketId: 'A' });
+  const wc = () => room.settings.wordCount;
+  check('⑥ 기본(classic) wordCount 3', room.settings.mode === 'classic' && wc() === 3);
+  room.updateSettings('A', { wordCount: 5 });
+  room.updateSettings('A', { mode: 'relay' });
+  check('⑥ classic → relay: wordCount 6', room.settings.mode === 'relay' && wc() === 6, wc());
+  room.updateSettings('A', { wordCount: 9 }); const hi = wc();
+  room.updateSettings('A', { wordCount: 2 }); const lo = wc();
+  room.updateSettings('A', { wordCount: 8 }); const eight = wc();
+  check('⑥ relay 범위 3..8 (9 → 8, 2 → 3, 8 그대로)', hi === 8 && lo === 3 && eight === 8, { hi, lo, eight });
+  room.updateSettings('A', { drawTime: 30 });
+  check('⑥ relay 에서 다른 설정만 바꾸면 wordCount 유지', wc() === 8, wc());
+  room.updateSettings('A', { mode: 'classic' });
+  check('⑥ relay → classic: wordCount 3', wc() === 3, wc());
+  room.updateSettings('A', { wordCount: 7 });
+  check('⑥ classic 범위 2..5 (7 → 5)', wc() === 5, wc());
+  room.updateSettings('A', { mode: 'fixed' });
+  check('⑥ classic → fixed: wordCount 그대로(5)', wc() === 5, wc());
+  room.updateSettings('A', { mode: 'relay', wordCount: 4 });
+  check('⑥ 같은 패치에 wordCount 가 있으면 그 값(relay 범위로)', wc() === 4, wc());
+  room.updateSettings('A', { mode: 'blitz', wordCount: 8 });
+  check('⑥ relay → blitz 패치에 wordCount 8 → 새 모드 범위로 5', wc() === 5, wc());
+  room.destroy();
 }
 
 // ── ③ 소켓 ─────────────────────────────────────────────────────
@@ -415,7 +487,7 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
   const jb = await emitAck(b, 'room:join', { roomCode: code, name: '비', avatar: {}, token: 'tok-relay-b-000002' });
   const B = jb.playerId;
   const setP = waitNext(a, 'room:state', (s) => s.settings.mode === 'relay' && s.settings.drawTime === 15, 5000, 'relay settings');
-  a.emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 3, hints: 3 } });
+  a.emit('room:settings', { settings: { mode: 'relay', drawTime: 15, hints: 3 } });
   const stSet = await setP;
   check('③ settings.mode = relay 저장, lobby 의 room:state.relay = null', stSet.settings.mode === 'relay' && stSet.relay === null, stSet);
 
@@ -440,19 +512,26 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
   const [chA, chB, chC] = await Promise.all([chAP, chBP, chCP]);
   check('③ 1번 문제 choosing: drawerId = A', chA.drawerId === A && chB.drawerId === A && chC.drawerId === A, { chA, chB });
   check('③ A 에게만 wordOptions', Array.isArray(chA.wordOptions) && chB.wordOptions === undefined && chC.wordOptions === undefined);
-  check('③ 후보 3개, 전부 " · " 조합에 요소 2개(3명 방)',
-    chA.wordOptions.length === 3 && chA.wordOptions.every((w) => w.includes(PART_SEP) && w.split(PART_SEP).length === 2), chA.wordOptions);
+  check('③ 후보는 단어 6개(relay 기본 wordCount), " · " 조합이 아니다',
+    chA.wordOptions.length === 6 && chA.wordOptions.every((w) => !w.includes(PART_SEP)) && stSet.settings.wordCount === 6, chA.wordOptions);
   const stCh = await stChP;
   check('③ choosing 중 room:state.relay = { order:[A,B], guesserId:C, legIndex:0, legCount:2 }, 문제 1/3',
     stCh.relay && same(stCh.relay, { order: [A, B], guesserId: C, legIndex: 0, legCount: 2 }) && stCh.round === 1 && stCh.totalRounds === 3, stCh);
 
-  const word = chA.wordOptions[1];
-  const parts = word.split(PART_SEP);
+  // relay 에 { word } 나 1개만 보내면 error:msg
+  for (const [label, payload] of [['{ word }', { word: chA.wordOptions[0] }], ['1개', { words: [chA.wordOptions[0]] }], ['중복', { words: [chA.wordOptions[0], chA.wordOptions[0]] }]]) {
+    const eP = waitNext(a, 'error:msg', undefined, 3000, 'choose err ' + label);
+    a.emit('word:choose', payload);
+    const e1 = await eP;
+    check(`③ word:choose ${label} → error:msg "서로 다른 2개"`, /서로 다른 2개/.test(e1.message), e1);
+  }
+  const parts = [chA.wordOptions[1], chA.wordOptions[0]]; // 고른 순서
+  const word = parts.join(PART_SEP);
   const dAP = waitNext(a, 'game:drawing', undefined, 5000, 'A drawing');
   const dBP = waitNext(b, 'game:drawing', undefined, 5000, 'B drawing');
   const dCP = waitNext(c, 'game:drawing', undefined, 5000, 'C drawing');
   const stDP = waitNext(c, 'room:state', (s) => s.phase === 'drawing', 5000, 'state drawing');
-  a.emit('word:choose', { word });
+  a.emit('word:choose', { words: parts });
   const [dA, dB, dC] = await Promise.all([dAP, dBP, dCP]);
   check('③ game:drawing.relay: order [A,B], guesserId C, legIndex 0, legCount 2, legTime 15, totalTime 30',
     dA.relay && same(dA.relay.order, [A, B]) && dA.relay.guesserId === C && dA.relay.legIndex === 0 && dA.relay.legCount === 2
@@ -567,15 +646,15 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
   const stTe = lastState(c);
   check('③ turnEnd 중 room:state.relay 유지, nextDrawerId null', stTe.phase === 'turnEnd' && stTe.relay && stTe.nextDrawerId === null, stTe);
   const ch2 = await ch2P;
-  check('③ 2번 문제 choosing: drawerId = B', ch2.drawerId === B && ch2.wordOptions.every((w) => w.split(PART_SEP).length === 2), ch2);
-  check('③ 2번 문제 후보는 1번 조합과 다르다', !ch2.wordOptions.includes(word), ch2.wordOptions);
+  check('③ 2번 문제 choosing: drawerId = B, 단어 후보 6개', ch2.drawerId === B && ch2.wordOptions.length === 6 && ch2.wordOptions.every((w) => !w.includes(PART_SEP)), ch2);
+  check('③ 2번 문제 후보는 1번에 제시된 단어와 겹치지 않는다', !ch2.wordOptions.some((w) => chA.wordOptions.includes(w)), { ch2: ch2.wordOptions, ch1: chA.wordOptions });
   const d2B = waitNext(b, 'game:drawing', undefined, 5000, 'drawing 2 B');
   const d2C = waitNext(c, 'game:drawing', undefined, 5000, 'drawing 2 C');
   const d2A = waitNext(a, 'game:drawing', undefined, 5000, 'drawing 2 A');
-  b.emit('word:choose', { word: ch2.wordOptions[0] });
+  b.emit('word:choose', { words: ch2.wordOptions.slice(0, 2) });
   const [x2B, x2C, x2A] = await Promise.all([d2B, d2C, d2A]);
   check('③ 2번 문제: order [B,C], guesserId A(순서 밀기)', same(x2B.relay.order, [B, C]) && x2B.relay.guesserId === A && x2B.round === 2, x2B.relay);
-  check('③ 2번 문제: word 는 B 에게만, C(뒤 주자)·A 는 마스크', x2B.word === ch2.wordOptions[0] && x2C.word === undefined && x2A.word === undefined && x2C.wordMask.includes(PART_SEP));
+  check('③ 2번 문제: word 는 B 에게만, C(뒤 주자)·A 는 마스크', x2B.word === ch2.wordOptions.slice(0, 2).join(PART_SEP) && x2C.word === undefined && x2A.word === undefined && x2C.wordMask.includes(PART_SEP));
   await sleep(200);
   const st2 = lastState(a);
   check('③ 2번 문제 room:state: drawerId B, nextDrawerId C, round 2/3', st2.drawerId === B && st2.nextDrawerId === C && st2.round === 2 && st2.totalRounds === 3, st2);
@@ -598,17 +677,17 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
     return e ? e.payload.timeLeft : fallback;
   };
   const nearPts = (got, f, tl) => [tl - 1, tl, tl + 1].some((t) => got === f(t));
-  const setR2 = waitNext(a, 'room:state', (s) => s.settings.hints === 2 && s.settings.wordCount === 2, 5000, 'R2 settings');
-  a.emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 2, hints: 2 } });
+  const setR2 = waitNext(a, 'room:state', (s) => s.settings.hints === 2 && s.settings.wordCount === 3, 5000, 'R2 settings');
+  a.emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 3, hints: 2 } });
   await setR2;
   const r1chA = waitNext(a, 'game:choosing', (p) => Array.isArray(p.wordOptions), 5000, 'R2 choosing 1');
   a.emit('game:start');
   const r1ch = await r1chA;
-  check('④ 새 게임 1번 문제: A 가 후보 2개', r1ch.drawerId === A && r1ch.wordOptions.length === 2, r1ch);
-  const w1 = r1ch.wordOptions[0];
-  const p1 = w1.split(PART_SEP);
+  check('④ 새 게임 1번 문제: A 가 후보 3개(wordCount 3)', r1ch.drawerId === A && r1ch.wordOptions.length === 3, r1ch);
+  const p1 = r1ch.wordOptions.slice(0, 2);
+  const w1 = p1.join(PART_SEP);
   const r1d = [waitNext(a, 'game:drawing', undefined, 5000, 'R2 d A'), waitNext(b, 'game:drawing', undefined, 5000, 'R2 d B'), waitNext(c, 'game:drawing', undefined, 5000, 'R2 d C')];
-  a.emit('word:choose', { word: w1 });
+  a.emit('word:choose', { words: p1 });
   const [r1dA] = await Promise.all(r1d);
   check('④ game:drawing.relay.hintsUsed 0, hintsMax 2', r1dA.relay.hintsUsed === 0 && r1dA.relay.hintsMax === 2 && r1dA.word === w1, r1dA.relay);
 
@@ -676,10 +755,9 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
 
   // 5. 2번 문제(B→C / A): 두 구간 뒤 한 번에 정답
   const r2ch = await waitNext(b, 'game:choosing', (p) => Array.isArray(p.wordOptions), 10000, 'R2 choosing 2');
-  const w2 = r2ch.wordOptions[0];
-  const p2 = w2.split(PART_SEP);
+  const p2 = r2ch.wordOptions.slice(0, 2);
   const r2d = waitNext(a, 'game:drawing', undefined, 5000, 'R2 d2 A');
-  b.emit('word:choose', { word: w2 });
+  b.emit('word:choose', { words: p2 });
   const r2dA = await r2d;
   check('④ 2번 문제: A 가 맞히는 사람, hintsUsed 0 으로 새로 시작', r2dA.relay.guesserId === A && r2dA.relay.hintsUsed === 0 && !revealed(r2dA.wordMask).length, r2dA);
   const baton2 = await waitNext(a, 'game:baton', undefined, 20000, 'R2 baton');
@@ -696,7 +774,7 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
   // 6. 3번 문제(C→A / B): 힌트는 차례 전 주자 A 에게도, 현재 주자 C 에게는 안 감 → 시간 초과
   const r3ch = await waitNext(c, 'game:choosing', (p) => Array.isArray(p.wordOptions), 10000, 'R2 choosing 3');
   const r3d = waitNext(b, 'game:drawing', undefined, 5000, 'R2 d3 B');
-  c.emit('word:choose', { word: r3ch.wordOptions[0] });
+  c.emit('word:choose', { words: r3ch.wordOptions.slice(0, 2) });
   await r3d;
   mark = c.log.length;
   const h3A = waitNext(a, 'game:hint', undefined, 3000, 'hint3 A');
@@ -726,13 +804,13 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
   const jf = await emitAck(f, 'room:join', { roomCode: cd.roomCode, name: '에프', avatar: {}, token: 'tok-relay-f-000006' });
   const F = jf.playerId;
   const setG = waitNext(d, 'room:state', (s) => s.settings.mode === 'relay', 5000, 'G settings');
-  d.emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 2 } });
+  d.emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 3 } });
   await setG;
   const gch = waitNext(d, 'game:choosing', (p) => Array.isArray(p.wordOptions), 5000, 'G choosing');
   d.emit('game:start');
   const gc = await gch;
   const gdr = waitNext(e, 'game:drawing', undefined, 5000, 'G drawing');
-  d.emit('word:choose', { word: gc.wordOptions[0] });
+  d.emit('word:choose', { words: gc.wordOptions.slice(0, 2) });
   const gd = await gdr;
   check('④ guesserLeft 준비: 주자 D→E, 맞히는 사람 F', same(gd.relay.order, [D, E]) && gd.relay.guesserId === F, gd.relay);
   const gte = waitNext(d, 'game:turnEnd', undefined, 5000, 'G turnEnd');
@@ -769,14 +847,14 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
   const Y = (await emitAck(y, 'room:join', { roomCode: code5, name: '와이', avatar: {}, token: TK.Y })).playerId;
   const Z = (await emitAck(z, 'room:join', { roomCode: code5, name: '제트', avatar: {}, token: TK.Z })).playerId;
   const set5 = waitNext(x, 'room:state', (s) => s.settings.mode === 'relay' && s.settings.hints === 2, 5000, '⑤ settings');
-  x.emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 2, hints: 2 } });
+  x.emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 3, hints: 2 } });
   await set5;
   const ch5P = waitNext(x, 'game:choosing', (p) => Array.isArray(p.wordOptions), 5000, '⑤ choosing');
   x.emit('game:start');
-  const w5 = (await ch5P).wordOptions[0];
-  const p5 = w5.split(PART_SEP);
+  const p5 = (await ch5P).wordOptions.slice(0, 2);
+  const w5 = p5.join(PART_SEP);
   const d5 = [x, y, z].map((cl) => waitNext(cl, 'game:drawing', undefined, 5000, '⑤ drawing'));
-  x.emit('word:choose', { word: w5 });
+  x.emit('word:choose', { words: p5 });
   const [d5X] = await Promise.all(d5);
   check('⑤ 준비: 주자 X→Y, 맞히는 사람 Z', same(d5X.relay.order, [X, Y]) && d5X.relay.guesserId === Z, d5X.relay);
   // X 가 획 하나, Z 가 부분 정답 1개 + 힌트 1회
@@ -890,13 +968,13 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
   const gNames = ['지일', '지이', '지삼', '지사', '지오'];
   for (let i = 1; i < 5; i++) G.push((await emitAck(g[i], 'room:join', { roomCode: gc0.roomCode, name: gNames[i], avatar: {}, token: `tok-relay-g${i + 1}-0001${i}` })).playerId);
   const gSet = waitNext(g[0], 'room:state', (s) => s.settings.mode === 'relay', 5000, 'G5 settings');
-  g[0].emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 2 } });
+  g[0].emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 3 } });
   await gSet;
   const gChP = waitNext(g[0], 'game:choosing', (p) => Array.isArray(p.wordOptions), 5000, 'G5 choosing');
   g[0].emit('game:start');
   const gCh = await gChP;
   const gDP = waitNext(g[1], 'game:drawing', undefined, 5000, 'G5 drawing');
-  g[0].emit('word:choose', { word: gCh.wordOptions[0] });
+  g[0].emit('word:choose', { words: gCh.wordOptions.slice(0, 2) });
   const gD = await gDP;
   check('⑤ 유예 준비: 5명, 주자 1~4, 맞히는 사람 5, 문제 1/5', same(gD.relay.order, G.slice(0, 4)) && gD.relay.guesserId === G[4] && gD.totalRounds === 5, gD.relay);
   // 현재 주자(1)의 유예 만료 → 완전히 나감 → 경계를 기다리지 않고 곧바로 다음 구간(2)
@@ -944,16 +1022,16 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
   const S = [s0.playerId];
   for (let i = 1; i < 4; i++) S.push((await emitAck(sc[i], 'room:join', { roomCode: scode, name: '에스' + (i + 1), avatar: {}, token: sT[i] })).playerId);
   const sSet = waitNext(sc[0], 'room:state', (st) => st.settings.mode === 'relay' && st.settings.hints === 2, 5000, 'S settings');
-  sc[0].emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 2, hints: 2 } });
+  sc[0].emit('room:settings', { settings: { mode: 'relay', drawTime: 15, wordCount: 3, hints: 2 } });
   await sSet;
   const sChP = waitNext(sc[0], 'game:choosing', (p) => Array.isArray(p.wordOptions), 5000, 'S choosing');
   sc[0].emit('game:start');
-  const sw = (await sChP).wordOptions[0];
-  const sp = sw.split(PART_SEP);
+  const sp = (await sChP).wordOptions.slice(0, 2);
+  const sw = sp.join(PART_SEP);
   const sDP = waitNext(sc[3], 'game:drawing', undefined, 5000, 'S drawing');
-  sc[0].emit('word:choose', { word: sw });
+  sc[0].emit('word:choose', { words: sp });
   const sD = await sDP;
-  check('⑤ 복원 준비: 4명, 주자 1→2→3, 맞히는 사람 4, 요소 3개', same(sD.relay.order, S.slice(0, 3)) && sD.relay.guesserId === S[3] && sp.length === 3, { relay: sD.relay, sp });
+  check('⑤ 복원 준비: 4명, 주자 1→2→3, 맞히는 사람 4, 요소 2개', same(sD.relay.order, S.slice(0, 3)) && sD.relay.guesserId === S[3] && sp.length === 2 && sD.word === undefined, { relay: sD.relay, sp });
   const sEnd = waitNext(sc[3], 'draw:end', undefined, 3000, 'S stroke 1');
   sc[0].emit('draw:start', { tool: 'pen', color: '#000000', size: 5, x: 20, y: 20 });
   sc[0].emit('draw:move', { pts: [[30, 30]] });
@@ -979,7 +1057,7 @@ const chatsSince = (c, mark, kind) => evsSince(c, mark, 'chat:message').map((x) 
   const snapA = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))[scode];
   check('⑤ 저장된 스냅샷: relay(legIndex 1·hintsUsed 1·solvedIdx·revealedByPart)·parts·turnOrder',
     snapA && snapA.relay && snapA.relay.legIndex === 1 && snapA.relay.hintsUsed === 1 && same(snapA.relay.solvedIdx, [sfi])
-      && snapA.relay.revealedByPart.length === 3 && same(snapA.parts, sp) && same(snapA.turnOrder, S) && snapA.ops.length === 2, snapA && snapA.relay);
+      && snapA.relay.revealedByPart.length === 2 && same(snapA.parts, sp) && same(snapA.turnOrder, S) && snapA.ops.length === 2, snapA && snapA.relay);
   const sDisc = Promise.all(sc.map((cl) => new Promise((r) => cl.once('disconnect', r))));
   await stopServer(sproc);
   await sDisc;

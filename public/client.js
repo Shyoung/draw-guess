@@ -157,6 +157,9 @@
     relay: { short: { drawTime: 15, hints: 2 }, normal: { drawTime: 20, hints: 3 }, long: { drawTime: 30, hints: 3 } }
   };
   var PRESET_NAMES = { short: '짧게', normal: '보통', long: '길게' };
+  // 이어 그리기 단어 후보 수(wordCount) 범위·기본값 — 첫 주자가 이 중 RELAY_PICK(2)개를 골라 제시어를 만든다. 다른 모드는 2~5, 기본 3(서버와 같음)
+  var RELAY_WORD_COUNT = { min: 3, max: 8, def: 6 }, RELAY_PICK = 2;
+  function wordCountRange(mode) { return mode === 'relay' ? [RELAY_WORD_COUNT.min, RELAY_WORD_COUNT.max] : [2, 5]; }
   function presetsFor(mode) { return LENGTH_PRESETS[mode] || LENGTH_PRESETS.classic; }
   function matchPreset(s) {
     var ps = presetsFor(s.mode), found = null;
@@ -222,7 +225,7 @@
 
   // 최근 게임 이벤트에서 파생된 UI 데이터
   var ui = {
-    wordMask: '', wordLength: 0, word: null, wordOptions: null, chosenWord: null, category: null,
+    wordMask: '', wordLength: 0, word: null, wordOptions: null, chosenWord: null, relayPicks: [], relayAutoTimer: null, category: null,
     // 방송 모드: 방 코드 잠깐 보기 시각 · 내 단어/후보 보기 토글 · 주소 갱신용 이전 값
     codeRevealUntil: 0, wordPeek: false, optionsPeek: false, streamerWas: null,
     wordWin: null, wordKey: '', wordChan: null, wordWatch: null, // 방송 모드 단어 창(팝업) — 방송 캡처 밖에서 후보·내 단어를 본다
@@ -662,6 +665,7 @@
     on('game:timer', function (p) {
       if (p && p.legTimeLeft != null) ui.legTimeLeft = Math.max(0, Math.round(num(p.legTimeLeft, 0)));
       if (p && p.timeLeft != null) setTimeLeft(num(p.timeLeft, 0), true);
+      armRelayAutoPick();
     });
     on('game:baton', onBaton);
     on('game:turnEnd', onTurnEnd);
@@ -711,7 +715,7 @@
     if (typeof s.allowSolo === 'boolean') state.allowSolo = s.allowSolo;
     if (state.phase === 'lobby' && prevPhase !== 'lobby') {
       closeGameKeyboard();
-      resetCanvasState(); ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.chosenWord = null;
+      resetCanvasState(); ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.chosenWord = null; resetRelayPicks();
       ui.turnEnd = null; setTimeLeft(null);
       ui.legTimeLeft = null; ui.relayInfo = null; ui.legStartOps = 0; hideTurnBanner();
       clearHintPending(); ui.solvedFlash = null;
@@ -719,7 +723,7 @@
     }
     var meNow = findPlayer(myId);
     if (meNow && !meNow.atResults && ui.ranking && !ui.resultsPending) ui.ranking = null; // 서버가 결과 확인을 반영하면 정리
-    if (state.phase !== 'choosing') { ui.wordOptions = null; ui.chosenWord = null; }
+    if (state.phase !== 'choosing') { ui.wordOptions = null; ui.chosenWord = null; resetRelayPicks(); }
     if (drawing && (state.phase !== 'drawing' || !isDrawer())) cancelLocalStroke(false);
     if (ui.relayWaitTimer) { clearTimeout(ui.relayWaitTimer); ui.relayWaitTimer = null; } // onChoosing 이 미뤄 둔 그리기를 여기서
     renderAll();
@@ -737,7 +741,7 @@
     ui.drawerName = p.drawerName ? String(p.drawerName) : playerName(state.drawerId, '출제자');
     ui.wordOptions = Array.isArray(p.wordOptions) ? p.wordOptions.map(String) : null;
     if (ui.wordOptions && ui.wordOptions.length) SFX.play('myTurn');
-    ui.chosenWord = null; ui.optionsPeek = false; ui.wordPeek = false;
+    ui.chosenWord = null; ui.optionsPeek = false; ui.wordPeek = false; resetRelayPicks();
     ui.word = null; ui.wordMask = ''; ui.category = null; ui.turnEnd = null; ui.ranking = null;
     ui.legTimeLeft = null; ui.relayInfo = null; ui.legStartOps = 0; hideTurnBanner();
     clearHintPending(); ui.solvedFlash = null;
@@ -748,6 +752,7 @@
     if (relayStale) state.relay = null;
     resetCanvasState();
     setTimeLeft(p.timeLeft != null ? num(p.timeLeft, 15) : 15, true);
+    armRelayAutoPick();
     if (relayStale) {
       if (ui.relayWaitTimer) clearTimeout(ui.relayWaitTimer);
       ui.relayWaitTimer = setTimeout(function () { ui.relayWaitTimer = null; renderAll(); }, 400);
@@ -766,7 +771,7 @@
     ui.category = typeof p.category === 'string' ? p.category : null;
     ui.wordLength = num(p.wordLength, 0);
     ui.word = typeof p.word === 'string' ? p.word : null;
-    ui.wordOptions = null; ui.chosenWord = null; ui.turnEnd = null; ui.wordPeek = false;
+    ui.wordOptions = null; ui.chosenWord = null; ui.turnEnd = null; ui.wordPeek = false; resetRelayPicks();
     ui.drawerName = playerName(state.drawerId, ui.drawerName);
     var rp = p.relay && typeof p.relay === 'object' ? p.relay : null;
     if (rp) {
@@ -1452,6 +1457,7 @@
       type: 'state', inRoom: inRoom, streamer: streamer(), phase: state.phase, isDrawer: isDrawer() || showsWord(), // relay 지난 주자도 제시어를 계속 본다
       options: isDrawer() && state.phase === 'choosing' && ui.wordOptions ? ui.wordOptions.slice() : null,
       chosen: ui.chosenWord || null, word: showsWord() && state.phase === 'drawing' ? ui.word : null, category: ui.category || null,
+      relayPick: inRelay() ? { picks: ui.relayPicks.slice(), max: RELAY_PICK } : null, // 이어 그리기: 후보 중 2개 고르기(고른 순서)
       answer: state.phase === 'turnEnd' && ui.turnEnd ? ui.turnEnd.word : null,
       drawerName: playerName(state.drawerId, ui.drawerName || ''), timeLeft: ui.timeLeft,
     };
@@ -1471,6 +1477,8 @@
         var m = e.data; if (!m || typeof m !== 'object') return;
         if (m.type === 'hello') pushWordState();
         else if (m.type === 'choose' && typeof m.word === 'string') chooseWord(m.word);
+        else if (m.type === 'pick' && typeof m.word === 'string') toggleRelayPick(m.word);
+        else if (m.type === 'submitPicks') submitRelayPicks();
       };
     }
     toast('단어 창을 열었어요. 방송 캡처 밖으로 옮겨 두세요', 'ok');
@@ -1492,9 +1500,48 @@
   }
   /** 출제자가 단어를 고른다(메인 화면 버튼 · 단어 창 공용) */
   function chooseWord(w) {
+    if (inRelay()) { toggleRelayPick(w); return; } // 이어 그리기는 2개를 골라 "이 두 개로 그리기"
     if (ui.chosenWord || !isDrawer() || state.phase !== 'choosing' || !ui.wordOptions || ui.wordOptions.indexOf(w) < 0) return;
     ui.chosenWord = w; emit('word:choose', { word: w });
     renderAll();
+  }
+  // ---- 이어 그리기: 첫 주자가 단어 후보 중 2개를 골라 제시어 "A · B"(고른 순서)를 만든다 ----
+  function canPickRelay() { return inRelay() && !ui.chosenWord && isDrawer() && state.phase === 'choosing' && !!ui.wordOptions; }
+  function resetRelayPicks() {
+    ui.relayPicks = [];
+    if (ui.relayAutoTimer) { clearTimeout(ui.relayAutoTimer); ui.relayAutoTimer = null; }
+  }
+  /** 누르면 선택, 다시 누르면 해제. 이미 2개면 먼저 고른 것을 바꾸지 않고 안내만 */
+  function toggleRelayPick(w) {
+    if (!canPickRelay() || ui.wordOptions.indexOf(w) < 0) return;
+    var i = ui.relayPicks.indexOf(w);
+    if (i >= 0) ui.relayPicks.splice(i, 1);
+    else if (ui.relayPicks.length >= RELAY_PICK) { toast(RELAY_PICK + '개까지 고를 수 있어요. 바꾸려면 고른 걸 한 번 더 눌러 빼 주세요'); return; }
+    else ui.relayPicks.push(w);
+    renderAll();
+  }
+  function submitRelayPicks() {
+    if (!canPickRelay() || ui.relayPicks.length !== RELAY_PICK) return;
+    var words = ui.relayPicks.slice();
+    ui.chosenWord = words.join(' · ');
+    if (ui.relayAutoTimer) { clearTimeout(ui.relayAutoTimer); ui.relayAutoTimer = null; }
+    emit('word:choose', { words: words });
+    renderAll();
+  }
+  /**
+   * 시간이 다 돼 가면(남은 1초 표시 + 0.5초) 고른 것 + 남은 후보 앞에서부터 채워 스스로 보낸다.
+   * 서버의 시간 초과 자동 선택은 고른 상태를 모르므로 후보 앞 2개 — 이건 그 전에 고른 걸 살리는 장치
+   */
+  function armRelayAutoPick() {
+    if (ui.relayAutoTimer || !canPickRelay() || ui.timeLeft !== 1) return;
+    ui.relayAutoTimer = setTimeout(function () {
+      ui.relayAutoTimer = null;
+      if (!canPickRelay() || !ui.relayPicks.length) return; // 하나도 안 골랐으면 서버가 앞 2개로 정한다
+      for (var k = 0; k < ui.wordOptions.length && ui.relayPicks.length < RELAY_PICK; k++) {
+        if (ui.relayPicks.indexOf(ui.wordOptions[k]) < 0) ui.relayPicks.push(ui.wordOptions[k]);
+      }
+      submitRelayPicks();
+    }, 500);
   }
   function wordWindowButton() {
     var b = el('button', 'btn btn-sm ' + (wordWindowOpen() ? 'btn-ghost' : 'btn-secondary') + ' btn-word-window', wordWindowOpen() ? '단어 창 열림' : '단어 창 열기');
@@ -1871,6 +1918,15 @@
     if (hint) hint.textContent = host ? '어떤 방식으로 놀지 골라주세요. 고르면 게임 설정으로 넘어가요.' : '호스트가 게임 모드를 고르고 있어요…';
   }
 
+  /** 단어 후보 수 목록: relay 3~8, 그 밖 2~5. 범위가 바뀔 때만 다시 만든다 */
+  function fillWordCountSelect(mode) {
+    var sel = $('set-wordCount'); if (!sel) return;
+    var rg = wordCountRange(mode), key = rg.join('-');
+    if (sel.getAttribute('data-range') === key) return;
+    sel.setAttribute('data-range', key);
+    var vals = []; for (var v = rg[0]; v <= rg[1]; v++) vals.push(v);
+    fillSelect('set-wordCount', vals, function (x) { return x + '개'; });
+  }
   function renderSettings() {
     var s = state.settings, editable = isHost() && state.phase === 'lobby';
     function setVal(id, v) {
@@ -1878,6 +1934,7 @@
       if (document.activeElement === n && editable) return; // 입력 중엔 덮어쓰지 않음
       if (n.type === 'checkbox') n.checked = !!v; else n.value = String(v);
     }
+    fillWordCountSelect(s.mode);
     setVal('set-rounds', s.rounds); setVal('set-drawTime', s.drawTime); setVal('set-wordCount', s.wordCount);
     setVal('set-hints', s.hints); setVal('set-hintEndAt', s.hintEndAt);
     setVal('set-customWords', s.customWords || ''); setVal('set-customWordsOnly', s.customWordsOnly);
@@ -1962,7 +2019,7 @@
     var dth = $('set-drawTime-help'); if (dth) dth.textContent = relay ? '주자 한 명이 이어 그리는 시간' : '한 사람이 그리는 시간';
     var hl = $('set-hints-label'); if (hl) hl.textContent = relay ? '최대 힌트' : '힌트 횟수';
     var hh = $('set-hints-help'); if (hh) hh.textContent = relay ? '맞히는 사람이 버튼으로 초성을 여는 횟수. 쓸 때마다 점수가 줄어요' : '정답 글자를 초성으로 몇 번 보여 줄지';
-    var wch = $('set-wordCount-help'); if (wch) wch.textContent = relay ? '첫 주자가 고를 수 있는 제시어 조합 개수' : '그리는 사람이 고를 수 있는 단어 개수';
+    var wch = $('set-wordCount-help'); if (wch) wch.textContent = relay ? '첫 주자가 이 중 ' + RELAY_PICK + '개를 골라 제시어를 만들어요' : '그리는 사람이 고를 수 있는 단어 개수';
     var fsel = $('set-fixedDrawer');
     if (fsel && fixed) {
       var want = fixedDrawerId();
@@ -1999,6 +2056,35 @@
     }
   }
 
+  /** 이어 그리기 2개 고르기: 칩 상태(고른 순서 1·2) · 미리보기 "A · B" · "이 두 개로 그리기" 버튼 */
+  function renderRelayPicks(show, blurred) {
+    var bar = $('relay-pick-bar'); if (!bar) return;
+    bar.hidden = !show;
+    bar.classList.toggle('blurred', !!blurred);
+    if (!show) return;
+    var picks = ui.relayPicks, sent = !!ui.chosenWord, full = picks.length >= RELAY_PICK;
+    document.querySelectorAll('#word-options .pick-option').forEach(function (b) {
+      var i = picks.indexOf(b.getAttribute('data-word'));
+      b.classList.toggle('picked', i >= 0);
+      b.classList.toggle('dim', i < 0 && full);
+      b.setAttribute('aria-pressed', i >= 0 ? 'true' : 'false');
+      b.disabled = sent;
+      var nEl = b.querySelector('.pick-num'); if (nEl) nEl.textContent = i >= 0 ? String(i + 1) : '';
+    });
+    var pv = $('relay-pick-preview');
+    if (pv) {
+      pv.innerHTML = '';
+      if (!picks.length) pv.appendChild(el('span', 'pick-empty', '두 단어를 고르면 제시어가 돼요'));
+      else {
+        pv.appendChild(el('b', null, picks[0]));
+        pv.appendChild(el('span', 'pick-sep', ' · '));
+        pv.appendChild(picks[1] ? el('b', null, picks[1]) : el('span', 'pick-empty', '하나 더'));
+      }
+    }
+    var go = $('btn-relay-pick');
+    if (go) { go.disabled = sent || picks.length !== RELAY_PICK; go.textContent = sent ? '골랐어요!' : '이 두 개로 그리기'; }
+  }
+
   function renderOverlays() {
     var ph = state.phase;
     var oc = $('overlay-choosing'), ot = $('overlay-turnend'), og = $('overlay-gameover');
@@ -2009,7 +2095,7 @@
         var title = $('choosing-title'), opts = $('word-options'), wait = $('choosing-wait');
         var dn = playerName(state.drawerId, ui.drawerName || '출제자');
         var relayC = inRelay();
-        if (title) title.textContent = mine ? (relayC ? '제시어를 골라주세요!' : '단어를 골라주세요!') : dn + (relayC ? '님이 제시어를 고르고 있어요' : '님이 단어를 고르고 있어요');
+        if (title) title.textContent = mine ? (relayC ? '단어 ' + RELAY_PICK + '개를 골라주세요!' : '단어를 골라주세요!') : dn + (relayC ? '님이 제시어를 고르고 있어요' : '님이 단어를 고르고 있어요');
         var rn = $('choosing-relay-note');
         if (rn) {
           // 이어 그리기: 첫 주자는 조합을 다 그리지 않아도 된다 — 뒤 주자가 이어 그린다
@@ -2027,10 +2113,18 @@
           opts.hidden = !mine || viaWindow;
           opts.classList.toggle('blurred', blurred); // 방송 모드: 후보를 흐리게, "후보 보기"를 눌러야 고를 수 있다
           if (!mine && opts.childElementCount) opts.innerHTML = ''; // 이전 턴 후보 버튼 잔존 방지
-          var key = mine ? ui.wordOptions.join('\u0001') : '';
+          opts.classList.toggle('relay-pick', !!(mine && relayC));
+          var key = mine ? (relayC ? 'r\u0001' : '') + ui.wordOptions.join('\u0001') : '';
           if (key !== ui.optionsKey) {
             ui.optionsKey = key; opts.innerHTML = '';
-            if (mine) ui.wordOptions.forEach(function (w) {
+            if (mine && relayC) ui.wordOptions.forEach(function (w) {
+              // 이어 그리기: 토글 칩(고른 순서 번호). 상태는 renderRelayPicks 가 매번 맞춘다
+              var b = el('button', 'word-option pick-option'); b.type = 'button'; b.setAttribute('data-word', w);
+              b.appendChild(el('span', 'pick-num')); b.appendChild(el('span', 'pick-text', w));
+              b.addEventListener('click', function () { toggleRelayPick(w); });
+              opts.appendChild(b);
+            });
+            else if (mine) ui.wordOptions.forEach(function (w) {
               var b = el('button', 'word-option', w); b.type = 'button';
               b.addEventListener('click', function () {
                 if (ui.chosenWord) return;
@@ -2041,7 +2135,8 @@
             });
           }
         }
-      } else { ui.optionsKey = ''; }
+        renderRelayPicks(!!(mine && relayC && !viaWindow), blurred);
+      } else { ui.optionsKey = ''; renderRelayPicks(false, false); }
     }
     if (ot) {
       ot.hidden = !(ph === 'turnEnd' && ui.turnEnd);
@@ -2972,7 +3067,8 @@
     var g = function (id) { return $(id); };
     if (g('set-rounds')) s.rounds = clamp(num(g('set-rounds').value, 3), 1, 10);
     if (g('set-drawTime')) s.drawTime = clamp(num(g('set-drawTime').value, 80), 15, 180);
-    if (g('set-wordCount')) s.wordCount = clamp(num(g('set-wordCount').value, 3), 2, 5);
+    var wcr = wordCountRange(s.mode);
+    if (g('set-wordCount')) s.wordCount = clamp(num(g('set-wordCount').value, s.wordCount), wcr[0], wcr[1]);
     if (g('set-hints')) s.hints = clamp(num(g('set-hints').value, 2), 0, 5);
     if (g('set-hintEndAt')) s.hintEndAt = clamp(num(g('set-hintEndAt').value, 15), 5, 60);
     if (g('set-customWords')) s.customWords = String(g('set-customWords').value || '').slice(0, 2000);
@@ -2992,7 +3088,7 @@
     var range = function (a, b, step) { var r = []; for (var v = a; v <= b; v += (step || 1)) r.push(v); return r; };
     fillSelect('set-rounds', range(1, 10), function (v) { return v + ' 라운드'; });
     fillSelect('set-drawTime', [15, 20, 25].concat(range(30, 180, 10)), function (v) { return v + '초'; });
-    fillSelect('set-wordCount', range(2, 5), function (v) { return v + '개'; });
+    fillWordCountSelect(state.settings.mode);
     fillSelect('set-hints', range(0, 5), function (v) { return v === 0 ? '없음' : v + '회'; });
     fillSelect('set-hintEndAt', [5, 10, 15, 20, 30, 45, 60], function (v) { return '종료 ' + v + '초 전'; });
 
@@ -3002,8 +3098,9 @@
     document.querySelectorAll('#mode-panel .mode-card').forEach(function (b) {
       b.addEventListener('click', function () {
         if (!isHost() || state.phase !== 'lobby') return;
-        var mode = b.getAttribute('data-mode');
+        var mode = b.getAttribute('data-mode'), wasRelay = state.settings.mode === 'relay';
         state.settings = Object.assign({}, state.settings, MODE_PRESETS[mode] || {}, { mode: mode });
+        if ((mode === 'relay') !== wasRelay) state.settings.wordCount = mode === 'relay' ? RELAY_WORD_COUNT.def : DEFAULT_SETTINGS.wordCount;
         emit('room:settings', { settings: state.settings });
         emit('lobby:step', { step: 'settings' });
         state.lobbyStep = 'settings'; renderAll();
@@ -3084,6 +3181,7 @@
     var chip = document.querySelector('.room-code-chip'); if (chip) chip.addEventListener('click', revealRoomCode);
     var pk = $('btn-peek-options'); if (pk) pk.addEventListener('click', function () { ui.optionsPeek = true; renderAll(); });
     var cw = $('btn-choose-window'); if (cw) cw.addEventListener('click', openWordWindow);
+    var rpk = $('btn-relay-pick'); if (rpk) rpk.addEventListener('click', submitRelayPicks);
     window.addEventListener('beforeunload', function () { closeWordWindow(); });
     var bl = $('btn-leave'); if (bl) bl.addEventListener('click', function () { resetToLanding(true); });
     var bs = $('btn-sound'); if (bs) { renderSoundButton(bs); bs.addEventListener('click', function () { SFX.toggle(); renderSoundButton(bs); }); }

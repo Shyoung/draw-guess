@@ -554,11 +554,11 @@ io.on('connection', (socket) => {
     if (err) fail(err);
   });
 
-  // word:choose { word } — 출제자, choosing
+  // word:choose { word } (relay 는 { words:[a,b] }) — 출제자, choosing
   on('word:choose', (data) => {
     const room = currentRoom();
     if (!room) return fail('방에 참가하지 않았습니다.');
-    const err = room.chooseWord(pid(), data && data.word);
+    const err = room.chooseWord(pid(), room.isRelay() ? data && data.words : data && data.word);
     if (err) fail(err);
   });
 

@@ -98,11 +98,23 @@ async function say(page, text) {
 
 /**
  * 이어 그리기(relay) 주자 화면 시나리오(R4 — R5·R6 에서 넓힌다): 새 방 2명 → 카드는 선택 가능 · 시작 버튼 잠김 + 안내(지금 n명) · 7명이어도 잠김 → 3명이 되면 시작 버튼 풀림 →
- * 설정 화면 라벨(한 명당 시간 · 최대 힌트, 라운드·힌트 시점 숨김) → 첫 주자에게 조합 후보(' · ') → 첫 주자 "내 차례!" 배너 · 진동 ·
+ * 설정 화면 라벨(한 명당 시간 · 최대 힌트 · 단어 후보 3~8개, 라운드·힌트 시점 숨김) → 첫 주자에게 단어 후보 6개 → 2개 고르기(토글 · 고른 순서 · 3번째는 안내만 ·
+ * "이 두 개로 그리기") → 첫 주자 "내 차례!" 배너 · 진동 ·
  * 툴바 활성 · 다른 주자 툴바 잠김 · 차례 전 주자와 맞히는 사람은 마스크(' · ') → 상단 띠 → 주자 채팅은 주자끼리 →
  * 구간 교대(game:baton): 앞 주자 툴바 잠김 · "다음은 ○○님" · 새 주자 배너 · 제시어 공개 · 앞사람 그림 되돌리기 불가 →
  * 맞히는 사람이 요소를 모두 입력하면 turnEnd → 2번 문제에서 배치 전환.
  */
+/** relay 첫 주자: 후보 칩 i, j 를 차례로 눌러 "이 두 개로 그리기". 제시어 "a · b"(고른 순서)를 돌려준다 */
+async function relayPick(pg, i = 0, j = 1) {
+  await pg.waitForSelector('#word-options .pick-option:not([disabled])', { timeout: 5000 }).catch(() => {});
+  const opts = pg.locator('#word-options .pick-option');
+  const a = (await opts.nth(i).locator('.pick-text').textContent()).trim();
+  const b = (await opts.nth(j).locator('.pick-text').textContent()).trim();
+  await opts.nth(i).click(); await opts.nth(j).click();
+  await pg.click('#btn-relay-pick');
+  return a + ' · ' + b;
+}
+
 async function relayScenario(browser) {
   const rctx = await Promise.all([1, 2, 3].map(() => browser.newContext({ viewport: { width: 1280, height: 860 } })));
   // 진동 호출을 센다(데스크톱 Chrome 에도 navigator.vibrate 가 있다)
@@ -152,6 +164,9 @@ async function relayScenario(browser) {
     badge: document.getElementById('mode-badge').textContent,
   }));
   check(lay.rounds && lay.hintEndAt && lay.dt === '한 명당 시간' && lay.hl === '최대 힌트' && lay.badge.includes('이어 그리기'), 'relay 설정: 라운드·힌트 시점 숨김 · 라벨 바뀜', lay);
+  const wcv = await pa.evaluate(() => ({ opts: [...document.querySelectorAll('#set-wordCount option')].map((o) => o.value).join(','), val: document.getElementById('set-wordCount').value,
+    help: document.getElementById('set-wordCount-help').textContent, s: window.__dg.state.settings.wordCount }));
+  check(wcv.opts === '3,4,5,6,7,8' && wcv.val === '6' && wcv.s === 6 && wcv.help.includes('이 중 2개를 골라 제시어를 만들어요'), 'relay 설정: 단어 후보 수 3~8 · 기본 6 · 도움말 "첫 주자가 이 중 2개를 골라 제시어를 만들어요"', wcv);
   check((await pa.textContent('#settings-estimate')).includes('3명 · 3문제') && !(await pa.textContent('#settings-estimate')).includes('기준'), 'relay 설정: 예상 "3명 · 3문제"(기준 없음)', await pa.textContent('#settings-estimate'));
   // 구간 교대까지 보려고 가장 짧은 15초로
   await pa.selectOption('#set-drawTime', '15');
@@ -172,11 +187,37 @@ async function relayScenario(browser) {
     }
     if (!chooser) await sleep(250);
   }
-  check(!!chooser && optTexts.length === 3 && optTexts.every((w) => w.includes(' · ')), 'relay: 첫 주자에게 조합 후보 3개(" · " 포함)', optTexts);
+  check(!!chooser && optTexts.length === 6 && optTexts.every((w) => w && !w.includes(' · ')), 'relay: 첫 주자에게 단어 후보 6개(조합 아님)', optTexts);
   if (!chooser) return;
-  check((await chooser.textContent('#choosing-title')).includes('제시어'), 'relay: 후보 창 제목 "제시어를 골라주세요!"');
+  check((await chooser.textContent('#choosing-title')).includes('단어 2개를 골라'), 'relay: 후보 창 제목 "단어 2개를 골라주세요!"', await chooser.textContent('#choosing-title'));
   for (const pg of pages) if (pg !== chooser) check(!(await pg.locator('#overlay-choosing').textContent()).includes(word), 'relay: 다른 사람 화면에 후보 노출 없음');
-  await chooser.locator('#word-options .word-option').first().click();
+  // 2개 고르기: 누르면 선택(고른 순서 번호) · 다시 누르면 해제 · 2개를 고르면 "이 두 개로 그리기" · 3번째는 안내만
+  const pickView = () => chooser.evaluate(() => ({
+    picked: [...document.querySelectorAll('#word-options .pick-option.picked')].map((b) => b.querySelector('.pick-num').textContent + ':' + b.querySelector('.pick-text').textContent),
+    preview: document.getElementById('relay-pick-preview').textContent, go: !document.getElementById('btn-relay-pick').disabled,
+    goText: document.getElementById('btn-relay-pick').textContent, bar: !document.getElementById('relay-pick-bar').hidden,
+  }));
+  const ow = optTexts.map((w) => w.trim());
+  const opt = (i) => chooser.locator('#word-options .pick-option').nth(i);
+  const pv0 = await pickView();
+  check(pv0.bar && !pv0.go && pv0.goText === '이 두 개로 그리기' && pv0.picked.length === 0, 'relay 고르기: 처음엔 "이 두 개로 그리기" 비활성', pv0);
+  await opt(0).click();
+  const pv1 = await pickView();
+  check(pv1.picked.join() === '1:' + ow[0] && !pv1.go && pv1.preview.includes(ow[0]) && pv1.preview.includes('하나 더'), 'relay 고르기: 1개 → 번호 1 · 미리보기 "A · 하나 더" · 버튼 비활성', pv1);
+  await opt(1).click();
+  const pv2 = await pickView();
+  check(pv2.picked.length === 2 && pv2.go && pv2.preview === ow[0] + ' · ' + ow[1], 'relay 고르기: 2개 → 미리보기 "A · B" · 버튼 켜짐', pv2);
+  await opt(2).click();
+  const pv3 = await pickView();
+  check(pv3.picked.length === 2 && !pv3.picked.some((x) => x.endsWith(':' + ow[2])) && (await chooser.textContent('#toasts')).includes('2개까지 고를 수 있어요'), 'relay 고르기: 3번째는 바꾸지 않고 "2개까지 고를 수 있어요" 안내', pv3);
+  await opt(0).click(); // 해제 → B 하나
+  const pv4 = await pickView();
+  check(pv4.picked.join() === '1:' + ow[1] && !pv4.go, 'relay 고르기: 다시 누르면 해제, 남은 것이 1번', pv4);
+  await opt(0).click(); // 다시 고름 → B · A
+  word = ow[1] + ' · ' + ow[0];
+  check((await pickView()).preview === word, 'relay 고르기: 표시 순서 = 고른 순서 "B · A"', (await pickView()).preview);
+  await chooser.screenshot({ path: path.join(SHOTS, 'e2e-relay-pick.png') });
+  await chooser.click('#btn-relay-pick');
   // 첫 주자: 내 차례 배너(1.5초) — 제시어 크게 + 구간 시간 + 진동
   const banner1 = await chooser.waitForSelector('#relay-banner:not([hidden])', { timeout: 3000 }).then(() => chooser.textContent('#relay-banner')).catch(() => '');
   check(banner1.includes('내 차례!') && banner1.includes('15초') && banner1.includes(word), 'relay: 첫 주자 "내 차례! 15초" 배너 + 제시어', banner1);
@@ -332,7 +373,7 @@ async function relayScenario(browser) {
   const reason = await guesser.textContent('#turnend-reason').catch(() => '');
   const reasonOther = await first.textContent('#turnend-reason').catch(() => '');
   check(reason.includes('🎯') && reason.includes('맞혔어요') && reasonOther.includes(nicks[gi]), 'relay: 정답 → 턴 종료 "🎯 ○○님이 맞혔어요!"', `${reason} | ${reasonOther}`);
-  check((await first.textContent('#turnend-word')).includes(word), 'relay: 턴 종료 오버레이에 조합 제시어', await first.textContent('#turnend-word'));
+  check((await first.textContent('#turnend-word')).includes(word), 'relay: 턴 종료 오버레이에 제시어 "B · A"', await first.textContent('#turnend-word'));
   // 힌트 3회 감점: (100 + 300 × 남은/전체) × (1 − 0.75) → 25~100점, 구간을 가진 주자 둘은 200
   const deltaOf = (pg, nick) => pg.evaluate((nk) => { const r = [...document.querySelectorAll('#turnend-deltas .delta-row')].find((x) => x.querySelector('.dname').textContent.startsWith(nk)); return r ? Number(r.querySelector('.delta').textContent.replace('+', '')) : null; }, nick);
   const dG = await deltaOf(first, nickOf(guesser)), dF = await deltaOf(first, nickOf(first)), dS = await deltaOf(first, nickOf(second));
@@ -351,13 +392,21 @@ async function relayScenario(browser) {
       if (!rq) { check(false, `relay: ${q}번 문제 시작`); break; }
       probs.push(rq);
       const ch = pageOf(rq.order[0]), gq = pageOf(rq.guesserId);
-      await ch.waitForSelector('#word-options .word-option:not([disabled])', { timeout: 5000 }).catch(() => {});
-      const wq = (await ch.locator('#word-options .word-option').first().textContent().catch(() => '')).trim();
+      await ch.waitForSelector('#word-options .pick-option:not([disabled])', { timeout: 5000 }).catch(() => {});
       if (q === 2) {
         const sys = await gq.locator('#chat-list').textContent();
         check(sys.includes(nickOf(ch) + '님이 제시어를 고르고 있어요.'), 'relay: choosing 시스템 메시지 "○○님이 제시어를 고르고 있어요."', sys.slice(-60));
       }
-      await ch.locator('#word-options .word-option').first().click().catch(() => {});
+      let wq;
+      if (q === 3) {
+        // 1개만 고르고 시간이 다 되면: 고른 것 + 남은 후보 중 앞의 것으로 채워 보낸다(클라이언트, 0.5초 남기고)
+        const opts3 = (await ch.locator('#word-options .pick-option .pick-text').allTextContents()).map((w) => w.trim());
+        await ch.locator('#word-options .pick-option').nth(2).click();
+        await ch.waitForFunction(() => window.__dg.state.phase === 'drawing', null, { timeout: 20000 }).catch(() => {});
+        wq = opts3[2] + ' · ' + opts3[0];
+        const got = await ch.evaluate(() => window.__dg.ui.word);
+        check(got === wq, 'relay: 1개만 고른 채 시간이 다 되면 "고른 것 · 첫 후보"로 채워 시작', `${got} (기대 ${wq})`);
+      } else wq = await relayPick(ch, 0, 1);
       await gq.waitForFunction(() => window.__dg.state.phase === 'drawing', null, { timeout: 5000 }).catch(() => {});
       if (q === 2) {
         // 문제가 바뀌면 힌트 수도 새로: 남은 3회

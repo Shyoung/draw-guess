@@ -535,6 +535,23 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 }
 .word-option:hover:not(:disabled) { transform: translateY(-2px); border-color: var(--primary); background: var(--primary-soft); }
 .word-option.chosen { border-color: var(--green); background: var(--green-soft); }
+/* 이어 그리기: 단어 후보 중 2개 고르기. 칸 폭에 맞춰 3열(PC)·2열(폰 360px), 고른 칩은 순서 번호 */
+.word-options.relay-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; width: 100%; }
+.pick-option { position: relative; font-size: 16px; padding: 10px 10px; min-height: 44px; overflow-wrap: anywhere; line-height: 1.25; }
+.pick-option.picked { border-color: var(--primary); background: var(--primary-soft); }
+.pick-option.dim { opacity: .55; }
+.pick-option .pick-num:empty { display: none; }
+.pick-option .pick-num {
+  position: absolute; top: -7px; left: -7px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--primary); color: #fff; font-size: 12px; font-weight: 900; box-shadow: 0 1px 3px rgba(0, 0, 0, .2);
+}
+.relay-pick-bar { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
+.relay-pick-preview { font-size: 18px; font-weight: 900; min-height: 1.4em; color: var(--primary-dark); overflow-wrap: anywhere; }
+.relay-pick-preview .pick-sep { color: var(--muted); }
+.relay-pick-preview .pick-empty { font-size: 14px; font-weight: 700; color: var(--muted); }
+.relay-pick-bar .btn { min-width: 180px; }
+.relay-pick-bar.blurred .relay-pick-preview { filter: blur(6px); user-select: none; }
+.relay-pick-bar.blurred .btn { pointer-events: none; }
 
 .delta-list { width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .delta-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 12px; background: #f8f6fc; }
@@ -1180,6 +1197,7 @@ body.sheet-open { overflow: hidden; }
   .card-wide { width: min(100%, 560px); }
   .card-title { font-size: 20px; }
   .word-option { font-size: 17px; padding: 11px 16px; max-width: 100%; overflow-wrap: anywhere; }
+  .pick-option { font-size: 16px; padding: 9px 8px; } /* 이어 그리기 후보 8개도 2열로 한 화면에 */
   .ranking-list { max-height: none; overflow: visible; }
   .podium-slot .avatar { width: 40px; height: 40px; font-size: 22px; }
   .podium-slot .pname { font-size: 13px; }

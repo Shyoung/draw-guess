@@ -8,8 +8,7 @@
  *   categoryOf(word)          : 단어 → 카테고리명 (사용자 단어는 null)
  *   parseCustomWords(str)     : 쉼표 구분 사용자 단어 문자열 → 정제된 배열
  *   pickWords(settings, exclude, count) : 사용자 단어 설정을 반영해 후보 count개 반환
- *   COMBO_TEMPLATES           : 이어 그리기 조합 제시어 템플릿(카테고리 이름 배열의 배열)
- *   pickCombos(settings, exclude, count, partCount) : 조합 제시어 후보 count개 → [{ word, parts }]
+ *   pickRelayWords(settings, exclude, count) : 이어 그리기 단어 후보 count개(3~8) — 첫 주자가 2개를 골라 "A · B" 제시어
  *   maskParts(parts, revealedByPart)    : 요소별 마스크를 ' · '로 이은 문자열
  *   revealPartsAll(parts, solvedIdx, revealedByPart) : 맞힌 요소만 글자로, 나머지는 마스크
  *   matchParts(text, parts)   : 채팅 한 줄에서 맞힌 요소·근접 요소 인덱스 → { solved, close }
@@ -500,166 +499,100 @@ function pickWords(settings, exclude, count) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 이어 그리기(relay) 조합 제시어 — docs/product/2026-10-relay-drawing.md §3-1
+// 이어 그리기(relay) 제시어 — docs/product/2026-10-relay-drawing.md §3-1
+// 첫 주자가 단어 후보 wordCount개 중 2개를 골라 "A · B" 제시어를 만든다(요소 수 항상 2)
 // ─────────────────────────────────────────────────────────────
 
-/**
- * 조합 템플릿. 방 설정 categories에 모든 카테고리가 켜진 템플릿만 쓴다.
- * 어색한 조합이 잘 나오는 신체·건강, 나라·도시·랜드마크는 넣지 않는다(설계 §6). 출시 뒤 관찰로 조정한다.
- */
-const COMBO_TEMPLATES = [
-  ['동물', '행동·놀이·행사'],
-  ['동물', '음식'],
-  ['직업·사람·캐릭터', '탈것'],
-  ['동물', '장소·자연'],
-  ['직업·사람·캐릭터', '사물'],
-  ['동물', '사물', '장소·자연'],
-  ['직업·사람·캐릭터', '탈것', '장소·자연'],
-  ['동물', '음식', '행동·놀이·행사'],
-];
-
-/** 조합 표시용 구분자(가운뎃점 U+00B7 양쪽 공백 1개) */
+/** 제시어 표시용 구분자(가운뎃점 U+00B7 양쪽 공백 1개) */
 const PART_SEP = ' · ';
+/** relay 제시어 요소 수(10-02 운영자 결정 — 인원 무관 2개) */
+const RELAY_PART_COUNT = 2;
 
-/** 풀이 전부 비는 등 최후의 경우에 쓰는 고정 요소 */
-const FALLBACK_PARTS = ['사과', '고양이', '바다'];
+/** 풀이 전부 비는 등 최후의 경우에 쓰는 고정 후보(relay wordCount 최대 8개까지 서로 다르게) */
+const FALLBACK_PARTS = ['사과', '고양이', '바다', '자동차', '우산', '기린', '피아노', '축구'];
 
 // 카테고리별 "소속" 단어(categoryOf 기준). 여러 카테고리에 있는 단어는 앞 카테고리에만 들어간다
-// → 조합 요소의 categoryOf가 그 자리의 카테고리와 항상 같다.
-// 한 글자 단어(곰·소·말·게 등)는 조합 요소로 쓰지 않는다 — 부분 문자열 판정이라 "축구하게"의 "게"처럼 흔한 문장에서 오탐한다
-const isMultiChar = (w) => Array.from(String(w)).length >= 2;
+// → 후보의 categoryOf가 그 자리의 카테고리와 항상 같다.
+// 한 글자 단어(곰·소·말·게 등)는 요소로 쓰지 않는다 — 부분 문자열 판정이라 "축구하게"의 "게"처럼 흔한 문장에서 오탐한다.
+// 가운뎃점(·)이 든 사용자 단어도 뺀다 — 요소 구분자(' · ')와 헷갈린다
+const isPartWord = (w) => Array.from(String(w)).length >= 2 && !String(w).includes('·');
 const OWNED_WORDS = {};
 for (const name of CATEGORY_NAMES) {
-  OWNED_WORDS[name] = dedupe(CATEGORIES[name]).filter((w) => categoryOf(w) === name && isMultiChar(w));
+  OWNED_WORDS[name] = dedupe(CATEGORIES[name]).filter((w) => categoryOf(w) === name && isPartWord(w));
 }
-/** 조합 요소 최후 풀(전체 사전 중 두 글자 이상) */
-const KO_MULTI = ko.filter(isMultiChar);
+/** 후보 최후 풀(전체 사전 중 두 글자 이상) */
+const KO_MULTI = ko.filter(isPartWord);
 
 const wordKey = (w) => String(w).normalize('NFC').toLowerCase();
-/** 순서 무관 조합 키: '고양이 · 축구'와 '축구 · 고양이'를 같은 조합으로 본다 */
-const comboKey = (parts) => parts.map(wordKey).sort().join('\u0000');
 
 function randomOf(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
 /**
- * 조합 제시어 후보 선택.
- *  - customWordsOnly이고 사용자 단어가 partCount개 이상이면 사용자 단어끼리 조합(카테고리 무관)
- *  - 아니면 categories(빈 배열 = 전체)에 모든 카테고리가 켜진 partCount짜리 템플릿 중 하나로,
- *    맞는 템플릿이 없으면 켜진 카테고리 중 서로 다른 카테고리 partCount개로(모자라면 같은 카테고리에서 다른 단어로)
+ * relay 단어 후보 선택(첫 주자가 이 중 2개를 고른다).
+ *  - 두 글자 이상 단어만(기본 사전·사용자 단어 모두 — 부분 문자열 판정 오탐 방지)
+ *  - 켜진 카테고리(categories, 빈 배열 = 전체)를 섞은 순서로 돌아가며 하나씩 → 가능한 한 서로 다른 카테고리.
+ *    카테고리 수보다 후보가 많으면 다시 섞어 한 바퀴 더(같은 카테고리에서 다른 단어)
  *  - customWords가 있으면 각 자리마다 (사용자 단어 수 / (사용자 단어 수 + 그 카테고리 단어 수)) 확률로 사용자 단어를 쓴다
- *  - exclude(이미 쓰인 요소 단어·조합 문자열)는 가능하면 피하고, 풀이 모자라면 재사용한다. 조합은 순서 무관으로 비교한다
- *  - 한 글자 단어는 요소로 쓰지 않는다(기본 사전·사용자 단어 모두 — 부분 문자열 판정 오탐 방지)
- *  - 한 조합 안에 같은 요소는 두 번 들어가지 않는다. 반환된 word는 가능하면 서로 다르다(풀이 너무 작으면 겹칠 수 있다)
- *  - settings가 없거나 이상해도 예외 없이 항상 count개를 돌려준다
+ *  - customWordsOnly이고 사용자 단어가 count개 이상이면 사용자 단어만. 모자라면 사용자 단어를 전부 넣고 나머지를 카테고리 풀에서 채운다
+ *  - exclude(이미 쓰였거나 제시된 단어)는 가능하면 피하고, 풀이 모자라면 재사용한다
+ *  - 반환 단어는 서로 다르다. settings가 없거나 이상해도 예외 없이 count개(3~8로 clamp, 기본 6)를 돌려준다
  * @param {object} settings { categories, customWords, customWordsOnly }
  * @param {Set<string>} exclude
  * @param {number} count
- * @param {number} partCount 요소 수(2~3으로 clamp)
- * @returns {{ word: string, parts: string[] }[]}
+ * @returns {string[]}
  */
-function pickCombos(settings, exclude, count, partCount) {
-  const n = Math.max(1, Math.floor(Number(count) || 3));
-  const pc = Number(partCount);
-  const k = Number.isFinite(pc) ? Math.min(3, Math.max(2, Math.round(pc))) : 2;
+function pickRelayWords(settings, exclude, count) {
+  const c = Math.floor(Number(count));
+  const n = Number.isFinite(c) ? Math.min(8, Math.max(3, c)) : 6;
   try {
-    return pickCombosInner(settings, exclude, n, k);
+    return pickRelayWordsInner(settings, exclude, n);
   } catch (_) {
-    return fallbackCombos(n, k);
+    return FALLBACK_PARTS.slice(0, n);
   }
 }
 
-function fallbackCombos(n, k) {
-  const out = [];
-  for (let i = 0; i < n; i++) {
-    const parts = FALLBACK_PARTS.slice(0, k);
-    out.push({ word: parts.join(PART_SEP), parts });
-  }
-  return out;
-}
-
-function pickCombosInner(settings, exclude, n, k) {
+function pickRelayWordsInner(settings, exclude, n) {
   const s = settings && typeof settings === 'object' ? settings : {};
-  const ex = exclude instanceof Set ? exclude : new Set();
-  const exWords = new Set();
-  const exCombos = new Set();
-  for (const v of ex) {
-    if (typeof v !== 'string') continue;
-    if (v.includes(PART_SEP)) exCombos.add(comboKey(v.split(PART_SEP)));
-    else exWords.add(wordKey(v));
-  }
-
-  const custom = parseCustomWords(s.customWords).filter(isMultiChar); // 사용자 단어도 한 글자는 뺀다
-  const customOnly = !!s.customWordsOnly && custom.length >= k;
-  const enabled = Array.isArray(s.categories)
-    ? CATEGORY_NAMES.filter((name) => s.categories.includes(name))
-    : [];
-  const cats = enabled.length ? enabled : CATEGORY_NAMES.slice();
-  const templates = COMBO_TEMPLATES.filter((t) => t.length === k && t.every((c) => cats.includes(c)));
-
-  /** 자리별 카테고리 목록(null = 사용자 단어 자리) */
-  function slotCategories() {
-    if (customOnly) return new Array(k).fill(null);
-    if (templates.length) return randomOf(templates).slice();
-    const picked = shuffle(cats).slice(0, k);
-    while (picked.length < k) picked.push(randomOf(cats)); // 켜진 카테고리가 모자라면 같은 카테고리 반복
-    return picked;
-  }
-
-  const batchWords = new Set(); // 이번 후보들에 이미 들어간 요소
-  const batchCombos = new Set();
-
-  /** 풀에서 요소 하나: 조합 안 중복 금지, exclude·이번 후보에 안 쓴 것 우선 */
-  function pickFrom(pool, inCombo) {
-    const avail = pool.filter((w) => !inCombo.has(wordKey(w)));
-    if (!avail.length) return null;
-    const fresh = avail.filter((w) => !exWords.has(wordKey(w)) && !batchWords.has(wordKey(w)));
-    if (fresh.length) return randomOf(fresh);
-    const notEx = avail.filter((w) => !exWords.has(wordKey(w)));
-    if (notEx.length) return randomOf(notEx);
-    return randomOf(avail);
-  }
-
-  function makeCombo() {
-    const parts = [];
-    const inCombo = new Set();
-    for (const cat of slotCategories()) {
-      let w = null;
-      if (cat === null) {
-        w = pickFrom(custom, inCombo);
-      } else {
-        const own = OWNED_WORDS[cat] || [];
-        const useCustom = custom.length > 0 && Math.random() < custom.length / (custom.length + own.length);
-        w = pickFrom(useCustom ? custom : own, inCombo) || pickFrom(useCustom ? own : custom, inCombo);
-      }
-      if (!w) w = pickFrom(KO_MULTI, inCombo) || pickFrom(FALLBACK_PARTS, inCombo);
-      if (!w) break;
-      parts.push(w);
-      inCombo.add(wordKey(w));
-    }
-    if (parts.length < k) return null;
-    return parts;
-  }
+  const ex = new Set();
+  if (exclude instanceof Set) for (const v of exclude) if (typeof v === 'string') ex.add(wordKey(v));
 
   const out = [];
-  for (let i = 0; i < n; i++) {
-    let best = null; // exclude·이번 후보 둘 다 안 겹치는 것
-    let okBatch = null; // 이번 후보와만 안 겹치는 것
-    let any = null;
-    for (let attempt = 0; attempt < 50 && !best; attempt++) {
-      const parts = makeCombo();
-      if (!parts) continue;
-      const key = comboKey(parts);
-      if (!any) any = parts;
-      if (batchCombos.has(key)) continue;
-      if (!okBatch) okBatch = parts;
-      if (!exCombos.has(key)) best = parts;
+  const taken = new Set(); // 이번 후보에 이미 넣은 단어
+  const push = (w) => { out.push(w); taken.add(wordKey(w)); };
+  /** 풀에서 하나: 이번 후보와 안 겹치는 것 중 exclude 에 없는 것 우선 */
+  function pickFrom(pool) {
+    const avail = pool.filter((w) => !taken.has(wordKey(w)));
+    if (!avail.length) return null;
+    const fresh = avail.filter((w) => !ex.has(wordKey(w)));
+    return randomOf(fresh.length ? fresh : avail);
+  }
+
+  const custom = parseCustomWords(s.customWords).filter(isPartWord);
+  if (s.customWordsOnly) {
+    if (custom.length >= n) {
+      // 사용자 단어만: 안 쓴 것 먼저
+      const unused = shuffle(custom.filter((w) => !ex.has(wordKey(w))));
+      const used = shuffle(custom.filter((w) => ex.has(wordKey(w))));
+      return unused.concat(used).slice(0, n);
     }
-    const parts = best || okBatch || any || FALLBACK_PARTS.slice(0, k);
-    batchCombos.add(comboKey(parts));
-    for (const w of parts) batchWords.add(wordKey(w));
-    out.push({ word: parts.join(PART_SEP), parts });
+    for (const w of shuffle(custom)) push(w); // 모자라면 전부 넣고 나머지는 아래 카테고리 풀에서
+  }
+
+  const enabled = Array.isArray(s.categories) ? CATEGORY_NAMES.filter((name) => s.categories.includes(name)) : [];
+  const cats = enabled.length ? enabled : CATEGORY_NAMES.slice();
+  const mixCustom = !s.customWordsOnly && custom.length > 0;
+  let order = [];
+  while (out.length < n) {
+    if (!order.length) order = shuffle(cats); // 한 바퀴 돌면 다시 섞는다
+    const cat = order.shift();
+    const own = OWNED_WORDS[cat] || [];
+    const useCustom = mixCustom && Math.random() < custom.length / (custom.length + own.length);
+    let w = pickFrom(useCustom ? custom : own) || pickFrom(useCustom ? own : custom);
+    if (!w) w = pickFrom([].concat(...cats.map((x) => OWNED_WORDS[x] || []))) || pickFrom(KO_MULTI) || pickFrom(FALLBACK_PARTS);
+    if (!w) break;
+    push(w);
   }
   return out;
 }
@@ -729,5 +662,5 @@ function matchParts(text, parts) {
 
 module.exports = {
   ko, CATEGORIES, CATEGORY_NAMES, baseWords, categoryOf, parseCustomWords, pickWords, shuffle, dedupe,
-  COMBO_TEMPLATES, PART_SEP, pickCombos, maskParts, revealPartsAll, matchParts,
+  PART_SEP, RELAY_PART_COUNT, pickRelayWords, maskParts, revealPartsAll, matchParts,
 };

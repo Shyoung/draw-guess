@@ -8,7 +8,7 @@
  *  - word / wordOptions 는 출제자에게만 보낸다
  */
 
-const { pickWords, categoryOf, CATEGORY_NAMES, pickCombos, maskParts, revealPartsAll, matchParts, PART_SEP } = require('./words');
+const { pickWords, categoryOf, CATEGORY_NAMES, pickRelayWords, RELAY_PART_COUNT, maskParts, revealPartsAll, matchParts, PART_SEP } = require('./words');
 const { normalizeAnswer, levenshtein, isHangulSyllable, hintChar, maskWord, revealAll } = require('./textmatch');
 
 // ── 상수 ────────────────────────────────────────────────────────
@@ -40,6 +40,8 @@ const MIN_PLAYERS = ALLOW_SOLO ? 1 : 2;
 // 이어 그리기(relay) 인원: 주자 n−1명 + 맞히는 사람 1명. ALLOW_SOLO 서버는 탭 2개로 확인할 수 있게 2명부터(1명은 주자가 0명)
 const RELAY_MIN_PLAYERS = ALLOW_SOLO ? 2 : 3;
 const RELAY_MAX_PLAYERS = 6;
+// relay 단어 후보 수(wordCount) 범위·기본값. 첫 주자가 이 중 2개를 고른다. 다른 모드는 2..5, 기본 3
+const RELAY_WORD_COUNT = { min: 3, max: 8, def: 6 };
 
 const MAX_OPS = 3000; // 턴당 op 상한 (메모리 보호)
 const MAX_STROKE_POINTS = 5000; // stroke 하나의 점 상한
@@ -216,8 +218,7 @@ class Room {
     // { order:[이번 문제 주자 id], guesserId, legIndex, legCount, legTime, legTimeLeft, totalTime, legStartOps, hintsUsed, hintsMax,
     //   revealedByPart: Array<Set<number>>(요소별 힌트 공개 글자 인덱스), solvedIdx: Set<number>(맞히는 사람이 맞힌 요소 인덱스, 누적) }
     this.relay = null;
-    this.parts = null; // 현재 조합 제시어의 요소 배열(판정용)
-    this.comboOptions = new Map(); // choosing 중 조합 후보: 표시 문자열 → parts
+    this.parts = null; // 현재 제시어의 요소 배열(판정용 — 첫 주자가 고른 단어 2개, 고른 순서)
     this.relayLeft = {}; // relay 게임 중 방을 완전히 나간 참가자 id → 이름(그 사람이 맞힐 문제를 건너뛸 때 안내용)
 
     this.usedWords = new Set(); // 이번 게임에서 이미 나온(선택된) 단어
@@ -292,7 +293,6 @@ class Room {
         solvedIdx: [...(this.relay.solvedIdx || [])],
       } : null,
       parts: this.parts ? this.parts.slice() : null,
-      comboOptions: [...this.comboOptions.entries()],
       relayLeft: { ...this.relayLeft },
       usedWords: [...this.usedWords],
       offeredWords: [...this.offeredWords],
@@ -347,7 +347,6 @@ class Room {
         solvedIdx: new Set(Array.isArray(s.relay.solvedIdx) ? s.relay.solvedIdx : []),
       } : null;
     room.parts = Array.isArray(s.parts) ? s.parts.slice() : null;
-    room.comboOptions = new Map(Array.isArray(s.comboOptions) ? s.comboOptions : []);
     room.relayLeft = s.relayLeft && typeof s.relayLeft === 'object' ? { ...s.relayLeft } : {};
     room.usedWords = new Set(s.usedWords || []);
     room.offeredWords = new Set(s.offeredWords || []);
@@ -380,7 +379,7 @@ class Room {
       // relay: 현재 구간 남은 시간은 문제 전체 남은 시간에서 다시 계산한다(구간 경계는 고정)
       if (relayDrawing) this.syncLegTimeLeft();
       if (this.timeLeft <= 0) {
-        if (this.phase === 'choosing') this.beginDrawing(this.wordOptions[0]);
+        if (this.phase === 'choosing') this.autoChoose();
         else this.endTurn('time');
       } else {
         // startTicker()는 phaseEndsAt을 다시 계산하므로 여기서는 종료 시각을 유지한 채 interval만 건다
@@ -971,7 +970,6 @@ class Room {
     const s = { ...this.settings };
     if ('rounds' in patch) s.rounds = clampInt(patch.rounds, 1, 10, s.rounds);
     if ('drawTime' in patch) s.drawTime = clampInt(patch.drawTime, 15, 180, s.drawTime);
-    if ('wordCount' in patch) s.wordCount = clampInt(patch.wordCount, 2, 5, s.wordCount);
     if ('hints' in patch) s.hints = clampInt(patch.hints, 0, 5, s.hints);
     if ('hintEndAt' in patch) s.hintEndAt = clampInt(patch.hintEndAt, 5, 60, s.hintEndAt);
     if ('customWords' in patch) {
@@ -982,6 +980,11 @@ class Room {
     if ('customWordsOnly' in patch) s.customWordsOnly = Boolean(patch.customWordsOnly);
     if ('categories' in patch) s.categories = sanitizeCategories(patch.categories);
     if ('mode' in patch && MODES.includes(patch.mode)) s.mode = patch.mode;
+    // 단어 후보 수: relay 는 3..8(기본 6 — 첫 주자가 2개를 고른다), 그 밖은 2..5(기본 3). 모드가 relay 로/relay 에서 바뀌면 그 모드 기본값으로
+    const relayNow = s.mode === 'relay';
+    if (relayNow !== (this.settings.mode === 'relay')) s.wordCount = relayNow ? RELAY_WORD_COUNT.def : DEFAULT_SETTINGS.wordCount;
+    const wcMin = relayNow ? RELAY_WORD_COUNT.min : 2, wcMax = relayNow ? RELAY_WORD_COUNT.max : 5;
+    s.wordCount = clampInt('wordCount' in patch ? patch.wordCount : s.wordCount, wcMin, wcMax, Math.min(wcMax, Math.max(wcMin, s.wordCount)));
     if ('fixedDrawerId' in patch) {
       // 방에 있는 사람만 출제자로 지정 가능. 아니면 null(=호스트)
       s.fixedDrawerId = typeof patch.fixedDrawerId === 'string' && this.getPlayer(patch.fixedDrawerId) ? patch.fixedDrawerId : null;
@@ -1029,7 +1032,6 @@ class Room {
     this.turnIndex = -1;
     this.relay = null;
     this.parts = null;
-    this.comboOptions = new Map();
     this.relayLeft = {};
     if (relay) {
       // 이어 그리기: 시작 때 접속한 사람들의 참가 순서로 고정, 문제 n개(모두가 한 번씩 맞힌다). round = 문제 번호(nextTurn 에서 1부터)
@@ -1158,7 +1160,6 @@ class Room {
     const blitz = this.settings.mode === 'blitz';
     let options;
     this.parts = null;
-    this.comboOptions = new Map();
     if (this.settings.mode === 'relay') {
       const runners = assignment && Array.isArray(assignment.runners) && assignment.runners.length ? assignment.runners.slice() : [drawerId];
       const legTime = this.settings.drawTime;
@@ -1167,19 +1168,15 @@ class Room {
         legIndex: 0, legCount: runners.length, legTime, legTimeLeft: legTime, totalTime: legTime * runners.length,
         legStartOps: 0, hintsUsed: 0, hintsMax: this.settings.hints, revealedByPart: [], solvedIdx: new Set(),
       };
-      // 조합 제시어: 요소 수 = min(주자 수, 3). 조합 문자열과 요소 둘 다 다음 문제에서 피한다
-      const combos = pickCombos(this.settings, exclude, this.settings.wordCount, Math.min(runners.length, 3));
-      for (const c of combos) {
-        this.comboOptions.set(c.word, c.parts.slice());
-        this.offeredWords.add(c.word);
-        for (const w of c.parts) this.offeredWords.add(w);
-      }
-      options = combos.map((c) => c.word);
+      // 단어 후보 wordCount개(3..8) — 첫 주자가 2개를 골라 제시어를 만든다. 제시된 단어는 다음 문제에서 피한다
+      options = pickRelayWords(this.settings, exclude, this.settings.wordCount);
+      for (const o of options) this.offeredWords.add(o);
     } else {
       options = pickWords(this.settings, exclude, blitz ? 1 : this.settings.wordCount);
       for (const o of options) this.offeredWords.add(o);
     }
     if (!options.length) options = ['사과']; // 방어: 절대 비어있지 않게
+    if (this.settings.mode === 'relay') for (const w of ['사과', '고양이']) if (options.length < RELAY_PART_COUNT && !options.includes(w)) options.push(w);
     this.wordOptions = options;
     if (blitz) {
       // 속도전: 고르는 단계 없이 곧바로 그리기 (힌트는 설정과 무관하게 없음 — beginDrawing 에서 처리)
@@ -1197,18 +1194,34 @@ class Room {
     this.startTicker();
   }
 
-  /** word:choose (출제자, choosing, 후보 중 하나) */
-  chooseWord(id, word) {
+  /**
+   * word:choose (출제자, choosing). classic 등은 후보 중 하나(string),
+   * relay 는 서로 다른 후보 2개(string[] — 순서 = 고른 순서, 제시어 "a · b")
+   */
+  chooseWord(id, choice) {
     if (this.phase !== 'choosing') return '지금은 단어를 선택할 수 없습니다.';
     if (id !== this.drawerId) return '출제자만 단어를 선택할 수 있습니다.';
-    if (typeof word !== 'string' || !this.wordOptions.includes(word)) {
+    if (this.isRelay()) {
+      const ok = Array.isArray(choice) && choice.length === RELAY_PART_COUNT && choice.every((w) => typeof w === 'string' && this.wordOptions.includes(w))
+        && new Set(choice).size === choice.length;
+      if (!ok) return '후보 중에서 서로 다른 2개를 골라 주세요.';
+      this.beginDrawing(choice.slice());
+      return null;
+    }
+    if (typeof choice !== 'string' || !this.wordOptions.includes(choice)) {
       return '제시된 후보 중에서 선택해 주세요.';
     }
-    this.beginDrawing(word);
+    this.beginDrawing(choice);
     return null;
   }
 
-  /** drawing 단계 시작 */
+  /** choosing 시간 초과(또는 복원 때 이미 시간이 다 됨): 첫 후보, relay 는 후보 앞 2개 */
+  autoChoose() {
+    if (this.isRelay()) this.beginDrawing(this.wordOptions.slice(0, RELAY_PART_COUNT));
+    else this.beginDrawing(this.wordOptions[0]);
+  }
+
+  /** drawing 단계 시작. word = 고른 단어(relay 는 고른 단어 배열) */
   beginDrawing(word) {
     this.clearTimers();
     const drawer = this.getPlayer(this.drawerId);
@@ -1246,12 +1259,13 @@ class Room {
     this.startTicker();
   }
 
-  /** relay drawing 시작: 첫 주자 구간부터. 제시어는 첫 주자에게만, 나머지는 요소별 마스크 */
-  beginRelayDrawing(word, drawer) {
+  /** relay drawing 시작: 첫 주자 구간부터. 제시어(고른 단어 2개 "a · b")는 첫 주자에게만, 나머지는 요소별 마스크 */
+  beginRelayDrawing(words, drawer) {
     const r = this.relay;
     this.phase = 'drawing';
+    this.parts = (Array.isArray(words) ? words : String(words).split(PART_SEP)).map(String);
+    const word = this.parts.join(PART_SEP);
     this.word = word;
-    this.parts = (this.comboOptions.get(word) || String(word).split(PART_SEP)).slice();
     this.revealed = new Set();
     this.ops = [];
     this.currentStroke = null;
@@ -1398,8 +1412,8 @@ class Room {
 
     if (this.timeLeft <= 0) {
       if (this.phase === 'choosing') {
-        // 시간 초과 → 첫 후보 자동 선택
-        this.beginDrawing(this.wordOptions[0]);
+        // 시간 초과 → 첫 후보 자동 선택(relay 는 앞 2개)
+        this.autoChoose();
       } else if (this.phase === 'drawing') {
         this.endTurn('time');
       }
@@ -1585,7 +1599,6 @@ class Room {
     this.wordOptions = [];
     this.relay = null;
     this.parts = null;
-    this.comboOptions = new Map();
     this.ops = [];
     this.currentStroke = null;
     for (const p of this.players) {
@@ -1659,7 +1672,6 @@ class Room {
     this.wordOptions = [];
     this.relay = null;
     this.parts = null;
-    this.comboOptions = new Map();
     this.relayLeft = {};
     this.revealed = new Set();
     this.ops = [];
