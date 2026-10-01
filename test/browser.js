@@ -368,6 +368,48 @@ async function relayScenario(browser) {
     check((await p2.inputValue('#set-drawTime')) === '30', '설정 변경 동기화(drawTime=30)', await p2.inputValue('#set-drawTime'));
     await p2.waitForFunction(() => document.querySelectorAll('#settings-summary .sum-word').length === 12, null, { timeout: 3000 }).catch(() => {});
     check((await p2.locator('#settings-summary .sum-word').count()) === 12 && (await p2.textContent('#settings-summary .sum-words-title')).includes('우리 단어로만'), '방장이 아닌 사람: 우리만의 단어 목록 12개 · "우리 단어로만 출제"', await p2.locator('#settings-summary .sum-word').count());
+
+    // F8 단어 세트 링크: 방장이 "이 단어로 방 만들기 링크" 복사 → 그 링크로 온 사람이 방을 만들면 단어가 채워진다
+    check(await host.locator('#wordset-share').isVisible() && await p2.locator('#btn-wordset-link').isHidden(), '우리만의 단어가 있으면 방장에게 "이 단어로 방 만들기 링크"');
+    await ctxs[0].grantPermissions(['clipboard-read', 'clipboard-write'], { origin: URL });
+    await host.click('#btn-wordset-link');
+    await sleep(300);
+    const wsText = await host.evaluate(() => navigator.clipboard.readText());
+    const wsUrl = (wsText.match(/https?:\/\/\S+#ws=[A-Za-z0-9_-]+/) || [])[0];
+    check(!!wsUrl && wsText.includes('단어 세트 12개') && (await host.textContent('#toasts')).includes('단어 세트 링크를 복사했어요'), '단어 세트 링크 복사: 문구 + #ws= 주소', wsText.slice(0, 60));
+    const wsCtx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    const toRoomStep = async (pg, nickName, url) => {
+      pg.on('pageerror', (e) => { console.log(`[${nickName}] pageerror: ${e.message}`); failures++; });
+      await pg.goto(url);
+      await pg.waitForSelector('#landing-step-profile:not([hidden]), #landing-step-room:not([hidden])', { timeout: 5000 });
+      if (await pg.locator('#landing-step-profile').isVisible()) { await pg.fill('#nick', nickName); await pg.click('#btn-profile-next'); }
+      await pg.waitForSelector('#landing-step-room:not([hidden])', { timeout: 3000 });
+    };
+    if (wsUrl) {
+      const wp = await wsCtx.newPage();
+      await toRoomStep(wp, '세트손님', wsUrl);
+      check(!wp.url().includes('#ws='), '받은 쪽: 주소에서 #ws= 지움', wp.url());
+      const wcNote = await wp.textContent('#wordset-card-note');
+      check(await wp.locator('#wordset-card').isVisible() && wcNote.includes('단어 12개') && wcNote.includes('이 단어로만') && !(await wp.textContent('#wordset-card')).includes('자전거'), '받은 쪽: "받은 단어 세트" 카드(개수만, 단어는 안 보임)', wcNote);
+      check(await wp.evaluate(() => document.getElementById('wordset-card').nextElementSibling.id === 'btn-create'), '받은 단어 세트 카드는 "방 만들기" 바로 위');
+      await wp.click('#btn-create');
+      await wp.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
+      await wp.waitForFunction(() => window.__dg.state.settings.customWords.split(',').length === 12 && window.__dg.state.settings.customWordsOnly === true, null, { timeout: 3000 }).catch(() => {});
+      const wsSet = await wp.evaluate(() => ({ s: window.__dg.state.settings, left: sessionStorage.getItem('drawguess.wordSetLink') }));
+      check(wsSet.s.customWords.split(',').length === 12 && wsSet.s.customWords.startsWith('자전거') && wsSet.s.customWordsOnly === true && wsSet.left === null, '링크로 만든 방: 우리만의 단어 12개 · 우리 단어만 · 서버 동기화 · 한 번만 쓰고 지움', JSON.stringify({ cw: wsSet.s.customWords.slice(0, 20), only: wsSet.s.customWordsOnly }));
+      // "안 쓸래" → 카드 사라지고 방은 기본 단어로
+      const wp2 = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage(); // 새 컨텍스트: 같은 컨텍스트면 방금 만든 방으로 자동 재접속한다
+      await toRoomStep(wp2, '세트손님2', wsUrl);
+      await wp2.click('#btn-wordset-card-drop');
+      check(await wp2.locator('#wordset-card').isHidden() && await wp2.evaluate(() => sessionStorage.getItem('drawguess.wordSetLink') === null), '"안 쓸래" → 받은 단어 세트 카드 숨김 · 기억 지움');
+      await wp2.context().close();
+    }
+    // 망가진 링크: 카드 없이 안내만
+    const wp3 = await (await browser.newContext({ viewport: { width: 1280, height: 860 } })).newPage();
+    await toRoomStep(wp3, '세트손님3', URL + '/#ws=bm90LWpzb24');
+    check(await wp3.locator('#wordset-card').isHidden() && (await wp3.textContent('#toasts')).includes('단어 세트 링크를 읽지 못했어요'), '망가진 #ws= 링크: 카드 없음 · 안내 토스트');
+    await wsCtx.close();
+    await wp3.context().close();
     // 채팅: 닉네임 위 · 내용 아래
     await p2.fill('#chat-input', '긴 닉네임이어도 내용 폭이 줄지 않아요');
     await p2.press('#chat-input', 'Enter');
