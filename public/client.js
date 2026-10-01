@@ -1853,17 +1853,14 @@
   function renderModePanel() {
     var mp = $('mode-panel'); if (!mp) return;
     var host = isHost();
-    // 이어 그리기: 접속 인원이 3~6명(ALLOW_SOLO 서버는 2명부터)일 때만 고를 수 있다. 인원이 바뀌면 room:state 로 즉시 갱신
-    var n = onlineCount(), relayOut = n < relayMin() ? relayMin() + '명부터 할 수 있어요' : n > RELAY_MAX ? RELAY_MAX + '명까지 할 수 있어요' : '';
+    // 이어 그리기 카드도 인원과 상관없이 방장이 고를 수 있다. 인원이 안 맞으면 설정 화면의 시작 버튼만 잠기고 안내가 나온다
     mp.querySelectorAll('.mode-card').forEach(function (b) {
       var mode = b.getAttribute('data-mode');
       b.classList.toggle('selected', mode === state.settings.mode);
-      var off = mode === 'relay' && !!relayOut;
-      b.disabled = !host || off;
-      b.classList.toggle('unavailable', off);
+      b.disabled = !host;
       if (mode === 'relay') {
         var meta = b.querySelector('.mode-meta');
-        if (meta) meta.textContent = relayOut || '함께 한 그림 · ' + relayMin() + '~' + RELAY_MAX + '명';
+        if (meta) meta.textContent = '함께 한 그림 · ' + relayMin() + '~' + RELAY_MAX + '명';
       }
     });
     var hint = $('mode-hint');
@@ -1990,8 +1987,8 @@
     }
     if (hint) {
       hint.textContent = viewing.length ? '결과 화면을 보고 있는 사람이 있어요: ' + viewing.join(', ')
-        : !enough ? (relay ? '이어 그리기는 ' + need + '명부터 할 수 있어요' : '플레이어가 ' + need + '명 이상이어야 시작할 수 있어요')
-        : tooMany ? '이어 그리기는 ' + RELAY_MAX + '명까지 할 수 있어요'
+        : !enough ? (relay ? '이어 그리기는 ' + need + '명부터 할 수 있어요 (지금 ' + onlineCount() + '명)' : '플레이어가 ' + need + '명 이상이어야 시작할 수 있어요')
+        : tooMany ? '이어 그리기는 ' + RELAY_MAX + '명까지 할 수 있어요 (지금 ' + onlineCount() + '명)'
         : !drawerOk ? '출제자가 접속 중이어야 시작할 수 있어요'
         : (isHost() ? (fixed && fd ? '✏️ ' + fd.name + '님이 ' + s.rounds + '개의 단어를 그려요' : blitz ? '⚡ 단어는 자동으로 정해지고 ' + s.drawTime + '초씩, 힌트 없음. 1등 400 · 2등 300 · 3등 200점'
           : relay ? '🖍 ' + (onlineCount() - 1) + '명이 ' + s.drawTime + '초씩 이어 그리고 1명이 맞혀요. 모두 한 번씩 맞히면 끝' : '') : '호스트가 게임을 시작하면 바로 시작돼요');

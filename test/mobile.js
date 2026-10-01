@@ -458,6 +458,7 @@ async function relayRun() {
     await m.waitForFunction(() => window.__dg.state.players.length === 3, null, { timeout: 5000 });
     await m.click('#mode-panel .mode-card[data-mode="relay"]');
     await m.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
+    check(await m.locator('#btn-start').isEnabled(), 'relay 360px: 3명이면 시작 버튼 풀림');
     await m.click('#settings-details > summary');
     await m.selectOption('#set-drawTime', '15');
     await sleep(400);

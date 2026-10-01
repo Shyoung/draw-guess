@@ -796,9 +796,6 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 /* 주자끼리 채팅(맞히는 사람은 못 본다) */
 .msg-runner { background: var(--amber-soft); color: #7a4a00; }
 .msg-tag { margin-left: 6px; font-size: 10px; font-weight: 800; padding: 0 6px; border-radius: 8px; background: rgba(122, 74, 0, .1); vertical-align: 1px; }
-/* 모드 카드: 인원이 맞지 않으면 비활성 + 이유 */
-.mode-card.unavailable { opacity: .55; }
-.mode-card.unavailable .mode-meta { color: var(--red); }
 /* 내 차례 배너: 1.5초. 입력은 막지 않는다(pointer-events: none) */
 .relay-banner { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 20px; background: rgba(43, 45, 66, .32); pointer-events: none; }
 .relay-banner[hidden] { display: none; }

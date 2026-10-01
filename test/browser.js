@@ -97,7 +97,7 @@ async function say(page, text) {
 }
 
 /**
- * 이어 그리기(relay) 주자 화면 시나리오(R4 — R5·R6 에서 넓힌다): 새 방 2명 → 카드 비활성 · 7명이면 비활성 → 3명이 되면 활성 →
+ * 이어 그리기(relay) 주자 화면 시나리오(R4 — R5·R6 에서 넓힌다): 새 방 2명 → 카드는 선택 가능 · 시작 버튼 잠김 + 안내(지금 n명) · 7명이어도 잠김 → 3명이 되면 시작 버튼 풀림 →
  * 설정 화면 라벨(한 명당 시간 · 최대 힌트, 라운드·힌트 시점 숨김) → 첫 주자에게 조합 후보(' · ') → 첫 주자 "내 차례!" 배너 · 진동 ·
  * 툴바 활성 · 다른 주자 툴바 잠김 · 차례 전 주자와 맞히는 사람은 마스크(' · ') → 상단 띠 → 주자 채팅은 주자끼리 →
  * 구간 교대(game:baton): 앞 주자 툴바 잠김 · "다음은 ○○님" · 새 주자 배너 · 제시어 공개 · 앞사람 그림 되돌리기 불가 →
@@ -113,25 +113,35 @@ async function relayScenario(browser) {
   await pa.waitForFunction(() => window.__dg.state.players.length === 2, null, { timeout: 3000 }).catch(() => {});
   const card = '#mode-panel .mode-card[data-mode="relay"]';
   const solo = await pa.evaluate(() => window.__dg.state.allowSolo);
+  const meta0 = await pa.textContent(card + ' .mode-meta');
+  check(await pa.locator(card).isEnabled() && meta0.includes('~6명'), 'relay: 2명이어도 카드는 선택 가능 · "함께 한 그림 · n~6명"', meta0);
+  check(await pb.locator(card).isDisabled(), 'relay: 방장이 아니면 카드 비활성');
   if (!solo) {
-    check(await pa.locator(card).isDisabled() && (await pa.textContent(card + ' .mode-meta')).includes('3명부터 할 수 있어요'), 'relay: 2명이면 카드 비활성 · "3명부터 할 수 있어요"', await pa.textContent(card + ' .mode-meta'));
+    // 혼자 아닌 2명: 카드를 눌러 설정 화면으로 넘어가면 시작 버튼만 잠기고 안내에 지금 인원이 붙는다
+    await pa.click(card);
+    await pa.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
+    check(await pa.locator('#btn-start').isDisabled() && (await pa.textContent('#start-hint')).includes('이어 그리기는 3명부터 할 수 있어요 (지금 2명)'), 'relay: 2명이면 시작 버튼 잠김 · 안내 "3명부터 할 수 있어요 (지금 2명)"', await pa.textContent('#start-hint'));
+    check((await pb.textContent('#start-hint')).includes('이어 그리기는 3명부터 할 수 있어요 (지금 2명)'), 'relay: 비방장 화면도 같은 안내', await pb.textContent('#start-hint'));
+    // 7명 이상: 화면 상태에만 가짜 접속자를 넣어 본다(바로 원래대로 되돌린다)
+    const seven = await pa.evaluate((sel) => {
+      const st = window.__dg.state, keep = st.players.slice();
+      for (let i = 0; i < 5; i++) st.players.push({ id: 'fake' + i, name: '가짜' + i, avatar: { emoji: '🐱', color: '#ff6b6b' }, score: 0, connected: true });
+      window.__dg.renderAll();
+      const r = { disabled: document.getElementById('btn-start').disabled, hint: document.getElementById('start-hint').textContent };
+      st.players = keep; window.__dg.renderAll();
+      return r;
+    }, card);
+    check(seven.disabled && seven.hint.includes('이어 그리기는 6명까지 할 수 있어요 (지금 7명)'), 'relay: 7명이면 시작 버튼 잠김 · 안내 "6명까지 할 수 있어요 (지금 7명)"', seven.hint);
+    await pa.click('#btn-mode-back');
+    await pa.waitForSelector('#mode-panel:not([hidden])', { timeout: 3000 });
   }
-  // 7명 이상: 화면 상태에만 가짜 접속자를 넣어 카드가 잠기는지 본다(바로 원래대로 되돌린다)
-  const seven = await pa.evaluate((sel) => {
-    const st = window.__dg.state, keep = st.players.slice();
-    for (let i = 0; i < 5; i++) st.players.push({ id: 'fake' + i, name: '가짜' + i, avatar: { emoji: '🐱', color: '#ff6b6b' }, score: 0, connected: true });
-    window.__dg.renderAll();
-    const b = document.querySelector(sel), r = { disabled: b.disabled, meta: b.querySelector('.mode-meta').textContent };
-    st.players = keep; window.__dg.renderAll();
-    return r;
-  }, card);
-  check(seven.disabled && seven.meta.includes('6명까지'), 'relay: 7명이면 카드 비활성 · "6명까지 할 수 있어요"', seven.meta);
   const pc = await joinAs(rctx[2], '릴레이C', rcode);
-  await pa.waitForFunction((sel) => !document.querySelector(sel).disabled, card, { timeout: 3000 }).catch(() => {});
-  check(await pa.locator(card).isEnabled() && (await pa.textContent(card + ' .mode-meta')).includes('~6명') && (await pa.textContent(card + ' .mode-desc')).includes('이어 그리고 한 명이 맞혀요'), 'relay: 3명이 되면 카드 활성 · 문구', await pa.textContent(card + ' .mode-meta'));
+  await pa.waitForFunction(() => window.__dg.state.players.length === 3, null, { timeout: 3000 }).catch(() => {});
+  check(await pa.locator(card).isEnabled() && (await pa.textContent(card + ' .mode-desc')).includes('이어 그리고 한 명이 맞혀요'), 'relay: 카드 문구', await pa.textContent(card + ' .mode-meta'));
   await pa.click(card);
   await pb.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
   await pb.waitForFunction(() => window.__dg.state.settings.mode === 'relay', null, { timeout: 3000 }).catch(() => {});
+  check(await pa.locator('#btn-start').isEnabled() && (await pa.textContent('#start-hint')).includes('2명이'), 'relay: 3명이 되면 시작 버튼 풀림', await pa.textContent('#start-hint'));
   check(await pb.evaluate(() => { const s = window.__dg.state.settings; return s.mode === 'relay' && s.drawTime === 20 && s.hints === 3; }), 'relay 카드: 프리셋 한 명당 20초 · 힌트 3 동기화');
   await pa.click('#settings-details > summary');
   const lay = await pa.evaluate(() => ({
@@ -399,8 +409,8 @@ async function relayScenario(browser) {
 }
 
 /**
- * relay 카드 인원 규칙(R6): ALLOW_SOLO 서버(스테이징·개발)는 2명부터 활성, 일반 서버(프로덕션)는 3명부터.
- * 일반 서버의 2명 비활성은 relayScenario 가, 여기서는 ALLOW_SOLO 서버를 따로 띄워 2명이면 카드가 켜지고 시작까지 되는지 본다.
+ * relay 카드 인원 규칙(R7): 카드는 인원과 무관하게 선택 가능, 시작 버튼은 ALLOW_SOLO 서버(스테이징·개발)는 2명부터, 일반 서버(프로덕션)는 3명부터.
+ * 일반 서버의 3명 미만 잠금은 relayScenario 가, 여기서는 ALLOW_SOLO 서버를 따로 띄워 혼자일 땐 잠기고 2명이면 풀리는지 본다.
  */
 async function soloRelayCardScenario(browser) {
   const SOLO_PORT = PORT + 11;
@@ -412,12 +422,17 @@ async function soloRelayCardScenario(browser) {
     const code = (await pa.textContent('#room-code')).trim().replace(/[^A-Z]/g, '');
     const card = '#mode-panel .mode-card[data-mode="relay"]';
     check(await pa.evaluate(() => window.__dg.state.allowSolo === true), 'ALLOW_SOLO 서버: state.allowSolo true');
-    check(await pa.locator(card).isDisabled(), 'ALLOW_SOLO 서버: 1명이면 relay 카드 비활성(주자가 0명)', await pa.textContent(card + ' .mode-meta'));
+    check(await pa.locator(card).isEnabled(), 'ALLOW_SOLO 서버: 혼자여도 relay 카드 선택 가능', await pa.textContent(card + ' .mode-meta'));
+    await pa.click(card);
+    await pa.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
+    check(await pa.locator('#btn-start').isDisabled() && (await pa.textContent('#start-hint')).includes('이어 그리기는 2명부터 할 수 있어요 (지금 1명)'), 'ALLOW_SOLO 서버: 혼자면 시작 버튼 잠김 · "2명부터 할 수 있어요 (지금 1명)"', await pa.textContent('#start-hint'));
+    await pa.click('#btn-mode-back');
+    await pa.waitForSelector('#mode-panel:not([hidden])', { timeout: 3000 });
     await joinAs(ctx[1], '솔로B', code, soloUrl);
     await pa.waitForFunction(() => window.__dg.state.players.length === 2, null, { timeout: 3000 }).catch(() => {});
     await pa.waitForFunction((sel) => !document.querySelector(sel).disabled, card, { timeout: 3000 }).catch(() => {});
     const meta = await pa.textContent(card + ' .mode-meta');
-    check(await pa.locator(card).isEnabled() && meta.includes('2~6명'), 'ALLOW_SOLO 서버: 2명이면 relay 카드 활성 · "2~6명"', meta);
+    check(await pa.locator(card).isEnabled() && meta.includes('2~6명'), 'ALLOW_SOLO 서버: relay 카드 "2~6명"', meta);
     await pa.click(card);
     await pa.waitForFunction(() => window.__dg.state.settings.mode === 'relay', null, { timeout: 3000 }).catch(() => {});
     check(await pa.evaluate(() => window.__dg.state.settings.mode === 'relay'), 'ALLOW_SOLO 서버: 2명으로 relay 모드 선택');
