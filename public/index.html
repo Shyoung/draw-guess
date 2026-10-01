@@ -348,23 +348,24 @@
                   <span>단어 목록 <small>(쉼표로 구분, 각 1~20자)</small></span>
                   <textarea id="set-customWords" rows="3" placeholder="예) 사과, 자전거, 무지개"></textarea>
                 </label>
+                <div class="wordset-row">
                 <div id="wordset-tools" class="wordset-tools" hidden>
-                  <select id="wordset-load" aria-label="내 세트 불러오기" hidden></select>
-                  <button id="btn-wordset-save" class="btn btn-ghost btn-sm" type="button">💾 현재 단어를 세트로 저장</button>
+                  <button id="btn-wordset-load" class="btn btn-ghost btn-sm" type="button" title="내 세트 불러오기" hidden>📂 불러오기</button>
+                  <button id="btn-wordset-save" class="btn btn-ghost btn-sm" type="button" title="현재 단어를 세트로 저장">💾 저장</button>
                   <div id="wordset-quick" class="wordset-quick" hidden>
                     <input id="ws-quick-name" type="text" maxlength="30" placeholder="세트 이름 (1~30자)" aria-label="새 세트 이름">
                     <button id="btn-ws-quick-save" class="btn btn-secondary btn-sm" type="button">저장</button>
                     <button id="btn-ws-quick-cancel" class="btn btn-ghost btn-sm" type="button">취소</button>
                   </div>
                 </div>
+                <div id="wordset-share" class="wordset-share" hidden>
+                  <button id="btn-wordset-link" class="btn btn-ghost btn-sm" type="button" title="이 단어로 방 만들기 링크 — 링크를 받은 사람이 방을 만들면 이 단어가 채워져요">🔗 방 링크</button>
+                </div>
+                </div>
                 <label class="check">
                   <input id="set-customWordsOnly" type="checkbox">
                   <span>우리 단어만 쓰기 <small>단어가 모자라면 고른 카테고리에서 채워요</small></span>
                 </label>
-                <div id="wordset-share" class="wordset-share" hidden>
-                  <button id="btn-wordset-link" class="btn btn-ghost btn-sm" type="button">🔗 이 단어로 방 만들기 링크</button>
-                  <small>링크를 받은 사람이 방을 만들면 이 단어가 채워져요</small>
-                </div>
               </div>
             </div>
 
@@ -511,6 +512,16 @@
   </main>
 
   <!-- 대기실·게임 중 기기 뒤로가기: 방을 나갈지 묻는다 -->
+  <!-- 대기실 설정 > 내 세트 불러오기: 세트를 고르면 단어가 채워진다(나가기 확인과 같은 .modal-confirm 패턴) -->
+  <div id="overlay-wsload" class="modal modal-confirm" hidden>
+    <div class="modal-card card-wsload" role="dialog" aria-modal="true" aria-labelledby="wsload-title">
+      <header class="modal-head">
+        <h3 id="wsload-title" class="card-title">내 세트 불러오기</h3>
+        <div class="modal-actions"><button id="btn-wsload-close" class="btn btn-ghost btn-sm" type="button">닫기</button></div>
+      </header>
+      <div id="wsload-list" class="wsload-list"></div>
+    </div>
+  </div>
   <div id="overlay-leave" class="modal modal-confirm" hidden>
     <div class="modal-card card-confirm" role="alertdialog" aria-modal="true" aria-labelledby="leave-title" aria-describedby="leave-desc">
       <h3 id="leave-title" class="card-title">방을 나갈까요?</h3>

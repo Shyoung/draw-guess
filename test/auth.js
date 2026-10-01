@@ -601,21 +601,37 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await p.locator('.topbar #btn-account-top').isVisible() && await p.locator('.topbar #btn-room-profile').isVisible(), '방 안(데스크톱): 상단바 "프로필" · "내 정보" 버튼');
     check(await p.locator('#custom-body').isHidden() && await p.locator('#wordset-tools').isHidden(), '설정: 우리만의 단어는 꺼진 채(세트 도구 숨김)');
     await p.click('label[for="set-useCustom"]');
-    check(await p.locator('#wordset-tools').isVisible() && await p.locator('#btn-wordset-save').isVisible(), '우리만의 단어 켜기 → "현재 단어를 세트로 저장" 표시');
-    check(await p.locator('#wordset-load').isVisible() && (await p.locator('#wordset-load option').count()) === 2, '설정: "내 세트 불러오기" 셀렉트(세트 1개)', await p.locator('#wordset-load option').count());
+    check(await p.locator('#wordset-tools').isVisible() && await p.locator('#btn-wordset-save').isVisible(), '우리만의 단어 켜기 → "💾 저장" 표시');
+    check((await p.textContent('#btn-wordset-save')).includes('저장') && (await p.getAttribute('#btn-wordset-save', 'title')) === '현재 단어를 세트로 저장', '저장 버튼: 문구 "💾 저장" + title');
+    {
+      const ys = await p.evaluate(() => ['btn-wordset-load', 'btn-wordset-save'].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)));
+      check(ys[0] === ys[1], '불러오기 · 저장 버튼이 한 줄', JSON.stringify(ys));
+    }
+    check(await p.locator('#btn-wordset-load').isVisible(), '설정: "📂 불러오기" 버튼(세트 1개 이상)');
     await p.waitForFunction(() => window.__dg.state.players.some((pl) => pl.loggedIn), null, { timeout: 3000 }).catch(() => {});
     check(await p.evaluate(() => window.__dg.state.players.some((pl) => pl.id === window.__dg.myId() && pl.loggedIn)), '데이터: players[].loggedIn 은 그대로 받음');
     check((await p.locator('.login-badge').count()) === 0, '플레이어 목록: 로그인해도 ✔ 배지를 그리지 않음');
 
-    // 셀렉트로 불러오기 (텍스트 영역만 채움)
+    // 불러오기 dialog로 불러오기 (텍스트 영역만 채움)
     await p.fill('#set-customWords', '임시');
     await p.locator('#set-customWords').blur();
-    await p.selectOption('#wordset-load', { index: 1 });
+    await p.click('#btn-wordset-load');
+    check(await p.locator('#overlay-wsload').isVisible() && (await p.locator('#wsload-list .wsload-item').count()) === 1, '불러오기 dialog: 세트 1행');
+    await p.keyboard.press('Escape');
+    check(await p.locator('#overlay-wsload').isHidden(), '불러오기 dialog: Esc로 닫힘');
+    await p.click('#btn-wordset-load');
+    await p.locator('#overlay-wsload').click({ position: { x: 4, y: 4 } });
+    check(await p.locator('#overlay-wsload').isHidden(), '불러오기 dialog: 바깥 클릭으로 닫힘');
+    await p.click('#btn-wordset-load');
+    await p.click('#btn-wsload-close');
+    check(await p.locator('#overlay-wsload').isHidden(), '불러오기 dialog: 닫기 버튼');
+    await p.click('#btn-wordset-load');
+    await p.click('#wsload-list .wsload-item');
     await sleep(300);
-    check((await val(p, '#set-customWords')) === '사과, 바나나, 포도', '셀렉트 불러오기: 텍스트 영역 채움', await val(p, '#set-customWords'));
-    check((await val(p, '#wordset-load')) === '', '셀렉트 불러오기: 셀렉트는 기본값으로 복귀');
+    check((await val(p, '#set-customWords')) === '사과, 바나나, 포도', 'dialog 불러오기: 텍스트 영역 채움', await val(p, '#set-customWords'));
+    check(await p.locator('#overlay-wsload').isHidden(), 'dialog 불러오기: 고르면 dialog 닫힘');
     await p.waitForFunction(() => /사과/.test(window.__dg.state.settings.customWords), null, { timeout: 3000 }).catch(() => {});
-    check(await p.evaluate(() => /사과/.test(window.__dg.state.settings.customWords)), '셀렉트 불러오기: room:settings 전송 → state 반영');
+    check(await p.evaluate(() => /사과/.test(window.__dg.state.settings.customWords)), 'dialog 불러오기: room:settings 전송 → state 반영');
 
     // 현재 단어를 세트로 저장 → 그 자리에서 이름만 받는다
     await p.fill('#set-customWords', '고양이, 강아지');
@@ -626,8 +642,11 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check((await p.locator('#toasts .toast').filter({ hasText: '세트 이름' }).count()) >= 1 && await p.locator('#wordset-quick').isVisible(), '현재 단어 저장: 이름 없으면 안내');
     await p.fill('#ws-quick-name', '동물');
     await p.press('#ws-quick-name', 'Enter');
-    await p.waitForFunction(() => document.querySelectorAll('#wordset-load option').length === 3, null, { timeout: 3000 }).catch(() => {});
-    check((await p.locator('#wordset-load option').count()) === 3 && await p.locator('#wordset-quick').isHidden(), '현재 단어 저장: 세트 2개 · 입력칸 닫힘', await p.locator('#wordset-load option').count());
+    await p.waitForFunction(() => window.__mockAuth.tables.word_sets.length >= 2 && document.getElementById('wordset-quick').hidden, null, { timeout: 3000 }).catch(() => {});
+    await p.click('#btn-wordset-load');
+    const nSets = await p.locator('#wsload-list .wsload-item').count();
+    await p.keyboard.press('Escape');
+    check(nSets === 2 && await p.locator('#wordset-quick').isHidden(), '현재 단어 저장: 세트 2개 · 입력칸 닫힘', nSets);
     check(await p.evaluate(() => { const r = window.__mockAuth.tables.word_sets.find((x) => x.name === '동물'); return !!r && JSON.stringify(r.words) === JSON.stringify(['고양이', '강아지']); }), '현재 단어 저장: DB 에 단어 그대로');
 
     // 방 안 프로필 수정(대기실) — 데스크톱 모달
@@ -1179,6 +1198,11 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await m.click('#btn-leave-cancel');
     await m.click('label[for="set-useCustom"]');
     check(await m.locator('#wordset-tools').isVisible(), '모바일 설정: 우리만의 단어 켜면 세트 도구 표시');
+    {
+      const ys = await m.evaluate(() => ['btn-wordset-load', 'btn-wordset-save', 'btn-wordset-link'].map((id) => { const e = document.getElementById(id); return e && e.offsetParent !== null ? Math.round(e.getBoundingClientRect().top) : null; }).filter((v) => v !== null));
+      check(ys.length >= 1 && ys.every((y) => y === ys[0]), '모바일 설정: 세트 도구 버튼들이 한 줄', JSON.stringify(ys));
+      if (process.env.SHOT) await m.locator('.wordset-row').screenshot({ path: process.env.SHOT });
+    }
     check((await m.locator('.login-badge').count()) === 0, '모바일: ✔ 로그인 배지 없음');
     sw = await m.evaluate(() => document.documentElement.scrollWidth);
     check(sw <= 390, '모바일 대기실(로그인): 가로 스크롤 없음', sw);
