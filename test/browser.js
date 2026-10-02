@@ -572,7 +572,7 @@ async function soloRelayCardScenario(browser) {
     // 게임 길이 빠른 선택: 기본 = 보통, 짧게를 누르면 라운드·시간·힌트가 한 번에
     check((await host.getAttribute('#preset-row .preset-btn[data-preset="normal"]', 'aria-checked')) === 'true', '게임 길이: 기본 "보통" 선택');
     check(/3명 × 3라운드 · 최대 약 \d+분/.test(await host.textContent('#settings-estimate')), '예상 시간 표시(인원 × 라운드)', await host.textContent('#settings-estimate'));
-    check(await host.locator('#settings-details').evaluate((d) => !d.open) && await host.locator('#custom-body').isHidden(), '세부 설정 · 우리만의 단어는 접힌 채 시작');
+    check(await host.locator('#settings-details').evaluate((d) => !d.open) && await host.locator('#custom-body').isHidden(), '세부 설정 · 커스텀 단어는 접힌 채 시작');
     check(await p2.locator('#settings-host').isHidden() && await p2.locator('#settings-summary').isVisible() && (await p2.textContent('#settings-summary')).includes('보통'), '방장이 아닌 사람: 설정 요약만', await p2.textContent('#settings-summary'));
     {
       const rc0 = serverMetrics.filter((m) => m.ev === 'room_created' && m.room === code)[0];
@@ -608,12 +608,12 @@ async function soloRelayCardScenario(browser) {
     // 단어를 3음절 이상 사용자 단어로 고정: 1글자 단어가 뽑히면 마스크·근접 정답 검사가 흔들리던 플레이크 제거
     check((await host.textContent('#details-note')) === '직접 설정함' && (await host.getAttribute('#preset-row .preset-btn[aria-checked="true"]', 'data-preset').catch(() => null)) === null, '세부 설정을 바꾸면 "직접 설정함"(빠른 선택 해제)');
     await host.click('label[for="set-useCustom"]');
-    check(await host.locator('#custom-body').isVisible(), '우리만의 단어 쓰기: 켜면 단어 입력 펼침');
+    check(await host.locator('#custom-body').isVisible(), '커스텀 단어 쓰기: 켜면 단어 입력 펼침');
     await host.fill('#set-customWords', '자전거,냉장고,해바라기,고슴도치,선풍기,소방차,다람쥐,무지개,피라미드,헬리콥터,미끄럼틀,아이스크림');
     await host.locator('#set-customWords').blur();
     await host.check('#set-customWordsOnly');
     await sleep(500);
-    check(await host.locator('#cat-block').isHidden(), '우리 단어만 쓰기 + 단어 12개(wordCount 이상) → 기본 단어 카테고리 블록 숨김');
+    check(await host.locator('#cat-block').isHidden(), '커스텀 단어만 쓰기 + 단어 12개(wordCount 이상) → 기본 단어 카테고리 블록 숨김');
     // 방송 모드는 각자 설정(⚙ 설정 창): 방장이 켜도 다른 사람 화면은 그대로
     await host.click('#btn-room-profile');
     await host.waitForSelector('#room-settings-top:not([hidden])', { timeout: 3000 });
@@ -633,10 +633,10 @@ async function soloRelayCardScenario(browser) {
     check((await p2.inputValue('#set-rounds')) === '1', '설정 변경 동기화(rounds=1)', await p2.inputValue('#set-rounds'));
     check((await p2.inputValue('#set-drawTime')) === '30', '설정 변경 동기화(drawTime=30)', await p2.inputValue('#set-drawTime'));
     await p2.waitForFunction(() => document.querySelectorAll('#settings-summary .sum-word').length === 12, null, { timeout: 3000 }).catch(() => {});
-    check((await p2.locator('#settings-summary .sum-word').count()) === 12 && (await p2.textContent('#settings-summary .sum-words-title')).includes('우리 단어로만'), '방장이 아닌 사람: 우리만의 단어 목록 12개 · "우리 단어로만 출제"', await p2.locator('#settings-summary .sum-word').count());
+    check((await p2.locator('#settings-summary .sum-word').count()) === 12 && (await p2.textContent('#settings-summary .sum-words-title')).includes('커스텀 단어로만'), '방장이 아닌 사람: 커스텀 단어 목록 12개 · "커스텀 단어로만 출제"', await p2.locator('#settings-summary .sum-word').count());
 
     // F8 단어 세트 링크: 방장이 "이 단어로 방 만들기 링크" 복사 → 그 링크로 온 사람이 방을 만들면 단어가 채워진다
-    check(await host.locator('#wordset-share').isVisible() && await p2.locator('#btn-wordset-link').isHidden(), '우리만의 단어가 있으면 방장에게 "이 단어로 방 만들기 링크"');
+    check(await host.locator('#wordset-share').isVisible() && await p2.locator('#btn-wordset-link').isHidden(), '커스텀 단어가 있으면 방장에게 "이 단어로 방 만들기 링크"');
     await ctxs[0].grantPermissions(['clipboard-read', 'clipboard-write'], { origin: URL });
     await host.click('#btn-wordset-link');
     await sleep(300);
@@ -662,7 +662,7 @@ async function soloRelayCardScenario(browser) {
       await wp.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
       await wp.waitForFunction(() => window.__dg.state.settings.customWords.split(',').length === 12 && window.__dg.state.settings.customWordsOnly === true, null, { timeout: 3000 }).catch(() => {});
       const wsSet = await wp.evaluate(() => ({ s: window.__dg.state.settings, left: sessionStorage.getItem('drawguess.wordSetLink') }));
-      check(wsSet.s.customWords.split(',').length === 12 && wsSet.s.customWords.startsWith('자전거') && wsSet.s.customWordsOnly === true && wsSet.left === null, '링크로 만든 방: 우리만의 단어 12개 · 우리 단어만 · 서버 동기화 · 한 번만 쓰고 지움', JSON.stringify({ cw: wsSet.s.customWords.slice(0, 20), only: wsSet.s.customWordsOnly }));
+      check(wsSet.s.customWords.split(',').length === 12 && wsSet.s.customWords.startsWith('자전거') && wsSet.s.customWordsOnly === true && wsSet.left === null, '링크로 만든 방: 커스텀 단어 12개 · 커스텀 단어만 · 서버 동기화 · 한 번만 쓰고 지움', JSON.stringify({ cw: wsSet.s.customWords.slice(0, 20), only: wsSet.s.customWordsOnly }));
       {
         const wsCode = await wp.evaluate(() => window.__dg.state.roomCode);
         const rcw = serverMetrics.filter((m) => m.ev === 'room_created' && m.room === wsCode).pop();
