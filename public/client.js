@@ -1583,8 +1583,8 @@
     var dn = playerName(state.drawerId, ui.drawerName || '');
     var key, build;
     if (ph === 'choosing') {
-      key = 'c|' + dn;
-      build = function () { rb.appendChild(el('span', 'rb-who', state.drawerId === myId ? '내가 제시어를 고를 차례예요' : dn + '님이 제시어를 고르고 있어요')); };
+      key = 'c|' + dn + '|' + relayMyTurnNo();
+      build = function () { rb.appendChild(el('span', 'rb-who', state.drawerId === myId ? '내가 제시어를 고를 차례예요' : dn + '님이 제시어를 고르고 있어요' + (relayMyTurnNo() ? ' · 나는 ' + relayMyTurnNo() + '번째' : ''))); };
     } else {
       var next = r.order[r.legIndex + 1], nn = next ? playerName(next, '') : '';
       var leg = ui.legTimeLeft;
@@ -1920,12 +1920,18 @@
     if (lobby) { renderModePanel(); renderSettings(); }
   }
 
-  /** 이어 그리기 상태 띠(맞히는 사람·관전자): "🎯 내가 맞혀요 · 🖍 ○○님이 이어 그리는 중" */
+  /** 이어 그리기 상태 띠(맞히는 사람·관전자): "🖍 ○○님이 이어 그리는 중" / choosing "○○님이 제시어를 고르고 있어요" */
   function relayStatusText(dn) {
     var ph = state.phase;
     if (ph === 'turnEnd') return '⏳ 다음 문제를 준비하고 있어요';
-    var who = isRelayGuesser() ? '🎯 내가 맞혀요 · ' : '👀 관전 중 · ';
-    return who + (ph === 'choosing' ? dn + '님이 제시어를 고르고 있어요' : '🖍 ' + dn + '님이 이어 그리는 중');
+    return ph === 'choosing' ? dn + '님이 제시어를 고르고 있어요' : '🖍 ' + dn + '님이 이어 그리는 중';
+  }
+
+  /** 이어 그리기 choosing 중 첫 주자가 아닌 주자의 순번(n번째). 해당 없으면 0 — drawing 의 "나는 n번째"와 같은 계산(order 위치 + 1) */
+  function relayMyTurnNo() {
+    if (!inRelay() || !state.relay || state.phase !== 'choosing' || !isRunner() || isDrawer()) return 0;
+    var i = state.relay.order.indexOf(myId);
+    return i > 0 ? i + 1 : 0;
   }
 
   /** 이어 그리기: 차례가 아닌 주자의 툴바에 잠김 표시 "🔒 ○○님 차례예요" */
@@ -1936,7 +1942,7 @@
     lk.hidden = !locked;
     if (!locked) return;
     var dn = playerName(state.drawerId, ui.drawerName || ''), mine = r.order.indexOf(myId);
-    lk.textContent = state.phase === 'choosing' ? '🔒 ' + dn + '님이 제시어를 고르고 있어요'
+    lk.textContent = state.phase === 'choosing' ? '🔒 ' + dn + '님이 제시어를 고르고 있어요' + (relayMyTurnNo() ? ' · 나는 ' + relayMyTurnNo() + '번째' : '')
       : mine > r.legIndex ? '🔒 ' + dn + '님 차례예요 · 나는 ' + (mine + 1) + '번째'
       : '🔒 ' + dn + '님이 이어 그리는 중';
   }
@@ -2139,8 +2145,10 @@
         var rn = $('choosing-relay-note');
         if (rn) {
           // 이어 그리기: 첫 주자는 조합을 다 그리지 않아도 된다 — 뒤 주자가 이어 그린다
-          rn.hidden = !(relayC && mine);
-          if (!rn.hidden) rn.textContent = state.relay.legCount > 1 ? '한 명당 ' + (state.settings.drawTime) + '초씩 ' + state.relay.legCount + '명이 이어 그려요. 다 못 그려도 괜찮아요' : state.settings.drawTime + '초 동안 그려요';
+          var myNo = relayC ? relayMyTurnNo() : 0;
+          rn.hidden = !(relayC && (mine || myNo));
+          if (!rn.hidden && !mine) rn.textContent = '나는 ' + myNo + '번째로 그려요';
+          else if (!rn.hidden) rn.textContent = state.relay.legCount > 1 ? '한 명당 ' + (state.settings.drawTime) + '초씩 ' + state.relay.legCount + '명이 이어 그려요. 다 못 그려도 괜찮아요' : state.settings.drawTime + '초 동안 그려요';
         }
         if (wait) wait.hidden = !!mine;
         var viaWindow = !!(mine && desktopStreamer() && wordWindowOpen()); // 단어 창에서 고른다: 메인에는 후보를 아예 안 그린다

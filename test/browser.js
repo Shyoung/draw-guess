@@ -193,6 +193,21 @@ async function relayScenario(browser) {
   if (!chooser) return;
   check((await chooser.textContent('#choosing-title')).includes('단어 2개를 골라'), 'relay: 후보 창 제목 "단어 2개를 골라주세요!"', await chooser.textContent('#choosing-title'));
   for (const pg of pages) if (pg !== chooser) check(!(await pg.locator('#overlay-choosing').textContent()).includes(word), 'relay: 다른 사람 화면에 후보 노출 없음');
+  // #23: choosing 중 첫 주자가 아닌 주자에게 "나는 n번째" (툴바 잠김·상단 띠·후보 창 한 줄), 맞히는 사람·첫 주자는 없음
+  {
+    let seenLater = 0;
+    for (const pg of pages) {
+      const v = await pg.evaluate(() => {
+        const s = window.__dg.state, i = s.relay ? s.relay.order.indexOf(window.__dg.myId()) : -1;
+        const g = (id) => { const e = document.getElementById(id); return e && !e.hidden ? e.textContent : ''; };
+        return { i, lock: g('toolbar-lock'), band: g('relay-band'), note: g('choosing-relay-note'), status: g('draw-status-text') };
+      });
+      if (pg === chooser) continue;
+      if (v.i > 0) { seenLater++; check(v.lock.includes('나는 ' + (v.i + 1) + '번째') && v.band.includes('나는 ' + (v.i + 1) + '번째') && v.note.includes('나는 ' + (v.i + 1) + '번째로 그려요'), 'relay choosing: 뒤 주자에게 "나는 n번째" (툴바·상단 띠·후보 창)', JSON.stringify(v)); }
+      else check(!v.lock.includes('번째') && !v.band.includes('번째') && !v.note.includes('번째') && !v.status.includes('번째'), 'relay choosing: 맞히는 사람은 "나는 n번째" 없음', JSON.stringify(v));
+    }
+    check(seenLater >= 1, 'relay choosing: 뒤 주자가 한 명 이상 확인됨', seenLater);
+  }
   // 2개 고르기: 누르면 선택(고른 순서 번호) · 다시 누르면 해제 · 2개를 고르면 "이 두 개로 그리기" · 3번째는 안내만
   const pickView = () => chooser.evaluate(() => ({
     picked: [...document.querySelectorAll('#word-options .pick-option.picked')].map((b) => b.querySelector('.pick-num').textContent + ':' + b.querySelector('.pick-text').textContent),
@@ -271,7 +286,7 @@ async function relayScenario(browser) {
   });
   const h0 = await hintView(guesser);
   check(h0.shown && !h0.disabled && h0.text.includes('초성 힌트 (남은 3회 · −25%)') && h0.below, 'relay 맞히는 사람: 마스크 아래 "초성 힌트 (남은 3회 · −25%)" 버튼(활성)', JSON.stringify(h0));
-  check(h0.status.includes('🎯') && h0.status.includes(nickOf(first)), 'relay 맞히는 사람: 상태 띠 "🎯 내가 맞혀요 · 🖍 ○○님이 이어 그리는 중"', h0.status);
+  check(!h0.status.includes('🎯') && !h0.status.includes('관전 중') && h0.status.includes('🖍') && h0.status.includes(nickOf(first)), 'relay 맞히는 사람: 상태 띠 "🖍 ○○님이 이어 그리는 중"만("내가 맞혀요" 없음)', h0.status);
   check(!(await hintView(first)).shown && !(await hintView(second)).shown, 'relay: 주자에게는 힌트 버튼 없음');
   // R10: 처음 맞히는 사람이 되면 힌트 버튼 바로 아래 안내 말풍선(한 번, 게스트는 'guest' 로 기록)
   const tipView = (pg) => pg.evaluate(() => {

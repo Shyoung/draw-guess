@@ -526,7 +526,7 @@ async function relayRun() {
       'relay 360px 힌트 말풍선: 헤더 힌트 버튼 바로 아래 · 화면 안(좌우 넘침 없음)', JSON.stringify(tip));
     await m.screenshot({ path: require('path').join(__dirname, 'shots', 'm-relay-hint-tip.png') }).catch(() => {});
     check((await m.textContent('#btn-relay-hint')).includes('힌트 3 · −25%') && (await m.getAttribute('#btn-relay-hint', 'aria-label')).includes('초성 힌트 (남은 3회 · −25%)'), 'relay 360px: 짧은 문구 "힌트 3 · −25%"(aria-label 은 전체)', await m.textContent('#btn-relay-hint'));
-    check(inRect(await box(m, '#canvas'), RW, RH) && inRect(await box(m, '#chat-input'), RW, RH) && (await m.textContent('#draw-status-text')).includes('🎯'), 'relay 360px 맞히는 사람: 캔버스·입력창 화면 안 · 상태 띠 🎯');
+    check(inRect(await box(m, '#canvas'), RW, RH) && inRect(await box(m, '#chat-input'), RW, RH) && (await m.textContent('#draw-status-text')).includes('이어 그리는 중'), 'relay 360px 맞히는 사람: 캔버스·입력창 화면 안 · 상태 띠 "이어 그리는 중"');
     await m.locator('#btn-relay-hint').tap();
     await m.waitForFunction(() => window.__dg.ui.relayInfo && window.__dg.ui.relayInfo.hintsUsed === 1, null, { timeout: 3000 }).catch(() => {});
     await sleep(150);
