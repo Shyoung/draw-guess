@@ -91,6 +91,25 @@ async function drawScribble(page) {
   await page.mouse.up();
 }
 
+/** 대기실 − / + 설정을 value 가 될 때까지 누른다(최대 30번). 끝값이면 멈춘다 */
+async function setStep(page, key, value) {
+  for (let i = 0; i < 30; i++) {
+    const cur = Number(await page.getAttribute(`#set-${key}`, 'data-value'));
+    if (cur === value) return true;
+    const btn = page.locator(`#set-${key} ${cur < value ? '.step-inc' : '.step-dec'}`);
+    if (await btn.isDisabled()) return false;
+    await btn.click();
+  }
+  return false;
+}
+/** 대기실 − / + 설정 상태 { v, dec, inc }(dec·inc = 버튼이 눌리는가) */
+async function stepState(page, key) {
+  return page.evaluate((k) => {
+    const b = document.getElementById('set-' + k);
+    return { v: Number(b.getAttribute('data-value')), text: b.querySelector('.step-val').textContent, dec: !b.querySelector('.step-dec').disabled, inc: !b.querySelector('.step-inc').disabled };
+  }, key);
+}
+
 async function say(page, text) {
   await page.fill('#chat-input', text);
   await page.press('#chat-input', 'Enter');
@@ -158,28 +177,45 @@ async function relayScenario(browser) {
   await pb.waitForFunction(() => window.__dg.state.settings.mode === 'relay', null, { timeout: 3000 }).catch(() => {});
   check(await pa.locator('#btn-start').isEnabled() && (await pa.textContent('#start-hint')).includes('2명이'), 'relay: 3명이 되면 시작 버튼 풀림', await pa.textContent('#start-hint'));
   check(await pb.evaluate(() => { const s = window.__dg.state.settings; return s.mode === 'relay' && s.drawTime === 20 && s.hints === 3; }), 'relay 카드: 프리셋 한 명당 20초 · 힌트 3 동기화');
-  await pa.click('#settings-details > summary');
+  // 이어 그리기: ① "한 명당 시간" 하나 + "문제 수 = 인원(n명)" 글 · ③ 제시어 후보 · 최대 힌트(마지막 힌트 시점 숨김)
+  check(await pa.locator('#diff-body').isHidden() && (await pa.textContent('#diff-note')) === '제시어 후보 6개 · 최대 힌트 3번', 'relay 설정: 난이도는 접힌 채 요약 "제시어 후보 6개 · 최대 힌트 3번"', await pa.textContent('#diff-note'));
+  await pa.click('#btn-diff-toggle');
   const lay = await pa.evaluate(() => ({
-    rounds: document.getElementById('set-rounds').closest('.setting').hidden,
-    hintEndAt: document.getElementById('set-hintEndAt').closest('.setting').hidden,
-    dt: document.getElementById('set-drawTime-label').textContent, hl: document.getElementById('set-hints-label').textContent,
+    rounds: document.getElementById('row-rounds').hidden, hintEndAt: document.getElementById('row-hintEndAt').hidden,
+    note: document.getElementById('relay-turns-note').hidden ? null : document.getElementById('relay-turns-note').textContent,
+    dt: document.getElementById('set-drawTime-label').textContent, hl: document.getElementById('set-hints-label').textContent, wl: document.getElementById('set-wordCount-label').textContent,
     badge: document.getElementById('mode-badge').textContent,
   }));
-  check(lay.rounds && lay.hintEndAt && lay.dt === '한 명당 시간' && lay.hl === '최대 힌트' && lay.badge.includes('이어 그리기'), 'relay 설정: 라운드·힌트 시점 숨김 · 라벨 바뀜', lay);
-  const wcv = await pa.evaluate(() => ({ opts: [...document.querySelectorAll('#set-wordCount option')].map((o) => o.value).join(','), val: document.getElementById('set-wordCount').value,
-    help: document.getElementById('set-wordCount-help').textContent, s: window.__dg.state.settings.wordCount }));
-  check(wcv.opts === '3,4,5,6,7,8' && wcv.val === '6' && wcv.s === 6 && wcv.help.includes('이 중 2개를 골라 제시어를 만들어요'), 'relay 설정: 단어 후보 수 3~8 · 기본 6 · 도움말 "첫 주자가 이 중 2개를 골라 제시어를 만들어요"', wcv);
+  check(lay.rounds && lay.hintEndAt && lay.note && lay.note.includes('문제 수 = 인원(3명)') && lay.dt === '한 명당 시간' && lay.hl === '최대 힌트' && lay.wl === '제시어 후보' && lay.badge.includes('이어 그리기'), 'relay 설정: 라운드 줄 대신 "문제 수 = 인원(3명)" · 마지막 힌트 시점 숨김 · 라벨 바뀜', lay);
+  const wcv = await stepState(pa, 'wordCount');
+  const wch = await pa.textContent('#set-wordCount-help');
+  check(wcv.v === 6 && wcv.text === '6개' && wcv.dec && wcv.inc && wch.includes('이 중 2개를 골라 제시어를 만들어요'), 'relay 설정: 제시어 후보 기본 6 · 도움말 "첫 주자가 이 중 2개를 골라 제시어를 만들어요"', JSON.stringify(wcv));
+  await setStep(pa, 'wordCount', 8);
+  { const st = await stepState(pa, 'wordCount'); check(st.v === 8 && !st.inc && st.dec, 'relay 설정: 제시어 후보 끝값 8 → + 꺼짐', JSON.stringify(st)); }
+  await setStep(pa, 'wordCount', 3);
+  { const st = await stepState(pa, 'wordCount'); check(st.v === 3 && !st.dec && st.inc, 'relay 설정: 제시어 후보 끝값 3 → − 꺼짐', JSON.stringify(st)); }
+  await setStep(pa, 'wordCount', 6);
   check((await pa.textContent('#settings-estimate')).includes('3명 · 3문제') && !(await pa.textContent('#settings-estimate')).includes('기준'), 'relay 설정: 예상 "3명 · 3문제"(기준 없음)', await pa.textContent('#settings-estimate'));
-  // 구간 교대까지 보려고 가장 짧은 15초로
-  await pa.selectOption('#set-drawTime', '15');
-  await pb.waitForFunction(() => window.__dg.state.settings.drawTime === 15, null, { timeout: 3000 }).catch(() => {});
+  // 구간 교대까지 보려고 가장 짧은 15초로(그리기 시간 첫 값 → − 꺼짐)
+  await setStep(pa, 'drawTime', 15);
+  { const st = await stepState(pa, 'drawTime'); check(st.v === 15 && !st.dec && st.inc, 'relay 설정: 한 명당 시간 15초(끝값) → − 꺼짐', JSON.stringify(st)); }
+  await pb.waitForFunction(() => window.__dg.state.settings.drawTime === 15 && window.__dg.state.settings.wordCount === 6, null, { timeout: 3000 }).catch(() => {});
+  check(await pb.evaluate(() => window.__dg.state.settings.drawTime === 15 && window.__dg.state.settings.wordCount === 6), 'relay 설정: − / + 값 동기화(15초 · 후보 6)');
 
   // data-role 이 바뀔 때마다(같은 값으로 다시 써도) 그때의 phase 와 함께 기록 — 배치 깜빡임 검사
   await Promise.all([pa, pb, pc].map((pg) => pg.evaluate(() => {
     const v = document.getElementById('view-room'); window.__roles = [];
     new MutationObserver(() => window.__roles.push({ role: v.getAttribute('data-role'), ph: v.getAttribute('data-phase') })).observe(v, { attributes: true, attributeFilter: ['data-role', 'data-phase'] });
   })));
-  await pa.click('#btn-start');
+  // 카테고리 창: 방장이 바뀌면(화면 상태만 바꿔 본다) 닫히고, 연 채로 게임이 시작돼도 닫힌다
+  await pa.click('#btn-cat-open');
+  await pa.waitForSelector('#overlay-cats:not([hidden])', { timeout: 3000 });
+  check(await pa.evaluate(() => { const st = window.__dg.state, h = st.hostId; st.hostId = 'someone-else'; window.__dg.renderAll(); const closed = document.getElementById('overlay-cats').hidden; st.hostId = h; window.__dg.renderAll(); return closed; }), '카테고리 창: 방장이 바뀌면 닫힘');
+  await pa.click('#btn-cat-open');
+  await pa.waitForSelector('#overlay-cats:not([hidden])', { timeout: 3000 });
+  await pa.evaluate(() => document.getElementById('btn-start').click()); // 창이 화면을 덮고 있어 직접 누른다
+  await pa.waitForFunction(() => window.__dg.state.phase !== 'lobby', null, { timeout: 5000 }).catch(() => {});
+  check(await pa.locator('#overlay-cats').isHidden(), '카테고리 창: 게임이 시작되면 닫힘');
   const pages = [pa, pb, pc], nicks = ['릴레이A', '릴레이B', '릴레이C'];
   let chooser = null, word = null, optTexts = [], reloaded = null;
   for (let t = 0; t < 40 && !chooser; t++) {
@@ -529,6 +565,37 @@ async function soloRelayCardScenario(browser) {
     await pa.click(card);
     await pa.waitForFunction(() => window.__dg.state.settings.mode === 'relay', null, { timeout: 3000 }).catch(() => {});
     check(await pa.evaluate(() => window.__dg.state.settings.mode === 'relay'), 'ALLOW_SOLO 서버: 2명으로 relay 모드 선택');
+    // 모드별 설정 화면 차이(칸의 뜻은 그대로, 묶음 안에서): 한 명이 그리기 · 속도전 · 돌아가며
+    const pb = (await ctx[1].pages())[0];
+    const pickMode = async (mode) => {
+      await pa.click('#btn-mode-back');
+      await pa.waitForSelector('#mode-panel:not([hidden])', { timeout: 3000 });
+      await pa.click(`#mode-panel .mode-card[data-mode="${mode}"]`);
+      await pa.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
+      await pb.waitForFunction((md) => window.__dg.state.settings.mode === md, mode, { timeout: 3000 }).catch(() => {});
+    };
+    const lenRows = () => pa.evaluate(() => [...document.querySelectorAll('#block-length .set-row')].filter((r) => !r.hidden).map((r) => r.id));
+    await pickMode('fixed');
+    {
+      const rows = await lenRows(), st = await stepState(pa, 'rounds');
+      check(rows.join(',') === 'set-fixedDrawer-wrap,row-rounds,row-drawTime' && (await pa.textContent('#set-rounds-label')) === '문제 수' && st.v === 5, '한 명이 그리기: ① 맨 위 출제자 · 문제 수 5 · 그리기 시간', JSON.stringify([rows, st]));
+      check(await pa.locator('#btn-diff-toggle').isVisible() && (await pa.textContent('#diff-note')) === '후보 3개 · 힌트 2번 · 마지막 힌트 15초 전', '한 명이 그리기: ③ 후보 · 힌트 · 마지막 힌트', await pa.textContent('#diff-note'));
+      check((await pb.textContent('#settings-summary')).includes('5문제'), '한 명이 그리기: 비방장 요약 "5문제"', await pb.textContent('#settings-summary'));
+    }
+    await pa.click('#btn-diff-toggle'); // 펼쳐 둔 채 속도전으로
+    await pickMode('blitz');
+    {
+      const rows = await lenRows();
+      check(rows.join(',') === 'row-rounds,row-drawTime' && (await pa.textContent('#set-rounds-label')) === '라운드' && (await stepState(pa, 'drawTime')).v === 25, '속도전: ① 라운드 · 그리기 시간 25초', JSON.stringify(rows));
+      check((await pa.textContent('#diff-note')) === '힌트 없음 · 단어 자동' && await pa.locator('#btn-diff-toggle').isHidden() && await pa.locator('#diff-body').isHidden(), '속도전: ③ "힌트 없음 · 단어 자동" 한 줄 · 바꾸기 버튼 없음(펼쳐 뒀어도)', await pa.textContent('#diff-note'));
+      const sm = await pb.textContent('#settings-summary');
+      check(sm.includes('5라운드') && sm.includes('힌트 없음') && !/짧게|보통|길게|직접 설정/.test(sm), '속도전: 비방장 요약 "5라운드 · 힌트 없음"(프리셋 칩 없음)', sm);
+    }
+    await pickMode('classic');
+    {
+      const rows = await lenRows();
+      check(rows.join(',') === 'row-rounds,row-drawTime' && await pa.locator('#diff-body').isVisible() && await pa.locator('#row-hintEndAt').isVisible() && await pa.locator('#row-wordCount').isVisible(), '돌아가며: ① 라운드 · 그리기 시간 · ③ 펼침 유지(후보 · 힌트 · 마지막 힌트)', JSON.stringify(rows));
+    }
   } finally {
     await Promise.all(ctx.map((c) => c.close().catch(() => {})));
     solo.kill();
@@ -555,7 +622,7 @@ async function soloRelayCardScenario(browser) {
     check((await host.locator(PLAYER_SEL).count()) === 3, '호스트 화면 플레이어 3명');
     check((await p3.locator(PLAYER_SEL).count()) === 3, '3번째 참가자 화면 플레이어 3명');
     check((await p2.locator('#chat-list').textContent()).includes('지은'), '입장 시스템 메시지 수신');
-    check(await p2.locator('#set-rounds').isDisabled(), '비호스트 설정 비활성');
+    check(await p2.locator('#set-rounds .step-inc').isDisabled() && await p2.locator('#set-rounds .step-dec').isDisabled(), '비호스트 설정 비활성(− / + 꺼짐)');
 
     // 모드 선택 단계: 호스트만 카드 활성, 비호스트는 대기 문구. 기본 모드 카드 선택 → 설정 화면
     check(await host.locator('#mode-panel').isVisible() && await host.locator('#settings-panel').isHidden(), '새 방은 모드 선택 화면부터');
@@ -569,24 +636,69 @@ async function soloRelayCardScenario(browser) {
     check(await host.locator('#btn-mode-back').isVisible() && await p2.locator('#btn-mode-back').isHidden(), '모드 선택으로 돌아가기 버튼은 호스트만');
     check(await host.locator('#set-fixedDrawer-wrap').isHidden(), '기본 모드에서는 출제자 선택 숨김');
 
-    // 게임 길이 빠른 선택: 기본 = 보통, 짧게를 누르면 라운드·시간·힌트가 한 번에
-    check((await host.getAttribute('#preset-row .preset-btn[data-preset="normal"]', 'aria-checked')) === 'true', '게임 길이: 기본 "보통" 선택');
+    // 설정 화면: ① 게임 길이 · ② 단어 · ③ 난이도 세 묶음, 프리셋(짧게·보통·길게) 없음
+    check(await host.evaluate(() => !document.getElementById('preset-row') && !document.querySelector('.preset-btn') && !document.getElementById('settings-details') && !document.querySelector('#settings-panel select:not(#set-fixedDrawer)')), '프리셋·세부 설정·숫자 선택 상자 없음');
+    check(await host.evaluate(() => [...document.querySelectorAll('#settings-host > .set-group .block-title')].map((n) => n.textContent).join('|')) === '게임 길이|단어|난이도', '세 묶음: 게임 길이 · 단어 · 난이도');
     check(/3명 × 3라운드 · 최대 약 \d+분/.test(await host.textContent('#settings-estimate')), '예상 시간 표시(인원 × 라운드)', await host.textContent('#settings-estimate'));
-    check(await host.locator('#settings-details').evaluate((d) => !d.open) && await host.locator('#custom-body').isHidden(), '세부 설정 · 커스텀 단어는 접힌 채 시작');
-    check(await p2.locator('#settings-host').isHidden() && await p2.locator('#settings-summary').isVisible() && (await p2.textContent('#settings-summary')).includes('보통'), '방장이 아닌 사람: 설정 요약만', await p2.textContent('#settings-summary'));
+    {
+      const r0 = await stepState(host, 'rounds'), d0 = await stepState(host, 'drawTime');
+      check(r0.v === 3 && r0.dec && r0.inc && d0.v === 80 && d0.text === '80초' && await host.locator('#row-rounds').isVisible() && await host.locator('#row-drawTime').isVisible(), '게임 길이: 라운드 3 · 그리기 시간 80초가 늘 보임(− / +)', JSON.stringify([r0, d0]));
+    }
+    check(await host.locator('#diff-body').isHidden() && (await host.textContent('#diff-note')) === '후보 3개 · 힌트 2번 · 마지막 힌트 15초 전' && await host.locator('#custom-body').isHidden(), '난이도 · 커스텀 단어는 접힌 채 시작(난이도 요약 한 줄)', await host.textContent('#diff-note'));
+    check((await host.textContent('#cat-note')) === '전체 13개' && await host.locator('#overlay-cats').isHidden(), '카테고리: 요약 "전체 13개" · 창은 닫힌 채', await host.textContent('#cat-note'));
+    {
+      const sumText = await p2.textContent('#settings-summary');
+      check(await p2.locator('#settings-host').isHidden() && await p2.locator('#settings-summary').isVisible() && sumText.includes('3라운드') && sumText.includes('한 턴 80초') && !/짧게|보통|길게|직접 설정/.test(sumText), '방장이 아닌 사람: 설정 요약 칩만(프리셋 칩 없음)', sumText);
+    }
     {
       const rc0 = serverMetrics.filter((m) => m.ev === 'room_created' && m.room === code)[0];
       check(rc0 && rc0.fromWordSetLink === false, '지표: 그냥 만든 방은 room_created.fromWordSetLink false', JSON.stringify(rc0));
     }
-    await host.click('#preset-row .preset-btn[data-preset="short"]');
-    await p2.waitForFunction(() => window.__dg.state.settings.rounds === 2 && window.__dg.state.settings.drawTime === 60 && window.__dg.state.settings.hints === 1, null, { timeout: 3000 }).catch(() => {});
-    check(await p2.evaluate(() => { const s = window.__dg.state.settings; return s.rounds === 2 && s.drawTime === 60 && s.hints === 1; }) && (await p2.textContent('#settings-summary')).includes('짧게'), '짧게: 2라운드 · 60초 · 힌트 1 동기화 · 요약 갱신', await p2.textContent('#settings-summary'));
-    // 기본 단어 카테고리: 처음엔 13개 전부 켜짐(빼는 식) · 하나 끄면 12개 · "모두 해제"는 첫 카테고리만 남김 · 마지막 하나는 못 끔 · "모두 선택"으로 복귀([])
-    check((await host.locator('#cat-row .cat-chip').count()) === 13 && (await host.locator('#cat-row .cat-chip[data-cat="*"]').count()) === 0 && (await host.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 13 && (await host.textContent('#cat-note')).includes('전체'), '기본 단어 카테고리: "전체" 칩 없이 13개 전부 켜진 채 시작');
+    // − / +: 끝값에서 그쪽 버튼이 꺼진다. 누른 값은 바로 다른 사람에게
+    await setStep(host, 'rounds', 1);
+    { const st = await stepState(host, 'rounds'); check(st.v === 1 && !st.dec && st.inc, '라운드 1(끝값) → − 꺼짐 · + 켜짐', JSON.stringify(st)); }
+    await setStep(host, 'rounds', 10);
+    { const st = await stepState(host, 'rounds'); check(st.v === 10 && st.dec && !st.inc, '라운드 10(끝값) → + 꺼짐', JSON.stringify(st)); }
+    await setStep(host, 'drawTime', 180);
+    { const st = await stepState(host, 'drawTime'); check(st.v === 180 && !st.inc, '그리기 시간 180초(끝값) → + 꺼짐', JSON.stringify(st)); }
+    await setStep(host, 'rounds', 1);
+    await setStep(host, 'drawTime', 30);
+    // 빠르게 여러 번 눌러도 앞서 보낸 값의 room:state 가 화면 값을 되돌리지 않는다
+    await host.evaluate(() => { const b = document.querySelector('#set-drawTime .step-inc'); for (let i = 0; i < 4; i++) b.click(); });
+    { const st = await stepState(host, 'drawTime'); check(st.v === 70, '빠르게 + 4번 → 70초(그 자리에서 바로)', JSON.stringify(st)); }
+    await sleep(400);
+    { const st = await stepState(host, 'drawTime'); check(st.v === 70, '빠르게 누른 뒤 room:state 가 와도 70초 유지', JSON.stringify(st)); }
+    await setStep(host, 'drawTime', 30);
+    // ③ 난이도: [바꾸기] → 그 자리에서 펼침. room:state 로 다시 그려도 펼친 채
+    await host.click('#btn-diff-toggle');
+    check(await host.locator('#diff-body').isVisible() && (await host.getAttribute('#btn-diff-toggle', 'aria-expanded')) === 'true', '난이도: 바꾸기 → 펼침(aria-expanded)');
+    await setStep(host, 'hints', 1);
+    await setStep(host, 'hintEndAt', 60);
+    { const st = await stepState(host, 'hintEndAt'); check(st.v === 60 && !st.inc && st.text === '60초 전', '마지막 힌트 60초 전(끝값) → + 꺼짐', JSON.stringify(st)); }
+    await setStep(host, 'hintEndAt', 15);
+    await setStep(host, 'hints', 0);
+    { const st = await stepState(host, 'hints'); check(st.v === 0 && st.text === '없음' && !st.dec && (await host.textContent('#diff-note')) === '후보 3개 · 힌트 없음', '힌트 0 = "없음" · − 꺼짐 · 요약 "후보 3개 · 힌트 없음"', await host.textContent('#diff-note')); }
+    await setStep(host, 'hints', 1);
+    await p2.waitForFunction(() => { const s = window.__dg.state.settings; return s.rounds === 1 && s.drawTime === 30 && s.hints === 1; }, null, { timeout: 3000 }).catch(() => {});
+    await host.evaluate(() => window.__dg.renderAll()); // room:state 로 다시 그린 것과 같다
+    check(await host.locator('#diff-body').isVisible() && (await host.textContent('#diff-note')) === '후보 3개 · 힌트 1번 · 마지막 힌트 15초 전', '난이도: 다시 그려도 펼친 채 · 요약 갱신', await host.textContent('#diff-note'));
+    // ② 카테고리 창: [고르기] → 창(첫 칩에 포커스) · 누르는 즉시 반영 · 닫기 → [고르기]로 포커스 복귀
+    check(await host.locator('#btn-cat-open').isVisible() && await p2.locator('#btn-cat-open').isHidden(), '카테고리 [고르기]는 방장에게만');
+    await host.click('#btn-cat-open');
+    await host.waitForSelector('#overlay-cats:not([hidden])', { timeout: 3000 });
+    check(await host.evaluate(() => document.activeElement && document.activeElement.classList.contains('cat-chip') && document.activeElement.closest('#overlay-cats') !== null) && (await host.textContent('#cats-title')) === '카테고리 고르기', '카테고리 창 열림: 제목 · 첫 칩에 포커스');
+    // Tab 트랩: 창 밖으로 나가지 않는다(Shift+Tab 으로 첫 칸에서 끝 칸으로)
+    await host.focus('#btn-cats-close');
+    await host.keyboard.press('Shift+Tab');
+    check(await host.evaluate(() => document.getElementById('overlay-cats').contains(document.activeElement)), '카테고리 창: Shift+Tab 이 창 안에서 돈다');
+    await host.evaluate(() => document.body.focus());
+    await host.keyboard.press('Tab');
+    check(await host.evaluate(() => document.getElementById('overlay-cats').contains(document.activeElement)), '카테고리 창: 포커스가 밖에 있어도 Tab 은 창 안으로');
+    check((await host.locator('#cat-row .cat-chip').count()) === 13 && (await host.locator('#cat-row .cat-chip[data-cat="*"]').count()) === 0 && (await host.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 13 && (await host.textContent('#cats-note')).includes('전체'), '카테고리 창: "전체" 칩 없이 13개 전부 켜진 채 시작');
     check(await host.locator('#btn-cat-all').isDisabled() && await host.locator('#btn-cat-none').isEnabled() && await p2.locator('#btn-cat-all').isHidden(), '"모두 선택"은 전부 켜져 있으면 비활성 · "모두 해제" 활성 · 비방장에겐 없음');
     await host.click('#cat-row .cat-chip[data-cat="동물"]');
     await p2.waitForFunction(() => window.__dg.state.settings.categories.length === 12, null, { timeout: 3000 }).catch(() => {});
-    check(await p2.evaluate(() => { const c = window.__dg.state.settings.categories; return c.length === 12 && c.indexOf('동물') === -1; }) && (await p2.textContent('#settings-summary')).includes('카테고리 12개') && (await host.getAttribute('#cat-row .cat-chip[data-cat="동물"]', 'aria-pressed')) === 'false' && (await host.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 12 && (await host.textContent('#cat-note')).includes('13개 중 12개') && await host.locator('#btn-cat-all').isEnabled(), '"동물" 끄기 → 12개 동기화 · 요약 "카테고리 12개" · "모두 선택" 활성', await p2.textContent('#settings-summary'));
+    check(await p2.evaluate(() => { const c = window.__dg.state.settings.categories; return c.length === 12 && c.indexOf('동물') === -1; }) && (await p2.textContent('#settings-summary')).includes('카테고리 12개') && (await host.getAttribute('#cat-row .cat-chip[data-cat="동물"]', 'aria-pressed')) === 'false' && (await host.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 12 && (await host.textContent('#cats-note')).includes('13개 중 12개') && (await host.textContent('#cat-note')) === '13개 중 12개' && await host.locator('#btn-cat-all').isEnabled(), '"동물" 끄기 → 즉시 12개 동기화 · 요약 "13개 중 12개" · "모두 선택" 활성', await p2.textContent('#settings-summary'));
     await host.click('#btn-cat-none');
     await p2.waitForFunction(() => JSON.stringify(window.__dg.state.settings.categories) === '["동물"]', null, { timeout: 3000 }).catch(() => {});
     check(await p2.evaluate(() => JSON.stringify(window.__dg.state.settings.categories) === '["동물"]') && (await p2.textContent('#settings-summary')).includes('동물') && (await host.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 1 && await host.locator('#btn-cat-none').isDisabled() && (await host.textContent('#toasts')).includes('동물'), '"모두 해제" → 첫 카테고리 "동물"만 남기고 토스트 · 요약에 이름 표시 · "모두 해제" 비활성', await p2.textContent('#settings-summary'));
@@ -596,17 +708,23 @@ async function soloRelayCardScenario(browser) {
     check(await host.evaluate(() => JSON.stringify(window.__dg.state.settings.categories) === '["동물"]') && (await host.getAttribute('#cat-row .cat-chip[data-cat="동물"]', 'aria-pressed')) === 'true', '마지막 하나는 못 끔(토스트)');
     await host.click('#cat-row .cat-chip[data-cat="음식"]');
     await p2.waitForFunction(() => JSON.stringify(window.__dg.state.settings.categories) === '["동물","음식"]', null, { timeout: 3000 }).catch(() => {});
-    check(await p2.evaluate(() => JSON.stringify(window.__dg.state.settings.categories) === '["동물","음식"]') && (await p2.textContent('#settings-summary')).includes('동물 · 음식'), '"음식" 더하기 → ["동물","음식"] 동기화 · 요약에 이름 나열(3개 이하)', await p2.textContent('#settings-summary'));
+    check(await p2.evaluate(() => JSON.stringify(window.__dg.state.settings.categories) === '["동물","음식"]') && (await p2.textContent('#settings-summary')).includes('동물 · 음식') && (await host.textContent('#cat-note')) === '동물 · 음식', '"음식" 더하기 → ["동물","음식"] 동기화 · 요약에 이름 나열(3개 이하)', await p2.textContent('#settings-summary'));
+    await host.evaluate(() => window.__dg.renderAll());
+    check(await host.locator('#overlay-cats').isVisible(), '카테고리 창: 다시 그려도 열린 채');
     await host.click('#btn-cat-all');
     await p2.waitForFunction(() => window.__dg.state.settings.categories.length === 0, null, { timeout: 3000 }).catch(() => {});
     check(await p2.evaluate(() => window.__dg.state.settings.categories.length === 0) && !(await p2.textContent('#settings-summary')).includes('동물') && (await host.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 13, '"모두 선택" → categories [] 동기화 · 13개 다시 켜짐 · 요약에서 사라짐');
-    // 설정 변경 → 다른 클라이언트에 반영
-    await host.click('#settings-details > summary');
-    await host.selectOption('#set-rounds', '1');
-    await host.selectOption('#set-drawTime', '30');
-    await host.selectOption('#set-hints', '1');
-    // 단어를 3음절 이상 사용자 단어로 고정: 1글자 단어가 뽑히면 마스크·근접 정답 검사가 흔들리던 플레이크 제거
-    check((await host.textContent('#details-note')) === '직접 설정함' && (await host.getAttribute('#preset-row .preset-btn[aria-checked="true"]', 'data-preset').catch(() => null)) === null, '세부 설정을 바꾸면 "직접 설정함"(빠른 선택 해제)');
+    await host.click('#btn-cats-close');
+    check(await host.locator('#overlay-cats').isHidden() && await host.evaluate(() => document.activeElement && document.activeElement.id === 'btn-cat-open') && (await host.textContent('#cat-note')) === '전체 13개', '닫기 → 창 닫힘 · [고르기]로 포커스 복귀 · 요약 "전체 13개"');
+    await host.click('#btn-cat-open');
+    await host.waitForSelector('#overlay-cats:not([hidden])', { timeout: 3000 });
+    await host.keyboard.press('Escape');
+    check(await host.locator('#overlay-cats').isHidden(), 'Esc 로 카테고리 창 닫힘');
+    // "게임 시작"은 화면 아래 고정(sticky) · 갤러리 버튼은 고정 영역 밖
+    {
+      const sr = await host.evaluate(() => { const r = document.getElementById('start-row'); return { pos: getComputedStyle(r).position, bottom: getComputedStyle(r).bottom, hasStart: r.contains(document.getElementById('btn-start')), hasHint: r.contains(document.getElementById('start-hint')), gallery: r.contains(document.getElementById('btn-gallery-lobby')) }; });
+      check(sr.pos === 'sticky' && sr.bottom === '0px' && sr.hasStart && sr.hasHint && !sr.gallery, '게임 시작 + 안내는 아래 고정(sticky) · 갤러리 버튼은 고정 영역 밖', JSON.stringify(sr));
+    }
     await host.click('label[for="set-useCustom"]');
     check(await host.locator('#custom-body').isVisible(), '커스텀 단어 쓰기: 켜면 단어 입력 펼침');
     await host.fill('#set-customWords', '자전거,냉장고,해바라기,고슴도치,선풍기,소방차,다람쥐,무지개,피라미드,헬리콥터,미끄럼틀,아이스크림');
@@ -630,8 +748,8 @@ async function soloRelayCardScenario(browser) {
     await host.waitForSelector('#room-settings-top', { state: 'hidden', timeout: 3000 }).catch(() => {});
     if (await host.locator('#btn-room-profile-close').isVisible().catch(() => false)) await host.click('#btn-room-profile-close');
     await sleep(200);
-    check((await p2.inputValue('#set-rounds')) === '1', '설정 변경 동기화(rounds=1)', await p2.inputValue('#set-rounds'));
-    check((await p2.inputValue('#set-drawTime')) === '30', '설정 변경 동기화(drawTime=30)', await p2.inputValue('#set-drawTime'));
+    check(await p2.evaluate(() => window.__dg.state.settings.rounds === 1) && (await p2.textContent('#settings-summary')).includes('1라운드'), '설정 변경 동기화(rounds=1)', await p2.textContent('#settings-summary'));
+    check(await p2.evaluate(() => window.__dg.state.settings.drawTime === 30) && (await p2.textContent('#settings-summary')).includes('한 턴 30초'), '설정 변경 동기화(drawTime=30)', await p2.textContent('#settings-summary'));
     await p2.waitForFunction(() => document.querySelectorAll('#settings-summary .sum-word').length === 12, null, { timeout: 3000 }).catch(() => {});
     check((await p2.locator('#settings-summary .sum-word').count()) === 12 && (await p2.textContent('#settings-summary .sum-words-title')).includes('커스텀 단어로만'), '방장이 아닌 사람: 커스텀 단어 목록 12개 · "커스텀 단어로만 출제"', await p2.locator('#settings-summary .sum-word').count());
 
@@ -1065,7 +1183,7 @@ async function soloRelayCardScenario(browser) {
     await host.click('#btn-leave');
     await sleep(500);
     check(await host.locator('#view-landing').isVisible(), '나가기 후 랜딩 복귀');
-    check(!(await p2.locator('#set-rounds').isDisabled()), '호스트 이전(다음 사람이 설정 가능)');
+    check(await p2.locator('#set-rounds .step-inc').isEnabled(), '호스트 이전(다음 사람이 설정 가능)');
     check((await p2.locator(PLAYER_SEL).count()) === 3, '퇴장 후 플레이어 3명');
 
     await relayScenario(browser);

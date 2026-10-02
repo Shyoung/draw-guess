@@ -325,7 +325,7 @@
           </div>
         </div>
 
-        <!-- lobby 2단계: 설정 패널 -->
+        <!-- lobby 2단계: 설정 패널. 방장은 ① 게임 길이 · ② 단어 · ③ 난이도 세 묶음, 게임 시작은 아래 고정 -->
         <div id="settings-panel" class="settings-panel" hidden>
           <div class="settings-head">
             <button id="btn-mode-back" class="btn btn-ghost btn-sm" type="button">← 모드 선택</button>
@@ -335,100 +335,92 @@
           <div id="settings-summary" class="settings-summary" hidden></div>
 
           <div id="settings-host" class="settings-host">
-            <div class="setting-block">
-              <div class="block-head"><span class="block-title">게임 길이</span><span id="settings-estimate" class="settings-estimate"></span></div>
-              <div id="preset-row" class="preset-row" role="radiogroup" aria-label="게임 길이">
-                <button class="preset-btn" type="button" role="radio" aria-checked="false" data-preset="short"><strong>짧게</strong><small class="preset-sub"></small></button>
-                <button class="preset-btn" type="button" role="radio" aria-checked="false" data-preset="normal"><strong>보통</strong><small class="preset-sub"></small></button>
-                <button class="preset-btn" type="button" role="radio" aria-checked="false" data-preset="long"><strong>길게</strong><small class="preset-sub"></small></button>
-              </div>
-            </div>
-
-            <label class="setting" id="set-fixedDrawer-wrap" hidden>
-              <span>출제자 <small>계속 그릴 사람</small></span>
-              <select id="set-fixedDrawer"></select>
-            </label>
-
-            <div class="setting-block custom-block">
-              <label class="switch-row" for="set-useCustom">
-                <span class="switch-text"><span class="block-title">커스텀 단어 쓰기</span><small>우리끼리 아는 단어로 문제를 내요</small></span>
-                <input id="set-useCustom" class="switch-input" type="checkbox" role="switch">
-                <span class="switch" aria-hidden="true"><span class="switch-knob"></span></span>
+            <!-- ① 게임 길이: 늘 보임. 숫자는 − / + 버튼(끝값에서 그쪽 버튼이 꺼진다). 지금 값은 data-value -->
+            <section id="block-length" class="setting-block set-group" aria-labelledby="block-length-title">
+              <div class="block-head"><h3 id="block-length-title" class="block-title">게임 길이</h3><span id="settings-estimate" class="settings-estimate"></span></div>
+              <label class="set-row" id="set-fixedDrawer-wrap" hidden>
+                <span class="set-label"><span>출제자</span><small class="setting-help">계속 그릴 사람</small></span>
+                <select id="set-fixedDrawer"></select>
               </label>
-              <div id="custom-body" class="custom-body" hidden>
-                <label class="setting setting-wide">
-                  <span>단어 목록 <small>(쉼표로 구분, 각 1~20자)</small></span>
-                  <textarea id="set-customWords" rows="3" placeholder="예) 사과, 자전거, 무지개"></textarea>
+              <div class="set-row" id="row-rounds">
+                <span class="set-label"><span id="set-rounds-label">라운드</span><small id="set-rounds-help" class="setting-help">모두가 한 번씩 그리면 1라운드</small></span>
+                <div id="set-rounds" class="stepper" role="group" aria-labelledby="set-rounds-label" data-key="rounds"></div>
+              </div>
+              <div class="set-row" id="row-drawTime">
+                <span class="set-label"><span id="set-drawTime-label">그리기 시간</span><small id="set-drawTime-help" class="setting-help">한 사람이 그리는 시간</small></span>
+                <div id="set-drawTime" class="stepper" role="group" aria-labelledby="set-drawTime-label" data-key="drawTime"></div>
+              </div>
+              <p id="relay-turns-note" class="set-note" hidden></p>
+            </section>
+
+            <!-- ② 단어: 커스텀 단어 스위치는 늘 보임, 카테고리는 요약 한 줄 + [고르기] → 창 -->
+            <section id="block-words" class="setting-block set-group" aria-labelledby="block-words-title">
+              <div class="block-head"><h3 id="block-words-title" class="block-title">단어</h3></div>
+              <div class="custom-block">
+                <label class="switch-row" for="set-useCustom">
+                  <span class="switch-text"><span class="set-title">커스텀 단어 쓰기</span><small>우리끼리 아는 단어로 문제를 내요</small></span>
+                  <input id="set-useCustom" class="switch-input" type="checkbox" role="switch">
+                  <span class="switch" aria-hidden="true"><span class="switch-knob"></span></span>
                 </label>
-                <div class="wordset-row">
-                <div id="wordset-tools" class="wordset-tools" hidden>
-                  <button id="btn-wordset-load" class="btn btn-ghost btn-sm" type="button" title="내 세트 불러오기" hidden>📂 불러오기</button>
-                  <button id="btn-wordset-save" class="btn btn-ghost btn-sm" type="button" title="현재 단어를 세트로 저장">💾 저장</button>
-                  <div id="wordset-quick" class="wordset-quick" hidden>
-                    <input id="ws-quick-name" type="text" maxlength="30" placeholder="세트 이름 (1~30자)" aria-label="새 세트 이름">
-                    <button id="btn-ws-quick-save" class="btn btn-secondary btn-sm" type="button">저장</button>
-                    <button id="btn-ws-quick-cancel" class="btn btn-ghost btn-sm" type="button">취소</button>
+                <div id="custom-body" class="custom-body" hidden>
+                  <label class="setting setting-wide">
+                    <span>단어 목록 <small>(쉼표로 구분, 각 1~20자)</small></span>
+                    <textarea id="set-customWords" rows="3" placeholder="예) 사과, 자전거, 무지개"></textarea>
+                  </label>
+                  <div class="wordset-row">
+                  <div id="wordset-tools" class="wordset-tools" hidden>
+                    <button id="btn-wordset-load" class="btn btn-ghost btn-sm" type="button" title="내 세트 불러오기" hidden>📂 불러오기</button>
+                    <button id="btn-wordset-save" class="btn btn-ghost btn-sm" type="button" title="현재 단어를 세트로 저장">💾 저장</button>
+                    <div id="wordset-quick" class="wordset-quick" hidden>
+                      <input id="ws-quick-name" type="text" maxlength="30" placeholder="세트 이름 (1~30자)" aria-label="새 세트 이름">
+                      <button id="btn-ws-quick-save" class="btn btn-secondary btn-sm" type="button">저장</button>
+                      <button id="btn-ws-quick-cancel" class="btn btn-ghost btn-sm" type="button">취소</button>
+                    </div>
                   </div>
+                  <div id="wordset-share" class="wordset-share" hidden>
+                    <button id="btn-wordset-link" class="btn btn-ghost btn-sm" type="button" title="이 단어로 방 만들기 링크 — 링크를 받은 사람이 방을 만들면 이 단어가 채워져요">🔗 방 링크</button>
+                  </div>
+                  </div>
+                  <label class="check">
+                    <input id="set-customWordsOnly" type="checkbox">
+                    <span>커스텀 단어만 쓰기 <small>단어가 모자라면 고른 카테고리에서 채워요</small></span>
+                  </label>
                 </div>
-                <div id="wordset-share" class="wordset-share" hidden>
-                  <button id="btn-wordset-link" class="btn btn-ghost btn-sm" type="button" title="이 단어로 방 만들기 링크 — 링크를 받은 사람이 방을 만들면 이 단어가 채워져요">🔗 방 링크</button>
-                </div>
-                </div>
-                <label class="check">
-                  <input id="set-customWordsOnly" type="checkbox">
-                  <span>커스텀 단어만 쓰기 <small>단어가 모자라면 고른 카테고리에서 채워요</small></span>
-                </label>
               </div>
-            </div>
+              <!-- 기본 단어 카테고리 요약. 커스텀 단어만 쓰고 단어가 wordCount 이상이면 숨긴다 -->
+              <div id="cat-block" class="set-row set-row-sum">
+                <span class="set-label"><span class="set-title">카테고리</span><span id="cat-note" class="set-sum"></span></span>
+                <button id="btn-cat-open" class="btn btn-outline btn-sm set-open" type="button" aria-haspopup="dialog" aria-controls="overlay-cats">고르기</button>
+              </div>
+            </section>
 
-            <!-- 기본 단어 카테고리 고르기. 기본은 13개 전부 켜짐(빼는 식으로 씀). 커스텀 단어만 쓰고 단어가 wordCount 이상이면 숨긴다 -->
-            <div id="cat-block" class="setting-block cat-block">
-              <div class="block-head cat-head">
-                <span class="block-title">기본 단어 카테고리 <span id="cat-note" class="settings-estimate"></span></span>
-                <span class="cat-tools">
-                  <button id="btn-cat-all" class="cat-tool" type="button">모두 선택</button>
-                  <span class="cat-tool-sep" aria-hidden="true">·</span>
-                  <button id="btn-cat-none" class="cat-tool" type="button">모두 해제</button>
-                </span>
+            <!-- ③ 난이도: 요약 한 줄 + [바꾸기] → 그 자리에서 펼침(처음엔 접힘, 한 번 펼치면 방에 있는 동안 유지) -->
+            <section id="block-diff" class="setting-block set-group" aria-labelledby="block-diff-title">
+              <div class="set-row set-row-sum">
+                <div class="set-label"><h3 id="block-diff-title" class="block-title">난이도</h3><span id="diff-note" class="set-sum"></span></div>
+                <button id="btn-diff-toggle" class="btn btn-outline btn-sm set-open" type="button" aria-expanded="false" aria-controls="diff-body">바꾸기</button>
               </div>
-              <div id="cat-row" class="cat-row" role="group" aria-label="기본 단어 카테고리"></div>
-            </div>
-
-            <details id="settings-details" class="settings-details">
-              <summary><span>세부 설정</span><span id="details-note" class="details-note"></span></summary>
-              <div class="settings-grid">
-                <label class="setting">
-                  <span id="set-rounds-label">라운드</span>
-                  <select id="set-rounds"></select>
-                  <small id="set-rounds-help" class="setting-help">모두가 한 번씩 그리면 1라운드</small>
-                </label>
-                <label class="setting">
-                  <span id="set-drawTime-label">그리기 시간</span>
-                  <select id="set-drawTime"></select>
-                  <small id="set-drawTime-help" class="setting-help">한 사람이 그리는 시간</small>
-                </label>
-                <label class="setting">
-                  <span>단어 후보 수</span>
-                  <select id="set-wordCount"></select>
-                  <small id="set-wordCount-help" class="setting-help">그리는 사람이 고를 수 있는 단어 개수</small>
-                </label>
-                <label class="setting">
-                  <span id="set-hints-label">힌트 횟수</span>
-                  <select id="set-hints"></select>
-                  <small id="set-hints-help" class="setting-help">정답 글자를 초성으로 몇 번 보여 줄지</small>
-                </label>
-                <label class="setting">
-                  <span>마지막 힌트 시점</span>
-                  <select id="set-hintEndAt"></select>
-                  <small class="setting-help">마지막 힌트를 끝나기 몇 초 전에 줄지</small>
-                </label>
+              <div id="diff-body" class="diff-body" hidden>
+                <div class="set-row" id="row-wordCount">
+                  <span class="set-label"><span id="set-wordCount-label">단어 후보 수</span><small id="set-wordCount-help" class="setting-help">그리는 사람이 고를 수 있는 단어 개수</small></span>
+                  <div id="set-wordCount" class="stepper" role="group" aria-labelledby="set-wordCount-label" data-key="wordCount"></div>
+                </div>
+                <div class="set-row" id="row-hints">
+                  <span class="set-label"><span id="set-hints-label">힌트 횟수</span><small id="set-hints-help" class="setting-help">정답 글자를 초성으로 몇 번 보여 줄지</small></span>
+                  <div id="set-hints" class="stepper" role="group" aria-labelledby="set-hints-label" data-key="hints"></div>
+                </div>
+                <div class="set-row" id="row-hintEndAt">
+                  <span class="set-label"><span id="set-hintEndAt-label">마지막 힌트 시점</span><small class="setting-help">마지막 힌트를 끝나기 몇 초 전에 줄지</small></span>
+                  <div id="set-hintEndAt" class="stepper" role="group" aria-labelledby="set-hintEndAt-label" data-key="hintEndAt"></div>
+                </div>
               </div>
-            </details>
+            </section>
           </div>
-          <div class="start-row">
+          <button id="btn-gallery-lobby" class="btn btn-ghost btn-block" type="button" hidden>🖼 지난 게임 그림 갤러리</button>
+          <!-- 게임 시작 + 안내: 화면 아래 고정(position: sticky). 폰에서 글자를 입력하는 동안은 고정을 푼다(키보드에 입력칸이 가리지 않게) -->
+          <div id="start-row" class="start-row">
             <button id="btn-start" class="btn btn-primary btn-xl btn-block" type="button">게임 시작</button>
             <p id="start-hint" class="start-hint"></p>
-            <button id="btn-gallery-lobby" class="btn btn-ghost btn-block" type="button" hidden>🖼 지난 게임 그림 갤러리</button>
           </div>
         </div>
 
@@ -540,6 +532,24 @@
   </div>
 
   <!-- 대기실·게임 중 기기 뒤로가기: 방을 나갈지 묻는다 -->
+  <!-- 대기실 설정 > 카테고리 고르기: 누르는 즉시 반영, 저장 버튼 없음. PC 는 가운데 창, 폰은 아래에서 올라오는 시트 모양(불러오기 dialog 와 같은 포커스 규칙) -->
+  <div id="overlay-cats" class="modal modal-cats" hidden>
+    <div class="modal-card card-cats" role="dialog" aria-modal="true" aria-labelledby="cats-title">
+      <header class="modal-head">
+        <h3 id="cats-title" class="card-title">카테고리 고르기</h3>
+        <div class="modal-actions"><button id="btn-cats-close" class="btn btn-ghost btn-sm" type="button">닫기</button></div>
+      </header>
+      <div class="cat-head">
+        <span id="cats-note" class="settings-estimate"></span>
+        <span class="cat-tools">
+          <button id="btn-cat-all" class="cat-tool" type="button">모두 선택</button>
+          <span class="cat-tool-sep" aria-hidden="true">·</span>
+          <button id="btn-cat-none" class="cat-tool" type="button">모두 해제</button>
+        </span>
+      </div>
+      <div id="cat-row" class="cat-row" role="group" aria-label="기본 단어 카테고리"></div>
+    </div>
+  </div>
   <!-- 대기실 설정 > 내 세트 불러오기: 세트를 고르면 단어가 채워진다(나가기 확인과 같은 .modal-confirm 패턴) -->
   <div id="overlay-wsload" class="modal modal-confirm" hidden>
     <div class="modal-card card-wsload" role="dialog" aria-modal="true" aria-labelledby="wsload-title">

@@ -15,6 +15,18 @@ const URL = `http://localhost:${PORT}`;
 const ROOT = path.join(__dirname, '..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** 대기실 − / + 설정을 value 가 될 때까지 누른다(최대 30번). 끝값이면 멈춘다 */
+async function setStep(page, key, value) {
+  for (let i = 0; i < 30; i++) {
+    const cur = Number(await page.getAttribute(`#set-${key}`, 'data-value'));
+    if (cur === value) return true;
+    const btn = page.locator(`#set-${key} ${cur < value ? '.step-inc' : '.step-dec'}`);
+    if (await btn.isDisabled()) return false;
+    await btn.click();
+  }
+  return false;
+}
+
 async function startServer() {
   const env = { ...process.env, PORT: String(PORT) };
   delete env.ALLOW_SOLO; // 최소 인원 2명(프로덕션 기본)으로 검증
@@ -96,12 +108,12 @@ async function runMobileFlow(hook, opts) {
     // 3. 설정 화면 (1라운드, 40초, 힌트 1회)
     await mobile.click('#mode-panel .mode-card[data-mode="classic"]');
     await mobile.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
-    await mobile.click('#settings-details > summary'); // 세부 설정 펼치기
-    await mobile.selectOption('#set-rounds', '1');
-    await mobile.selectOption('#set-drawTime', '40');
-    await mobile.selectOption('#set-hints', '1');
+    await setStep(mobile, 'rounds', 1);
+    await setStep(mobile, 'drawTime', 40);
+    await mobile.click('#btn-diff-toggle'); // 난이도 펼치기
+    await setStep(mobile, 'hints', 1);
     if (opts.customWords) {
-      await mobile.selectOption('#set-wordCount', String(opts.wordCount || 2));
+      await setStep(mobile, 'wordCount', opts.wordCount || 2);
       await mobile.click('label[for="set-useCustom"]'); // 커스텀 단어 쓰기
       await mobile.fill('#set-customWords', opts.customWords);
       await mobile.check('#set-customWordsOnly'); // change → 설정 전송(텍스트 영역 값 포함)
@@ -168,4 +180,4 @@ async function runMobileFlow(hook, opts) {
   }
 }
 
-module.exports = { runMobileFlow, startServer, scribble, say, sleep, URL, PORT };
+module.exports = { runMobileFlow, startServer, scribble, say, sleep, setStep, URL, PORT };

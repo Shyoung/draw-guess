@@ -210,7 +210,7 @@ relay 에서: `round` = 문제 번호(1..n), `totalRounds` = n. `relay.order` = 
 
 ## 이용 지표 (서버 전용, 닉네임·IP·채팅 내용 없음)
 - 서버는 stdout 에 `[metric] {"ev","ts",...}` 한 줄씩 남기고 일별 누적을 저장소에 쌓는다(Redis 해시 `draw-guess:stats:YYYY-MM-DD`, 한국 시간 기준, 40일 보관). 필드 목록은 `server/metrics.js` 머리 주석.
-- 이벤트: `room_created`(ref, loggedIn, fromWordSetLink — 일별 `rooms_from_wsl`) · `player_joined`(via link|code, midGame, size) · `game_started` · `game_completed`(turns, durationSec, bytesOut) · `game_aborted`(reason host|notEnoughPlayers) · `room_closed`(gamesPlayed, peakPlayers, lifetimeSec) · `room_full_rejected`.
+- 이벤트: `room_created`(ref, loggedIn, fromWordSetLink — 일별 `rooms_from_wsl`) · `player_joined`(via link|code, midGame, size) · `game_started`(mode, players, rounds, drawTime, customWords = 커스텀 단어가 1개 이상인지 불린, categories = 고른 기본 단어 카테고리 **개수**·0 = 전체 — 일별 `starts_<mode>`, `starts_cat_some`(categories > 0), `starts_custom`(customWords true). 단어·카테고리 이름은 남기지 않는다. relay 도 같은 기준(단어 후보에 그대로 적용되므로)) · `game_completed`(turns, durationSec, bytesOut) · `game_aborted`(reason host|notEnoughPlayers) · `room_closed`(gamesPlayed, peakPlayers, lifetimeSec) · `room_full_rejected`.
 - `bytesOut` 은 그 방에 보낸 socket.io 패킷 길이 × 받는 사람 수의 합(근사). 게임 시작 때 0 으로, 게임이 끝나면 기록하고 다시 0 으로.
 - `GET /admin/stats?key=<ADMIN_KEY>&days=30` → `{ ok, today, rooms, store, days:[{ day, ...counters }] }`(최신순, 기록 있는 날만). `ADMIN_KEY` 가 없으면 404, 틀리면 403. 공개 `/healthz` 에는 통계를 넣지 않는다.
 
