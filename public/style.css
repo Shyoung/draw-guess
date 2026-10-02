@@ -1162,6 +1162,12 @@ body.sheet-open { overflow: hidden; }
   .chat-bubble.kind-system { background: rgba(108, 111, 133, 0.62); font-style: italic; font-weight: 500; }
   .chat-bubble.kind-guessed { background: rgba(74, 120, 212, 0.85); }
   .chat-bubble.mine { background: rgba(61, 123, 242, 0.78); }
+  /* 키패드 컴팩트(맞히는 사람) 말풍선: 위치별 불투명도(배경+글자) 70/45/15% + 3초 뒤 페이드 아웃(시작 시점은 JS가 animation-delay로) */
+  .chat-bubble.bb-timed { animation: bubble-fade .4s ease-in forwards; }
+  .chat-bubble.bb-pos0 { --bo: .7; opacity: .7; }
+  .chat-bubble.bb-pos1 { --bo: .45; opacity: .45; }
+  .chat-bubble.bb-pos2 { --bo: .15; opacity: .15; }
+  @keyframes bubble-fade { from { opacity: var(--bo, .7); } to { opacity: 0; } }
   @keyframes bubble-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
   /* ---- 컴팩트 모드(키보드 열림, 관전자): 채팅 목록·상태 띠를 숨기고 캔버스가 4:3 을 지키며 남은 높이에 맞게 줄어든다(최소 120px).

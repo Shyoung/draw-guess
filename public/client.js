@@ -2328,7 +2328,7 @@
     while (list.children.length > 300) list.removeChild(list.firstChild);
     if (atBottom) list.scrollTop = list.scrollHeight;
     // 모바일 요약(티커 · 말풍선 · 접힌 채팅 바)용 최근 메시지
-    ui.recentChat.push({ kind: kind, name: m.name ? String(m.name) : '', text: safe && prefs.profanityFilter ? safe : text, raw: text, safe: safe, mine: !!(m.id && m.id === myId), note: peekNote });
+    ui.recentChat.push({ kind: kind, name: m.name ? String(m.name) : '', text: safe && prefs.profanityFilter ? safe : text, raw: text, safe: safe, mine: !!(m.id && m.id === myId), note: peekNote, t: Date.now() });
     while (ui.recentChat.length > 3) ui.recentChat.shift();
     renderChatPeek(true);
   }
@@ -3335,7 +3335,7 @@
   // 가로 태블릿(아이패드 가로) 게임 셸 — style.css 의 같은 미디어 조건과 맞춘다
   var TABLET_LAND_MQ = '(min-width: 640px) and (orientation: landscape) and (pointer: coarse)';
   var tabletLandMq = window.matchMedia ? window.matchMedia(TABLET_LAND_MQ) : { matches: false, addEventListener: null, addListener: null };
-  var openSheetId = null, sheetTimer = null, tickerTimer = null, lastCompact = false;
+  var openSheetId = null, sheetTimer = null, tickerTimer = null, bubbleTimer = null, lastCompact = false;
 
   /** node 를 parent 안(before 앞, 없으면 끝)으로 옮긴다. 이미 그 자리면 건드리지 않는다(포커스 유지). */
   function placeNode(node, parent, before) {
@@ -3581,6 +3581,7 @@
   /** 요약에 쓸 본문: 이어 그리기 부분 정답이면 "고양이 · 3개 중 1개 맞았어요!" */
   function peekText(m) { return m.note ? m.text + ' · ' + m.note : m.text; }
   function kindClass(kind) { return kind === 'correct' ? 'kind-correct' : kind === 'close' ? 'kind-close' : kind === 'system' ? 'kind-system' : kind === 'guessed-chat' ? 'kind-guessed' : 'kind-chat'; }
+  var BUBBLE_LIFE_MS = 3000, BUBBLE_FADE_MS = 400;
   function renderChatPeek(fresh) {
     var recent = ui.recentChat, last = recent[recent.length - 1];
     var bar = $('chat-bar-last'); if (bar) bar.textContent = last ? summarize(last) : '아직 채팅이 없어요';
@@ -3616,12 +3617,25 @@
     var bb = $('chat-bubbles');
     if (bb) {
       bb.innerHTML = '';
-      if (mobileMq.matches) recent.forEach(function (m) {
+      if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = null; }
+      // 맞히는 사람이 폰 키패드를 올린 컴팩트 화면에서만: 도착 3초 뒤 사라지고(도착 시각 기준이라 다시 그려도 타이머가 리셋되지 않음) 아래(최신)부터 70/45/15% 불투명
+      var vr2 = $('view-room');
+      var timed = mobileMq.matches && !!vr2 && vr2.getAttribute('data-role') === 'guesser' && vr2.getAttribute('data-compact') === '1';
+      var now = Date.now(), nextAt = 0;
+      var shown = mobileMq.matches ? recent.filter(function (m) { return !timed || now - (m.t || 0) < BUBBLE_LIFE_MS; }) : [];
+      shown.forEach(function (m, i) {
         var b = el('div', 'chat-bubble ' + kindClass(m.kind) + (m.mine ? ' mine' : ''));
+        if (timed) {
+          b.classList.add('bb-timed', 'bb-pos' + Math.min(2, shown.length - 1 - i));
+          var age = now - (m.t || 0);
+          b.style.animationDelay = (BUBBLE_LIFE_MS - BUBBLE_FADE_MS - age) + 'ms'; // 페이드 시작까지(이미 지났으면 음수 = 중간부터)
+          var left = BUBBLE_LIFE_MS - age; if (!nextAt || left < nextAt) nextAt = left;
+        }
         if ((m.kind === 'chat' || m.kind === 'guessed-chat') && m.name) b.appendChild(el('span', 'bb-name', m.name));
         b.appendChild(el('span', 'bb-text', peekText(m)));
         bb.appendChild(b);
       });
+      if (timed && nextAt) bubbleTimer = setTimeout(function () { bubbleTimer = null; renderChatPeek(false); }, nextAt + 20);
     }
   }
 

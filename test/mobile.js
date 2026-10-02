@@ -335,10 +335,15 @@ async function mainRun() {
       check(nb >= 1 && nb <= 3, 'keyboard: 캔버스 위 말풍선 1~3개', nb);
       const lastBubble = (await m.locator('#chat-bubbles .chat-bubble').last().textContent().catch(() => '')).trim();
       check(lastBubble.includes('컴팩트테스트'), 'keyboard: 마지막 말풍선이 내 메시지', lastBubble.slice(0, 40));
+      const bbOp = await m.locator('#chat-bubbles .chat-bubble').evaluateAll((els) => els.map((e) => ({ cls: e.className, op: Math.round(parseFloat(getComputedStyle(e).getPropertyValue('--bo')) * 100) }))); // --bo = 위치별 기본 불투명도(페이드 중에는 opacity 자체가 변하므로 변수로 확인)
+      const expOp = [70, 45, 15];
+      check(bbOp.length >= 1 && bbOp.every((b, i) => b.cls.includes('bb-timed') && b.op === expOp[bbOp.length - 1 - i]), 'keyboard: 말풍선 불투명도 아래(최신)부터 70/45/15%', JSON.stringify(bbOp));
       const bb = await box(m, '#chat-bubbles');
       check(inside(bb, KB_VH) && overlaps(bb, kc), 'keyboard: 말풍선이 캔버스 위(안쪽)에', fmt(bb));
       const kci = await box(m, '#chat-input');
       check(inside(kci, KB_VH), 'keyboard: 메시지 후에도 #chat-input 보임', fmt(kci));
+      await m.waitForFunction(() => document.querySelectorAll('#chat-bubbles .chat-bubble').length === 0, null, { timeout: 5000 }).catch(() => {});
+      check((await m.locator('#chat-bubbles .chat-bubble').count()) === 0, 'keyboard: 말풍선은 도착 3초 뒤 사라짐');
       await m.setViewportSize({ width: VW, height: VH });
       await m.waitForSelector('#view-room:not([data-compact])', { timeout: 3000 }).catch(() => {});
       await sleep(250);
