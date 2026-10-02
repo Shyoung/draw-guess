@@ -128,9 +128,9 @@ async function mainRun() {
       check((await m.locator('#btn-start').count()) === 1, '로비(설정): #btn-start 존재');
       check(mm.chatFont >= 16, '채팅 입력 font-size ≥ 16px', mm.chatFont);
       check(mm.sw <= VW, '로비(설정): 가로 스크롤 없음', mm.sw);
-      // 기본 단어 카테고리: 우리 단어가 wordCount 이상이면 블록 숨김, 아니면 13개 칩 전부 켜진 채 여러 줄로 접히고 "모두 선택 · 모두 해제"는 제목 줄 오른쪽
+      // 기본 단어 카테고리: 커스텀 단어가 wordCount 이상이면 블록 숨김, 아니면 13개 칩 전부 켜진 채 여러 줄로 접히고 "모두 선택 · 모두 해제"는 제목 줄 오른쪽
       if (await m.locator('#cat-block').isHidden()) {
-        check(true, '로비(설정): 우리 단어만 쓰기(단어 충분) → 카테고리 블록 숨김');
+        check(true, '로비(설정): 커스텀 단어만 쓰기(단어 충분) → 카테고리 블록 숨김');
       } else {
         const chips = await m.locator('#cat-row .cat-chip').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, on: e.getAttribute('aria-pressed') === 'true' }; }));
         const rowsY = [...new Set(chips.map((c) => Math.round(c.y)))];

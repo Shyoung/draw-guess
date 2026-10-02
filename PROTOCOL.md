@@ -206,7 +206,7 @@ relay 에서: `round` = 문제 번호(1..n), `totalRounds` = n. `relay.order` = 
 - 호스트가 오프라인인데 접속 중인 사람이 있으면(끊김 · 새로고침 · 서버 재시작 복원 직후) `HOST_RETURN_MS`(기본 10초) 기다렸다가 접속 중인 첫 사람에게 호스트를 넘기고 시스템 메시지("방장이 돌아오지 않아 …")를 보낸다. 그 안에 돌아오면 그대로. `hostId` 가 목록에 없는 사람을 가리키면 즉시 바로잡는다.
 - URL `?room=CODE` 로 접속하면 클라이언트는 방 코드 입력란을 자동으로 채운다.
 - URL `?ref=코드` 는 유입 경로(홍보 채널) 표시. 클라이언트가 sessionStorage 에 기억하고 주소에서 지운 뒤 `room:create`/`room:join` 에 `ref` 로 실어 보낸다.
-- URL `#ws=<base64url>` 은 공개 단어 세트 링크("이 단어 세트로 방 만들기", 클라이언트 전용 — 해시라 서버는 보지 않는다). 내용은 UTF-8 JSON `{ v:1, n?:세트 이름(1~30자), w:[단어…], o:0|1 }`(`o` = 우리 단어만 쓰기). 클라이언트는 읽자마자 sessionStorage 에 두고 주소에서 지운다. 단어는 `customWords` 규칙(각 1~20자, 중복 제거, 쉼표로 이은 원문 2000자 이하)으로 다시 거르고, 남는 단어가 없으면 버린다. 그 탭에서 방을 만들 때 `room:create` 에 `fromWordSetLink: true` 를 싣고(지표용), 성공하면 호스트 클라이언트가 곧바로 `room:settings { settings:{ customWords, customWordsOnly } }` 를 보낸다(새 이벤트 없음). 링크 만들기는 방장 설정의 우리만의 단어 · 내 정보의 단어 세트에서 한다.
+- URL `#ws=<base64url>` 은 공개 단어 세트 링크("이 단어 세트로 방 만들기", 클라이언트 전용 — 해시라 서버는 보지 않는다). 내용은 UTF-8 JSON `{ v:1, n?:세트 이름(1~30자), w:[단어…], o:0|1 }`(`o` = 커스텀 단어만 쓰기). 클라이언트는 읽자마자 sessionStorage 에 두고 주소에서 지운다. 단어는 `customWords` 규칙(각 1~20자, 중복 제거, 쉼표로 이은 원문 2000자 이하)으로 다시 거르고, 남는 단어가 없으면 버린다. 그 탭에서 방을 만들 때 `room:create` 에 `fromWordSetLink: true` 를 싣고(지표용), 성공하면 호스트 클라이언트가 곧바로 `room:settings { settings:{ customWords, customWordsOnly } }` 를 보낸다(새 이벤트 없음). 링크 만들기는 방장 설정의 커스텀 단어 · 내 정보의 단어 세트에서 한다.
 
 ## 이용 지표 (서버 전용, 닉네임·IP·채팅 내용 없음)
 - 서버는 stdout 에 `[metric] {"ev","ts",...}` 한 줄씩 남기고 일별 누적을 저장소에 쌓는다(Redis 해시 `draw-guess:stats:YYYY-MM-DD`, 한국 시간 기준, 40일 보관). 필드 목록은 `server/metrics.js` 머리 주석.

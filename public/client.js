@@ -1985,7 +1985,7 @@
     setVal('set-hints', s.hints); setVal('set-hintEndAt', s.hintEndAt);
     setVal('set-customWords', s.customWords || ''); setVal('set-customWordsOnly', s.customWordsOnly);
     var fixed = s.mode === 'fixed';
-    // 게임 길이 · 예상 시간 · 우리만의 단어 · 요약(방장이 아닌 사람)
+    // 게임 길이 · 예상 시간 · 커스텀 단어 · 요약(방장이 아닌 사람)
     var preset = matchPreset(s), ps = presetsFor(s.mode), est = estimateGame(s);
     document.querySelectorAll('#preset-row .preset-btn').forEach(function (b) {
       var k = b.getAttribute('data-preset'), p = ps[k];
@@ -2009,7 +2009,7 @@
             [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']];
         var cwList = cw ? parseWords(s.customWords || '').words : [];
         var sumCats = Array.isArray(s.categories) ? s.categories : [];
-        // 우리 단어만 쓰기라도 단어가 wordCount 미만이면 고른 카테고리에서 채우므로(server/words.js pickWords) 칩을 보여준다
+        // 커스텀 단어만 쓰기라도 단어가 wordCount 미만이면 고른 카테고리에서 채우므로(server/words.js pickWords) 칩을 보여준다
         if (sumCats.length && !(s.customWordsOnly && cwList.length >= s.wordCount)) chips.push([sumCats.length <= 3 ? sumCats.join(' · ') : '카테고리 ' + sumCats.length + '개']);
         var skey = JSON.stringify([chips, cwList, !!s.customWordsOnly]);
         if (sum.getAttribute('data-key') !== skey) {
@@ -2019,7 +2019,7 @@
           sum.appendChild(chipRow);
           if (cwList.length) {
             var box = el('div', 'sum-words');
-            box.appendChild(el('div', 'sum-words-title', '우리만의 단어 ' + cwList.length + '개' + (!s.customWordsOnly ? ' · 기본 단어와 섞어서 출제' : cwList.length >= s.wordCount ? ' · 우리 단어로만 출제' : ' · 우리 단어로 출제 · 모자라면 고른 카테고리에서 채워요')));
+            box.appendChild(el('div', 'sum-words-title', '커스텀 단어 ' + cwList.length + '개' + (!s.customWordsOnly ? ' · 기본 단어와 섞어서 출제' : cwList.length >= s.wordCount ? ' · 커스텀 단어로만 출제' : ' · 커스텀 단어로 출제 · 모자라면 고른 카테고리에서 채워요')));
             var wl = el('div', 'sum-words-list');
             cwList.forEach(function (w) { wl.appendChild(el('span', 'sum-word', w)); });
             box.appendChild(wl);
@@ -2033,7 +2033,7 @@
     if (uc) { if (!ui.customOpen && hasWords) ui.customOpen = true; uc.checked = !!ui.customOpen; uc.disabled = !editable; }
     if (cb0) cb0.hidden = !ui.customOpen;
     var wsl = $('wordset-share'); if (wsl) wsl.hidden = !hasWords || !editable;
-    // 기본 단어 카테고리 칩. 우리 단어만 쓰고 단어가 wordCount 이상이면 기본 단어가 안 나오므로 숨긴다(모자라면 고른 카테고리에서 채우니 보여준다)
+    // 기본 단어 카테고리 칩. 커스텀 단어만 쓰고 단어가 wordCount 이상이면 기본 단어가 안 나오므로 숨긴다(모자라면 고른 카테고리에서 채우니 보여준다)
     var cats = selectedCategories(), catBlock = $('cat-block');
     if (catBlock) {
       catBlock.hidden = !!(s.customWordsOnly && hasWords && parseWords(s.customWords || '').words.length >= s.wordCount);
@@ -2577,7 +2577,7 @@
     else toast('단어 세트 링크를 읽지 못했어요. 주소가 잘렸는지 확인해 줘', 'error');
     landing.wordSet = set || pendingWordSet();
   }
-  /** 방을 만든 직후(호스트): 받은 단어 세트로 우리만의 단어를 채운다 */
+  /** 방을 만든 직후(호스트): 받은 단어 세트로 커스텀 단어를 채운다 */
   function applyPendingWordSet() {
     var ws = landing.wordSet || pendingWordSet(); clearPendingWordSet();
     if (!ws) return;
@@ -2585,7 +2585,7 @@
     state.settings = Object.assign({}, state.settings, patch);
     ui.customOpen = true; ui.setSource = { name: ws.name, key: ws.words.join(',') };
     emit('room:settings', { settings: patch });
-    toast((ws.name ? '"' + ws.name + '" ' : '') + '단어 세트(' + ws.words.length + '개)를 우리만의 단어에 넣었어요', 'ok');
+    toast((ws.name ? '"' + ws.name + '" ' : '') + '단어 세트(' + ws.words.length + '개)를 커스텀 단어에 넣었어요', 'ok');
     renderAll();
   }
   /** 단어 세트 링크 보내기: 모바일은 공유 시트, PC 는 문구 + 링크 복사 */

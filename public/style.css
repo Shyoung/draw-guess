@@ -414,7 +414,7 @@ select:disabled, textarea:disabled, input:disabled { background: #f2f0f6; color:
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; }
 .check input { width: 18px; height: 18px; accent-color: var(--primary); }
 .start-row { margin-top: 6px; display: flex; flex-direction: column; gap: 8px; align-items: center; }
-/* 게임 설정: 게임 길이 · 우리만의 단어 · 세부 설정 */
+/* 게임 설정: 게임 길이 · 커스텀 단어 · 세부 설정 */
 .settings-host { display: flex; flex-direction: column; gap: 14px; }
 .setting-block { display: flex; flex-direction: column; gap: 10px; }
 .block-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }

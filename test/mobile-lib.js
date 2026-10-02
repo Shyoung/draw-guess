@@ -102,7 +102,7 @@ async function runMobileFlow(hook, opts) {
     await mobile.selectOption('#set-hints', '1');
     if (opts.customWords) {
       await mobile.selectOption('#set-wordCount', String(opts.wordCount || 2));
-      await mobile.click('label[for="set-useCustom"]'); // 우리만의 단어 쓰기
+      await mobile.click('label[for="set-useCustom"]'); // 커스텀 단어 쓰기
       await mobile.fill('#set-customWords', opts.customWords);
       await mobile.check('#set-customWordsOnly'); // change → 설정 전송(텍스트 영역 값 포함)
       await mobile.waitForFunction((w) => (window.__dg.state.settings.customWords || '') === w && window.__dg.state.settings.customWordsOnly, opts.customWords, { timeout: 3000 });

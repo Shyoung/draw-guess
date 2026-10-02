@@ -531,7 +531,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await p.locator('#wordset-form').isHidden(), '새 세트: 저장 후 폼 닫힘');
     check((await p.locator('#wordset-list .ws-apply').count()) === 0, '내 정보: "이 세트로 방 설정" 버튼 없음(방 밖 화면)');
     check(await p.evaluate(() => window.__mockAuth.tables.word_sets.length === 1 && window.__mockAuth.tables.word_sets[0].owner_id === 'mock-user-1'), '새 세트: DB 행에 owner_id 포함');
-    // F8 단어 세트 링크: 세트마다 "🔗 링크" → #ws= 에 이름·단어·우리 단어만(o=1)
+    // F8 단어 세트 링크: 세트마다 "🔗 링크" → #ws= 에 이름·단어·커스텀 단어만(o=1)
     await p.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: URL });
     await p.click('#wordset-list .ws-link');
     await sleep(300);
@@ -540,7 +540,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
       let s = m[1].replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '=';
       return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(s), (c) => c.charCodeAt(0))));
     });
-    check(wsPayload && wsPayload.n === '과일' && JSON.stringify(wsPayload.w) === '["사과","바나나","포도"]' && wsPayload.o === 1, '내 정보: 세트 "링크" → #ws= 에 이름·단어 3개·우리 단어만', JSON.stringify(wsPayload));
+    check(wsPayload && wsPayload.n === '과일' && JSON.stringify(wsPayload.w) === '["사과","바나나","포도"]' && wsPayload.o === 1, '내 정보: 세트 "링크" → #ws= 에 이름·단어 3개·커스텀 단어만', JSON.stringify(wsPayload));
 
     // 빈 폼 검증
     await p.click('#btn-wordset-new');
@@ -599,9 +599,9 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     await p.waitForSelector('#view-room:not([hidden])', { timeout: 5000 });
     await p.waitForSelector('#settings-panel:not([hidden])', { timeout: 5000 });
     check(await p.locator('.topbar #btn-account-top').isVisible() && await p.locator('.topbar #btn-room-profile').isVisible(), '방 안(데스크톱): 상단바 "프로필" · "내 정보" 버튼');
-    check(await p.locator('#custom-body').isHidden() && await p.locator('#wordset-tools').isHidden(), '설정: 우리만의 단어는 꺼진 채(세트 도구 숨김)');
+    check(await p.locator('#custom-body').isHidden() && await p.locator('#wordset-tools').isHidden(), '설정: 커스텀 단어는 꺼진 채(세트 도구 숨김)');
     await p.click('label[for="set-useCustom"]');
-    check(await p.locator('#wordset-tools').isVisible() && await p.locator('#btn-wordset-save').isVisible(), '우리만의 단어 켜기 → "💾 저장" 표시');
+    check(await p.locator('#wordset-tools').isVisible() && await p.locator('#btn-wordset-save').isVisible(), '커스텀 단어 켜기 → "💾 저장" 표시');
     check((await p.textContent('#btn-wordset-save')).includes('저장') && (await p.getAttribute('#btn-wordset-save', 'title')) === '현재 단어를 세트로 저장', '저장 버튼: 문구 "💾 저장" + title');
     {
       const ys = await p.evaluate(() => ['btn-wordset-load', 'btn-wordset-save'].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)));
@@ -1245,7 +1245,7 @@ const storagePaths = (page) => page.evaluate(() => Object.keys(window.__mockAuth
     check(await m.locator('#sheet-menu').isHidden() && (await txt(m, '#leave-title')) === '내 정보로 이동할까요?', '모바일: 메뉴 → 내 정보 → 나가고 이동할지 묻기');
     await m.click('#btn-leave-cancel');
     await m.click('label[for="set-useCustom"]');
-    check(await m.locator('#wordset-tools').isVisible(), '모바일 설정: 우리만의 단어 켜면 세트 도구 표시');
+    check(await m.locator('#wordset-tools').isVisible(), '모바일 설정: 커스텀 단어 켜면 세트 도구 표시');
     {
       const ys = await m.evaluate(() => ['btn-wordset-load', 'btn-wordset-save', 'btn-wordset-link'].map((id) => { const e = document.getElementById(id); return e && e.offsetParent !== null ? Math.round(e.getBoundingClientRect().top) : null; }).filter((v) => v !== null));
       check(ys.length >= 1 && ys.every((y) => y === ys[0]), '모바일 설정: 세트 도구 버튼들이 한 줄', JSON.stringify(ys));
