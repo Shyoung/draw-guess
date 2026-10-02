@@ -148,27 +148,29 @@
   var MODE_NAMES = { classic: '돌아가며 그리기', fixed: '한 명이 그리기', blitz: '속도전', relay: '이어 그리기' };
   // 모드 카드를 고를 때 함께 적용되는 프리셋 (그 뒤엔 설정 화면에서 자유롭게 바꿀 수 있다)
   var MODE_PRESETS = { blitz: { drawTime: 25, hints: 0, rounds: 5 }, classic: { drawTime: 80, hints: 2, rounds: 3 }, fixed: { drawTime: 80, hints: 2, rounds: 5 }, relay: { drawTime: 20, hints: 3 } };
-  /** 게임 길이 빠른 선택(모드별). 보통 = 모드를 고를 때의 기본값(MODE_PRESETS) */
-  var LENGTH_PRESETS = {
-    classic: { short: { rounds: 2, drawTime: 60, hints: 1 }, normal: { rounds: 3, drawTime: 80, hints: 2 }, long: { rounds: 5, drawTime: 100, hints: 2 } },
-    fixed: { short: { rounds: 3, drawTime: 60, hints: 1 }, normal: { rounds: 5, drawTime: 80, hints: 2 }, long: { rounds: 8, drawTime: 100, hints: 2 } },
-    blitz: { short: { rounds: 3, drawTime: 20, hints: 0 }, normal: { rounds: 5, drawTime: 25, hints: 0 }, long: { rounds: 8, drawTime: 30, hints: 0 } },
-    // 이어 그리기: 라운드가 없다(문제 수 = 인원). drawTime = 한 명당 그리는 시간, hints = 맞히는 사람 힌트 최대 횟수
-    relay: { short: { drawTime: 15, hints: 2 }, normal: { drawTime: 20, hints: 3 }, long: { drawTime: 30, hints: 3 } }
-  };
-  var PRESET_NAMES = { short: '짧게', normal: '보통', long: '길게' };
   // 이어 그리기 단어 후보 수(wordCount) 범위·기본값 — 첫 주자가 이 중 RELAY_PICK(2)개를 골라 제시어를 만든다. 다른 모드는 2~5, 기본 3(서버와 같음)
   var RELAY_WORD_COUNT = { min: 3, max: 8, def: 6 }, RELAY_PICK = 2;
   function wordCountRange(mode) { return mode === 'relay' ? [RELAY_WORD_COUNT.min, RELAY_WORD_COUNT.max] : [2, 5]; }
-  function presetsFor(mode) { return LENGTH_PRESETS[mode] || LENGTH_PRESETS.classic; }
-  function matchPreset(s) {
-    var ps = presetsFor(s.mode), found = null;
-    Object.keys(ps).forEach(function (k) {
-      var p = ps[k];
-      if ((s.mode === 'relay' || p.rounds === s.rounds) && p.drawTime === s.drawTime && (s.mode === 'blitz' || p.hints === s.hints)) found = k;
-    });
-    return found;
+  function rangeList(a, b, step) { var r = []; for (var v = a; v <= b; v += (step || 1)) r.push(v); return r; }
+  /**
+   * 대기실 숫자 설정(− / + 버튼). 값 목록은 서버 범위와 같다. − / + 는 목록에서 한 칸씩 움직이고 끝값에서는 그쪽 버튼을 끈다.
+   * 이어 그리기: 라운드가 없다(문제 수 = 인원). drawTime = 한 명당 그리는 시간, hints = 맞히는 사람 힌트 최대 횟수
+   */
+  var STEPPERS = {
+    rounds: { values: function () { return rangeList(1, 10); }, fmt: function (v) { return String(v); } },
+    drawTime: { values: function () { return [15, 20, 25].concat(rangeList(30, 180, 10)); }, fmt: function (v) { return v + '초'; } },
+    wordCount: { values: function (s) { var r = wordCountRange(s.mode); return rangeList(r[0], r[1]); }, fmt: function (v) { return v + '개'; } },
+    hints: { values: function () { return rangeList(0, 5); }, fmt: function (v) { return v ? v + '번' : '없음'; } },
+    hintEndAt: { values: function () { return [5, 10, 15, 20, 30, 45, 60]; }, fmt: function (v) { return v + '초 전'; } }
+  };
+  /** key 값을 dir(+1/−1) 방향으로 한 칸. 목록 밖 값이면 그 방향의 가장 가까운 값, 끝이면 null */
+  function stepValue(key, s, dir) {
+    var list = STEPPERS[key].values(s), cur = num(s[key], list[0]), i;
+    if (dir > 0) { for (i = 0; i < list.length; i++) if (list[i] > cur) return list[i]; }
+    else { for (i = list.length - 1; i >= 0; i--) if (list[i] < cur) return list[i]; }
+    return null;
   }
+  var STEP_HOLD_MS = 1500; // − / + 를 빠르게 누르는 동안, 앞서 보낸 값의 room:state 가 화면 값을 되돌리지 않게 잠깐 붙잡는다
   /** 전체 턴 수와 최대 예상 시간(분). 턴마다 단어 고르기(평균 ~8초, 속도전 0) + 결과 5초를 더한다 */
   function estimateGame(s) {
     var conn = state.players.filter(function (p) { return p.connected !== false; }).length;
@@ -183,10 +185,6 @@
     var turns = s.mode === 'fixed' ? s.rounds : s.rounds * n;
     var per = s.drawTime + (s.mode === 'blitz' ? 0 : 8) + 5;
     return { players: n, turns: turns, minutes: Math.max(1, Math.round(turns * per / 60)) };
-  }
-  function presetSub(mode, p) {
-    if (mode === 'relay') return '한 명당 ' + p.drawTime + '초'; // 힌트 수까지 넣으면 폰에서 잘린다
-    return (mode === 'fixed' ? p.rounds + '문제' : p.rounds + '라운드') + ' · ' + p.drawTime + '초';
   }
   /** fixed 모드에서 실제 출제자(지정된 사람이 없으면 호스트). classic 이면 null */
   function fixedDrawerId() {
@@ -237,7 +235,9 @@
     // 이어 그리기: 구간 남은 시간 · 문제 정보(game:drawing.relay) · 내 구간이 시작될 때의 ops 길이(되돌리기 경계) · 내 차례 배너 타이머
     legTimeLeft: null, relayInfo: null, legStartOps: 0, bannerTimer: null,
     // 이어 그리기 맞히는 사람: 힌트 요청 응답 대기 · 막 맞힌 요소(마스크 반짝임 { idx: true, until })
-    hintPending: false, hintPendingTimer: null, solvedFlash: null, relayWaitTimer: null
+    hintPending: false, hintPendingTimer: null, solvedFlash: null, relayWaitTimer: null,
+    // 대기실 설정(방장): 난이도 펼침(한 번 펼치면 방에 있는 동안 유지) · − / + 로 막 바꾼 값 { key: { v, t } }
+    diffOpen: false, stepHold: {}
   };
 
   var profile = { name: '', emoji: EMOJIS[0], color: AV_COLORS[4] };
@@ -698,7 +698,7 @@
     if (typeof s.phase === 'string') state.phase = s.phase;
     state.round = num(s.round, state.round); state.totalRounds = num(s.totalRounds, state.totalRounds);
     state.drawerId = s.drawerId == null ? null : s.drawerId;
-    if (s.settings && typeof s.settings === 'object') state.settings = Object.assign({}, DEFAULT_SETTINGS, s.settings);
+    if (s.settings && typeof s.settings === 'object') { state.settings = Object.assign({}, DEFAULT_SETTINGS, s.settings); keepStepHold(); }
     if (Array.isArray(s.players)) {
       state.players = s.players.filter(function (p) { return p && typeof p === 'object' && p.id != null; }).map(function (p) {
         return { id: p.id, name: String(p.name || '?'), avatar: safeAvatar(p.avatar), score: num(p.score, 0), isDrawing: !!p.isDrawing, hasGuessed: !!p.hasGuessed, connected: p.connected !== false, atResults: !!p.atResults, loggedIn: !!p.loggedIn };
@@ -727,6 +727,15 @@
     if (drawing && (state.phase !== 'drawing' || !isDrawer())) cancelLocalStroke(false);
     if (ui.relayWaitTimer) { clearTimeout(ui.relayWaitTimer); ui.relayWaitTimer = null; } // onChoosing 이 미뤄 둔 그리기를 여기서
     renderAll();
+  }
+  /** 방장이 − / + 로 막 바꾼 값은 STEP_HOLD_MS 동안 그대로 둔다(앞서 보낸 값의 room:state 가 늦게 와도 화면 값이 되돌아가지 않게) */
+  function keepStepHold() {
+    var now = Date.now(), keep = isHost() && state.phase === 'lobby';
+    Object.keys(ui.stepHold).forEach(function (k) {
+      var h = ui.stepHold[k];
+      if (!keep || now - h.t > STEP_HOLD_MS) { delete ui.stepHold[k]; return; }
+      state.settings[k] = h.v;
+    });
   }
   /** room:state.relay · game:drawing.relay 공통 형식 { order, guesserId, legIndex, legCount } (없거나 이상하면 null) */
   function sanitizeRelay(r) {
@@ -1436,6 +1445,7 @@
     if (vr) { vr.setAttribute('data-phase', state.phase); vr.setAttribute('data-role', drawerLayout() ? 'drawer' : 'guesser'); vr.setAttribute('data-tablet', isTabletPortrait() ? '1' : '0'); }
     placeMobileChrome();
     if (roomProfile.open && !roomProfile.formless && (!inRoom || state.phase !== 'lobby')) { closeRoomProfile(); if (inRoom) toast('게임이 시작돼 프로필 수정을 닫았어요'); }
+    if (catsOpen() && !canEditCats()) closeCats(); // 방장이 바뀌거나 게임이 시작되면 카테고리 창을 닫는다
     renderTopbar(); renderPlayers(); renderCenter(); renderOverlays(); renderTimers(); renderChatInput(); renderGallery(); renderResultsSave(); renderChatPeek(); renderAccount();
     pushWordState();
     maybeReloadForUpdate();
@@ -1964,14 +1974,30 @@
     if (hint) hint.textContent = host ? '어떤 방식으로 놀지 골라주세요. 고르면 게임 설정으로 넘어가요.' : '호스트가 게임 모드를 고르고 있어요…';
   }
 
-  /** 단어 후보 수 목록: relay 3~8, 그 밖 2~5. 범위가 바뀔 때만 다시 만든다 */
-  function fillWordCountSelect(mode) {
-    var sel = $('set-wordCount'); if (!sel) return;
-    var rg = wordCountRange(mode), key = rg.join('-');
-    if (sel.getAttribute('data-range') === key) return;
-    sel.setAttribute('data-range', key);
-    var vals = []; for (var v = rg[0]; v <= rg[1]; v++) vals.push(v);
-    fillSelect('set-wordCount', vals, function (x) { return x + '개'; });
+  /** − / + 설정 하나를 그린다: 가운데 값 · 끝값에서 그쪽 버튼 끔 · 방장이 아니거나 대기실이 아니면 둘 다 끔 */
+  function renderStepper(key, s, editable) {
+    var box = $('set-' + key); if (!box) return;
+    var v = num(s[key], 0), lab = $('set-' + key + '-label'), name = lab ? lab.textContent : '';
+    box.setAttribute('data-value', String(v));
+    var val = box.querySelector('.step-val'); if (val) val.textContent = STEPPERS[key].fmt(v, s);
+    var dec = box.querySelector('.step-dec'), inc = box.querySelector('.step-inc');
+    if (dec) { dec.disabled = !editable || stepValue(key, s, -1) == null; dec.setAttribute('aria-label', name + ' 줄이기'); }
+    if (inc) { inc.disabled = !editable || stepValue(key, s, 1) == null; inc.setAttribute('aria-label', name + ' 늘리기'); }
+  }
+  /** 카테고리 요약 한 줄: 전부면 "전체 13개", 3개 이하면 이름을 " · "로, 그 밖은 "13개 중 n개" */
+  function categorySummary() {
+    var cats = selectedCategories(), n = CATEGORY_NAMES.length;
+    return cats.length === n ? '전체 ' + n + '개' : cats.length <= 3 ? cats.join(' · ') : n + '개 중 ' + cats.length + '개';
+  }
+  /** 난이도 요약 한 줄(모드별) */
+  function difficultySummary(s) {
+    if (s.mode === 'blitz') return '힌트 없음 · 단어 자동';
+    if (s.mode === 'relay') return '제시어 후보 ' + s.wordCount + '개 · ' + (s.hints ? '최대 힌트 ' + s.hints + '번' : '힌트 없음');
+    return '후보 ' + s.wordCount + '개 · ' + (s.hints ? '힌트 ' + s.hints + '번 · 마지막 힌트 ' + s.hintEndAt + '초 전' : '힌트 없음');
+  }
+  /** 커스텀 단어만 쓰고 단어가 후보 수 이상이면 기본 단어가 안 나오므로 카테고리 줄을 숨긴다(모자라면 고른 카테고리에서 채우니 보여준다) */
+  function categoriesUnused(s) {
+    return !!(s.customWordsOnly && parseWords(s.customWords || '').words.length >= s.wordCount);
   }
   function renderSettings() {
     var s = state.settings, editable = isHost() && state.phase === 'lobby';
@@ -1980,23 +2006,13 @@
       if (document.activeElement === n && editable) return; // 입력 중엔 덮어쓰지 않음
       if (n.type === 'checkbox') n.checked = !!v; else n.value = String(v);
     }
-    fillWordCountSelect(s.mode);
-    setVal('set-rounds', s.rounds); setVal('set-drawTime', s.drawTime); setVal('set-wordCount', s.wordCount);
-    setVal('set-hints', s.hints); setVal('set-hintEndAt', s.hintEndAt);
     setVal('set-customWords', s.customWords || ''); setVal('set-customWordsOnly', s.customWordsOnly);
-    var fixed = s.mode === 'fixed';
-    // 게임 길이 · 예상 시간 · 커스텀 단어 · 요약(방장이 아닌 사람)
-    var preset = matchPreset(s), ps = presetsFor(s.mode), est = estimateGame(s);
-    document.querySelectorAll('#preset-row .preset-btn').forEach(function (b) {
-      var k = b.getAttribute('data-preset'), p = ps[k];
-      b.setAttribute('aria-checked', k === preset ? 'true' : 'false');
-      b.disabled = !editable;
-      var sub = b.querySelector('.preset-sub'); if (sub && p) sub.textContent = presetSub(s.mode, p);
-    });
-    var relay = s.mode === 'relay';
+    var fixed = s.mode === 'fixed', relay = s.mode === 'relay', blitz = s.mode === 'blitz';
+    var est = estimateGame(s);
+    // ① 게임 길이: 예상 인원·시간
     var estEl = $('settings-estimate');
     if (estEl) estEl.textContent = (relay ? est.players + (est.below ? '명 기준 · ' : '명 · ') + est.turns + '문제' : fixed ? s.rounds + '문제' : est.players + '명 × ' + s.rounds + '라운드') + ' · 최대 약 ' + est.minutes + '분';
-    var dn = $('details-note'); if (dn) dn.textContent = preset ? '' : '직접 설정함';
+    // 방장이 아닌 사람: 요약 칩 + 커스텀 단어 목록
     var hostView = $('settings-host'), sum = $('settings-summary');
     if (hostView) hostView.hidden = !isHost();
     if (sum) {
@@ -2004,9 +2020,9 @@
       if (!sum.hidden) {
         var cw = parseWords(s.customWords || '').words.length;
         var chips = relay
-          ? [[preset ? PRESET_NAMES[preset] : '직접 설정', 'sum-main'], [est.turns + '문제'], ['한 명당 ' + s.drawTime + '초'], [s.hints ? '힌트 최대 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']]
-          : [[preset ? PRESET_NAMES[preset] : '직접 설정', 'sum-main'], [fixed ? s.rounds + '문제' : s.rounds + '라운드'], ['한 턴 ' + s.drawTime + '초'],
-            [s.mode === 'blitz' ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']];
+          ? [[est.turns + '문제'], ['한 명당 ' + s.drawTime + '초'], [s.hints ? '힌트 최대 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']]
+          : [[fixed ? s.rounds + '문제' : s.rounds + '라운드'], ['한 턴 ' + s.drawTime + '초'],
+            [blitz ? '힌트 없음' : s.hints ? '힌트 ' + s.hints + '번' : '힌트 없음'], ['최대 약 ' + est.minutes + '분']];
         var cwList = cw ? parseWords(s.customWords || '').words : [];
         var sumCats = Array.isArray(s.categories) ? s.categories : [];
         // 커스텀 단어만 쓰기라도 단어가 wordCount 미만이면 고른 카테고리에서 채우므로(server/words.js pickWords) 칩을 보여준다
@@ -2028,44 +2044,47 @@
         }
       }
     }
+    // ② 단어: 커스텀 단어 스위치 · 카테고리 요약 한 줄(+ 창 안의 칩)
     var uc = $('set-useCustom'), cb0 = $('custom-body');
     var hasWords = !!String(s.customWords || '').trim();
     if (uc) { if (!ui.customOpen && hasWords) ui.customOpen = true; uc.checked = !!ui.customOpen; uc.disabled = !editable; }
     if (cb0) cb0.hidden = !ui.customOpen;
     var wsl = $('wordset-share'); if (wsl) wsl.hidden = !hasWords || !editable;
-    // 기본 단어 카테고리 칩. 커스텀 단어만 쓰고 단어가 wordCount 이상이면 기본 단어가 안 나오므로 숨긴다(모자라면 고른 카테고리에서 채우니 보여준다)
-    var cats = selectedCategories(), catBlock = $('cat-block');
-    if (catBlock) {
-      catBlock.hidden = !!(s.customWordsOnly && hasWords && parseWords(s.customWords || '').words.length >= s.wordCount);
-      var allOn = cats.length === CATEGORY_NAMES.length;
-      var cn = $('cat-note'); if (cn) cn.textContent = allOn ? '전체 ' + CATEGORY_NAMES.length + '개' : CATEGORY_NAMES.length + '개 중 ' + cats.length + '개';
-      document.querySelectorAll('#cat-row .cat-chip').forEach(function (b) {
-        b.setAttribute('aria-pressed', cats.indexOf(b.getAttribute('data-cat')) !== -1 ? 'true' : 'false');
-        b.disabled = !editable;
-      });
-      var ca = $('btn-cat-all'), cnn = $('btn-cat-none');
-      if (ca) ca.disabled = !editable || allOn;
-      if (cnn) cnn.disabled = !editable || cats.length === 1;
-    }
-    var rh = $('set-rounds-help'); if (rh) rh.textContent = fixed ? '출제자가 그릴 단어 개수' : '모두가 한 번씩 그리면 1라운드';
+    var cats = selectedCategories(), allOn = cats.length === CATEGORY_NAMES.length, catBlock = $('cat-block');
+    if (catBlock) catBlock.hidden = categoriesUnused(s);
+    var cn = $('cat-note'); if (cn) cn.textContent = categorySummary();
+    var cno = $('cats-note'); if (cno) cno.textContent = allOn ? '전체 ' + CATEGORY_NAMES.length + '개' : CATEGORY_NAMES.length + '개 중 ' + cats.length + '개';
+    var cop = $('btn-cat-open'); if (cop) cop.disabled = !editable;
+    document.querySelectorAll('#cat-row .cat-chip').forEach(function (b) {
+      b.setAttribute('aria-pressed', cats.indexOf(b.getAttribute('data-cat')) !== -1 ? 'true' : 'false');
+      b.disabled = !editable;
+    });
+    var ca = $('btn-cat-all'), cnn = $('btn-cat-none');
+    if (ca) ca.disabled = !editable || allOn;
+    if (cnn) cnn.disabled = !editable || cats.length === 1;
+    if (catsOpen() && !canEditCats()) closeCats();
+    // 모드별 이름·도움말
     var badge = $('mode-badge'); if (badge) badge.textContent = MODE_NAMES[s.mode] || s.mode;
     var back = $('btn-mode-back'); if (back) back.hidden = !isHost();
     var rl = $('set-rounds-label'); if (rl) rl.textContent = fixed ? '문제 수' : '라운드';
+    var rh = $('set-rounds-help'); if (rh) rh.textContent = fixed ? '출제자가 그릴 단어 개수' : '모두가 한 번씩 그리면 1라운드';
     var fw = $('set-fixedDrawer-wrap'); if (fw) fw.hidden = !fixed;
-    // 속도전: 단어 후보·힌트 설정은 의미가 없으므로 숨긴다
-    var blitz = s.mode === 'blitz';
-    ['set-wordCount', 'set-hints', 'set-hintEndAt'].forEach(function (id) {
-      var n = $(id); var wrap = n && n.closest ? n.closest('.setting') : null; if (wrap) wrap.hidden = blitz;
-    });
-    // 이어 그리기: 라운드·힌트 시점은 쓰지 않는다(문제 수 = 인원, 힌트는 맞히는 사람이 버튼으로). 시간·힌트는 뜻이 바뀐 라벨로
-    ['set-rounds', 'set-hintEndAt'].forEach(function (id) {
-      var n = $(id); var wrap = n && n.closest ? n.closest('.setting') : null; if (wrap && relay) wrap.hidden = true; else if (wrap && id === 'set-rounds') wrap.hidden = false;
-    });
     var dtl = $('set-drawTime-label'); if (dtl) dtl.textContent = relay ? '한 명당 시간' : '그리기 시간';
     var dth = $('set-drawTime-help'); if (dth) dth.textContent = relay ? '주자 한 명이 이어 그리는 시간' : '한 사람이 그리는 시간';
+    var wcl = $('set-wordCount-label'); if (wcl) wcl.textContent = relay ? '제시어 후보' : '단어 후보 수';
+    var wch = $('set-wordCount-help'); if (wch) wch.textContent = relay ? '첫 주자가 이 중 ' + RELAY_PICK + '개를 골라 제시어를 만들어요' : '그리는 사람이 고를 수 있는 단어 개수';
     var hl = $('set-hints-label'); if (hl) hl.textContent = relay ? '최대 힌트' : '힌트 횟수';
     var hh = $('set-hints-help'); if (hh) hh.textContent = relay ? '맞히는 사람이 버튼으로 초성을 여는 횟수. 쓸 때마다 점수가 줄어요' : '정답 글자를 초성으로 몇 번 보여 줄지';
-    var wch = $('set-wordCount-help'); if (wch) wch.textContent = relay ? '첫 주자가 이 중 ' + RELAY_PICK + '개를 골라 제시어를 만들어요' : '그리는 사람이 고를 수 있는 단어 개수';
+    // 이어 그리기: 라운드 대신 "문제 수 = 인원(n명)" 글, 마지막 힌트 시점은 쓰지 않는다(힌트는 맞히는 사람이 버튼으로)
+    var rr = $('row-rounds'); if (rr) rr.hidden = relay;
+    var rtn = $('relay-turns-note'); if (rtn) { rtn.hidden = !relay; rtn.textContent = relay ? '문제 수 = 인원(' + onlineCount() + '명) · 모두 한 번씩 맞혀요' : ''; }
+    var rhe = $('row-hintEndAt'); if (rhe) rhe.hidden = relay;
+    Object.keys(STEPPERS).forEach(function (k) { renderStepper(k, s, editable); });
+    // ③ 난이도: 요약 한 줄 + 펼침. 속도전은 힌트·단어 후보가 없으므로 요약만(바꾸기 버튼 없음)
+    var dno = $('diff-note'); if (dno) dno.textContent = difficultySummary(s);
+    var dtg = $('btn-diff-toggle'), dbd = $('diff-body');
+    if (dtg) { dtg.hidden = blitz; dtg.disabled = !editable; dtg.setAttribute('aria-expanded', ui.diffOpen && !blitz ? 'true' : 'false'); dtg.textContent = ui.diffOpen ? '접기' : '바꾸기'; }
+    if (dbd) dbd.hidden = blitz || !ui.diffOpen;
     var fsel = $('set-fixedDrawer');
     if (fsel && fixed) {
       var want = fixedDrawerId();
@@ -2078,7 +2097,7 @@
       }
       if (document.activeElement !== fsel) fsel.value = want || '';
     }
-    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWords', 'set-customWordsOnly', 'set-fixedDrawer'].forEach(function (id) {
+    ['set-customWords', 'set-customWordsOnly', 'set-fixedDrawer'].forEach(function (id) {
       var n = $(id); if (n) n.disabled = !editable;
     });
     var btn = $('btn-start'), hint = $('start-hint');
@@ -2970,7 +2989,7 @@
     state.roomCode = null; state.hostId = null; state.phase = 'lobby'; state.round = 0; state.totalRounds = 0;
     state.drawerId = null; state.players = []; state.settings = Object.assign({}, DEFAULT_SETTINGS);
     ui.wordMask = ''; ui.word = null; ui.wordOptions = null; ui.turnEnd = null; ui.ranking = null; ui.optionsKey = '';
-    ui.gallery = null; ui.galleryThumbs = []; ui.galleryOpen = false; ui.saveStatus = null; ui.saveJob = null; ui.customOpen = false; ui.customStash = null; ui.setSource = null;
+    ui.gallery = null; ui.galleryThumbs = []; ui.galleryOpen = false; ui.saveStatus = null; ui.saveJob = null; ui.customOpen = false; ui.customStash = null; ui.setSource = null; ui.diffOpen = false; ui.stepHold = {};
     state.lobbyStep = 'mode'; state.fixedDrawerId = null;
     setTimeLeft(null);
     resetCanvasState(); clearChat();
@@ -2978,6 +2997,7 @@
     if (vr) vr.hidden = true; if (vl) vl.hidden = false;
     closeLeaveDialog();
     closeRoomProfile();
+    closeCats();
     // 방에서 나오면 메인. 방 항목을 걷어내고(→ 메인 항목), 주소에서 ?room= 을 뺀다
     landing.invite = null; landing.ready = true;
     afterHistory(function () { try { if (history.state && history.state.inRoom) histBack(); } catch (e) { /* ignore */ } });
@@ -3105,20 +3125,13 @@
   // ------------------------------------------------------------------
   // Room UI wiring
   // ------------------------------------------------------------------
-  function fillSelect(id, values, fmt) {
-    var s = $(id); if (!s) return;
-    s.innerHTML = '';
-    values.forEach(function (v) { var o = el('option', null, fmt ? fmt(v) : String(v)); o.value = String(v); s.appendChild(o); });
-  }
   function collectSettings() {
     var s = Object.assign({}, state.settings);
     var g = function (id) { return $(id); };
-    if (g('set-rounds')) s.rounds = clamp(num(g('set-rounds').value, 3), 1, 10);
-    if (g('set-drawTime')) s.drawTime = clamp(num(g('set-drawTime').value, 80), 15, 180);
+    // 숫자 설정(− / +)은 누를 때 state.settings 에 바로 들어가므로 여기서는 범위만 지킨다
     var wcr = wordCountRange(s.mode);
-    if (g('set-wordCount')) s.wordCount = clamp(num(g('set-wordCount').value, s.wordCount), wcr[0], wcr[1]);
-    if (g('set-hints')) s.hints = clamp(num(g('set-hints').value, 2), 0, 5);
-    if (g('set-hintEndAt')) s.hintEndAt = clamp(num(g('set-hintEndAt').value, 15), 5, 60);
+    s.rounds = clamp(num(s.rounds, 3), 1, 10); s.drawTime = clamp(num(s.drawTime, 80), 15, 180);
+    s.wordCount = clamp(num(s.wordCount, 3), wcr[0], wcr[1]); s.hints = clamp(num(s.hints, 2), 0, 5); s.hintEndAt = clamp(num(s.hintEndAt, 15), 5, 60);
     if (g('set-customWords')) s.customWords = String(g('set-customWords').value || '').slice(0, 2000);
     if (g('set-customWordsOnly')) s.customWordsOnly = !!g('set-customWordsOnly').checked;
     if (s.mode === 'fixed' && g('set-fixedDrawer') && g('set-fixedDrawer').value) s.fixedDrawerId = g('set-fixedDrawer').value;
@@ -3131,22 +3144,74 @@
     emit('room:settings', { settings: s });
   }
   var sendSettingsDebounced = debounce(sendSettings, 300);
+  /** − / + 한 번: 값 목록에서 한 칸 옮겨 바로 보낸다. 끝값에 닿아 누른 버튼이 꺼지면 반대쪽 버튼으로 포커스를 옮긴다 */
+  function stepSetting(key, dir, btn) {
+    if (!isHost() || state.phase !== 'lobby' || !STEPPERS[key]) return;
+    var v = stepValue(key, state.settings, dir); if (v == null) return;
+    state.settings = Object.assign({}, state.settings); state.settings[key] = v;
+    ui.stepHold[key] = { v: v, t: Date.now() };
+    sendSettings(); renderAll();
+    if (btn && btn.disabled && document.activeElement !== btn) {
+      var other = btn.parentNode && btn.parentNode.querySelector(dir > 0 ? '.step-dec' : '.step-inc');
+      if (focusableNow(other)) focusNode(other);
+    }
+  }
+
+  // ---------- 대기실 설정 > 카테고리 고르기 창(불러오기 dialog 와 같은 규칙: 포커스 복귀 · Tab 트랩 · 대기실을 벗어나면 닫힘) ----------
+  function catsOpen() { var d = $('overlay-cats'); return !!(d && !d.hidden); }
+  function canEditCats() { return inRoom && isHost() && state.phase === 'lobby' && state.lobbyStep !== 'mode' && !categoriesUnused(state.settings); }
+  function openCats() {
+    var d = $('overlay-cats'); if (!d || !canEditCats()) return;
+    d.hidden = false;
+    renderAll();
+    focusNode(d.querySelector('.cat-chip:not(:disabled)') || $('btn-cats-close')); // 첫 칩, 없으면 닫기
+  }
+  /** 닫으면 [고르기] 로 포커스를 돌려놓는다(버튼이 숨었거나 비활성이면 그대로 둔다) */
+  function closeCats() {
+    var d = $('overlay-cats'); if (!d || d.hidden) return;
+    d.hidden = true;
+    var b = $('btn-cat-open'); if (focusableNow(b)) focusNode(b);
+  }
 
   function buildRoom() {
-    var range = function (a, b, step) { var r = []; for (var v = a; v <= b; v += (step || 1)) r.push(v); return r; };
-    fillSelect('set-rounds', range(1, 10), function (v) { return v + ' 라운드'; });
-    fillSelect('set-drawTime', [15, 20, 25].concat(range(30, 180, 10)), function (v) { return v + '초'; });
-    fillWordCountSelect(state.settings.mode);
-    fillSelect('set-hints', range(0, 5), function (v) { return v === 0 ? '없음' : v + '회'; });
-    fillSelect('set-hintEndAt', [5, 10, 15, 20, 30, 45, 60], function (v) { return '종료 ' + v + '초 전'; });
-
-    ['set-rounds', 'set-drawTime', 'set-wordCount', 'set-hints', 'set-hintEndAt', 'set-customWordsOnly', 'set-fixedDrawer'].forEach(function (id) {
+    // 숫자 설정: [−] 값 [+]. 누르면 바로 state.settings 에 넣고 보낸다(room:settings 그대로)
+    document.querySelectorAll('#settings-host .stepper[data-key]').forEach(function (box) {
+      var key = box.getAttribute('data-key');
+      var dec = el('button', 'step-btn step-dec', '−'), val = el('span', 'step-val'), inc = el('button', 'step-btn step-inc', '+');
+      dec.type = 'button'; inc.type = 'button'; dec.setAttribute('data-dir', '-1'); inc.setAttribute('data-dir', '1');
+      val.setAttribute('aria-live', 'polite');
+      box.appendChild(dec); box.appendChild(val); box.appendChild(inc);
+      box.addEventListener('click', function (ev) {
+        var b = ev.target && ev.target.closest ? ev.target.closest('.step-btn') : null; if (!b || b.disabled) return;
+        stepSetting(key, Number(b.getAttribute('data-dir')), b);
+      });
+    });
+    ['set-customWordsOnly', 'set-fixedDrawer'].forEach(function (id) {
       var n = $(id); if (n) n.addEventListener('change', sendSettings);
     });
+    // ③ 난이도 펼치기/접기(한 번 펼치면 room:state 로 다시 그려도 그대로)
+    var dtg = $('btn-diff-toggle');
+    if (dtg) dtg.addEventListener('click', function () { ui.diffOpen = !ui.diffOpen; renderAll(); });
+    // ② 카테고리 창
+    var cop = $('btn-cat-open'); if (cop) cop.addEventListener('click', openCats);
+    var ccl = $('btn-cats-close'); if (ccl) ccl.addEventListener('click', closeCats);
+    var cov = $('overlay-cats');
+    if (cov) {
+      cov.addEventListener('click', function (e) { if (e.target === cov) closeCats(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Tab' && catsOpen()) trapTab(cov.querySelector('.modal-card'), e); });
+    }
+    // 폰: 글자를 입력하는 동안은 "게임 시작" 고정을 풀어 키보드 위 입력칸을 가리지 않게 한다(.typing — style.css 모바일 블록)
+    var spn = $('settings-panel');
+    if (spn) {
+      var isText = function (n) { return !!(n && (n.tagName === 'TEXTAREA' || (n.tagName === 'INPUT' && n.type === 'text'))); };
+      spn.addEventListener('focusin', function (e) { if (isText(e.target)) spn.classList.add('typing'); });
+      spn.addEventListener('focusout', function (e) { if (!(isText(e.relatedTarget) && spn.contains(e.relatedTarget))) spn.classList.remove('typing'); });
+    }
     document.querySelectorAll('#mode-panel .mode-card').forEach(function (b) {
       b.addEventListener('click', function () {
         if (!isHost() || state.phase !== 'lobby') return;
         var mode = b.getAttribute('data-mode'), wasRelay = state.settings.mode === 'relay';
+        ui.stepHold = {}; // 모드 기본값이 막 누른 값에 덮이지 않게
         state.settings = Object.assign({}, state.settings, MODE_PRESETS[mode] || {}, { mode: mode });
         if ((mode === 'relay') !== wasRelay) state.settings.wordCount = mode === 'relay' ? RELAY_WORD_COUNT.def : DEFAULT_SETTINGS.wordCount;
         emit('room:settings', { settings: state.settings });
@@ -3191,15 +3256,6 @@
       // 규칙상 최소 하나는 남아야 하므로 첫 카테고리만 남기고 알려 준다. 상태가 늘 유효하고 서버·비방장 요약과 바로 맞아떨어진다
       setCategories([CATEGORY_NAMES[0]]);
       toast('하나는 남겨야 해서 "' + CATEGORY_NAMES[0] + '"만 남겼어요. 쓰고 싶은 카테고리를 눌러 더해요');
-    });
-    document.querySelectorAll('#preset-row .preset-btn').forEach(function (b) {
-      b.addEventListener('click', function () {
-        if (!isHost() || state.phase !== 'lobby') return;
-        var p = presetsFor(state.settings.mode)[b.getAttribute('data-preset')]; if (!p) return;
-        state.settings = Object.assign({}, state.settings, p);
-        emit('room:settings', { settings: state.settings });
-        renderAll();
-      });
     });
     var ucb = $('set-useCustom');
     if (ucb) ucb.addEventListener('change', function () {
@@ -3270,6 +3326,7 @@
       if (e.key !== 'Escape') return;
       if (leaveDialogOpen()) { closeLeaveDialog(); return; }
       if (wsLoadOpen()) { closeWsLoad(); return; }
+      if (catsOpen()) { closeCats(); return; }
       var dd = $('overlay-delete'); if (dd && !dd.hidden) { closeDeleteDialog(); return; }
       if (vault.viewing) { closeDrawing(); return; }
       if (openSheetId) { closeSheet(false); return; }

@@ -12,7 +12,7 @@
  *  - choosing/turnEnd 오버레이 카드, gameOver(#btn-results-done 포함), 갤러리
  * 2회차(사용자 단어 12자+): 헤더 ≤ 2행(높이 ≤ 120px), 행 겹침 없음, 가로 스크롤 없음
  */
-const { runMobileFlow, say, sleep } = require('./mobile-lib');
+const { runMobileFlow, say, sleep, setStep } = require('./mobile-lib');
 
 const VW = 390, VH = 664, KB_VH = 360;
 let failures = 0;
@@ -128,28 +128,52 @@ async function mainRun() {
       check((await m.locator('#btn-start').count()) === 1, '로비(설정): #btn-start 존재');
       check(mm.chatFont >= 16, '채팅 입력 font-size ≥ 16px', mm.chatFont);
       check(mm.sw <= VW, '로비(설정): 가로 스크롤 없음', mm.sw);
-      // 기본 단어 카테고리: 커스텀 단어가 wordCount 이상이면 블록 숨김, 아니면 13개 칩 전부 켜진 채 여러 줄로 접히고 "모두 선택 · 모두 해제"는 제목 줄 오른쪽
+      // 설정 화면: 세 묶음 · − / + 버튼 터치 목표 · 게임 시작은 화면 아래 고정
+      check(await m.evaluate(() => [...document.querySelectorAll('#settings-host > .set-group .block-title')].map((n) => n.textContent).join('|')) === '게임 길이|단어|난이도', '로비(설정): 세 묶음 게임 길이 · 단어 · 난이도');
+      {
+        const sb = await m.locator('#settings-host .step-btn').evaluateAll((els) => els.filter((e) => e.getClientRects().length).map((e) => { const r = e.getBoundingClientRect(); return { x: r.left, w: r.width, h: r.height }; }));
+        check(sb.length >= 4 && sb.every((b) => b.w >= 40 && b.h >= 40 && b.x >= 0 && b.x + b.w <= VW + 0.5), '로비(설정): − / + 버튼 ≥ 40px · 화면 안', JSON.stringify(sb.slice(0, 2)));
+      }
+      await m.evaluate(() => window.scrollTo(0, 0));
+      await sleep(150);
+      {
+        const st = await box(m, '#btn-start'), pos = await m.locator('#start-row').evaluate((e) => getComputedStyle(e).position);
+        check(pos === 'sticky' && inside(st) && st.y + st.height >= VH - 90, '로비(설정): 맨 위에서도 "게임 시작"이 화면 아래에 보임(고정)', `${pos} ${fmt(st)}`);
+      }
+      // 카테고리: 커스텀 단어가 wordCount 이상이면 줄 숨김, 아니면 요약 + [고르기] → 아래에서 올라오는 창(칩 13개 전부 켜짐, 여러 줄, "모두 선택 · 모두 해제"는 오른쪽)
       if (await m.locator('#cat-block').isHidden()) {
-        check(true, '로비(설정): 커스텀 단어만 쓰기(단어 충분) → 카테고리 블록 숨김');
+        check(true, '로비(설정): 커스텀 단어만 쓰기(단어 충분) → 카테고리 줄 숨김');
       } else {
+        check((await m.textContent('#cat-note')) === '전체 13개', '로비(설정): 카테고리 요약 "전체 13개"', await m.textContent('#cat-note'));
+        await m.locator('#btn-cat-open').tap();
+        await m.waitForSelector('#overlay-cats:not([hidden])', { timeout: 3000 });
+        await sleep(300);
+        const card = await box(m, '#overlay-cats .card-cats');
+        check(!!card && Math.abs(card.y + card.height - VH) <= 1.5 && card.width >= VW - 1, '로비(설정): 카테고리 창은 화면 아래에 붙은 시트(폭 전체)', fmt(card));
         const chips = await m.locator('#cat-row .cat-chip').evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, on: e.getAttribute('aria-pressed') === 'true' }; }));
         const rowsY = [...new Set(chips.map((c) => Math.round(c.y)))];
         check(chips.length === 13 && chips.every((c) => c.on), '로비(설정): 카테고리 칩 13개 전부 켜짐', `${chips.length}/${chips.filter((c) => c.on).length}`);
-        check(rowsY.length >= 3 && chips.every((c) => c.x >= 0 && c.x + c.w <= VW + 0.5), '로비(설정): 칩이 화면 안에서 3줄 이상으로 접힘', `rows=${rowsY.length}`);
-        check(chips.every((c) => c.h >= 30), '로비(설정): 칩 높이 ≥ 30px(터치 목표)', Math.min(...chips.map((c) => c.h)));
-        const title = await box(m, '#cat-block .block-title'), tools = await box(m, '#cat-block .cat-tools'), all = await box(m, '#btn-cat-all'), none = await box(m, '#btn-cat-none'), row = await box(m, '#cat-row');
+        check(rowsY.length >= 3 && chips.every((c) => c.x >= 0 && c.x + c.w <= VW + 0.5 && c.y + c.h <= VH + 0.5), '로비(설정): 칩이 화면 안에서 3줄 이상으로 접힘', `rows=${rowsY.length}`);
+        check(chips.every((c) => c.h >= 36), '로비(설정): 칩 높이 ≥ 36px(터치 목표)', Math.min(...chips.map((c) => c.h)));
+        const title = await box(m, '#cats-title'), tools = await box(m, '#overlay-cats .cat-tools'), all = await box(m, '#btn-cat-all'), none = await box(m, '#btn-cat-none'), row = await box(m, '#cat-row');
         check(!!tools && tools.x + tools.width <= VW + 0.5 && tools.x + tools.width >= VW - 60, '로비(설정): "모두 선택 · 모두 해제"가 오른쪽 끝에 정렬', fmt(tools));
         check(!!title && !!tools && !overlaps(title, tools) && !!row && tools.y + tools.height <= row.y + 0.5, '로비(설정): 버튼이 제목과 안 겹치고 칩 줄 위에 있음', `${fmt(title)} / ${fmt(tools)} / ${fmt(row)}`);
         check(!!all && !!none && all.height >= 32 && none.height >= 32, '로비(설정): 모두 선택/해제 버튼 높이 ≥ 32px', `${fmt(all)} / ${fmt(none)}`);
         check(await m.locator('#btn-cat-all').isDisabled() && await m.locator('#btn-cat-none').isEnabled(), '로비(설정): 전부 켜진 상태 → "모두 선택" 비활성 · "모두 해제" 활성');
-        // 칩 하나를 끄면 12개, 다시 켜면 전부([]) — 폰에서 탭이 먹는지
+        // 칩 하나를 끄면 바로 12개, 다시 켜면 전부([]) — 폰에서 탭이 먹는지
         await m.locator('#cat-row .cat-chip[data-cat="동물"]').tap();
         await m.waitForFunction(() => window.__dg.state.settings.categories.length === 12, null, { timeout: 3000 }).catch(() => {});
-        check((await m.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 12 && await m.locator('#btn-cat-all').isEnabled(), '로비(설정): 칩 탭으로 하나 끄기 → 12개 · "모두 선택" 활성');
+        check((await m.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 12 && await m.locator('#btn-cat-all').isEnabled() && (await m.textContent('#cat-note')) === '13개 중 12개', '로비(설정): 칩 탭으로 하나 끄기 → 12개 · 요약 "13개 중 12개" · "모두 선택" 활성');
         await m.locator('#btn-cat-all').tap();
         await m.waitForFunction(() => window.__dg.state.settings.categories.length === 0, null, { timeout: 3000 }).catch(() => {});
         check((await m.locator('#cat-row .cat-chip[aria-pressed="true"]').count()) === 13, '로비(설정): "모두 선택" 탭 → 13개 전부 켜짐');
+        await m.locator('#btn-cats-close').tap();
+        await sleep(150);
+        check(await m.locator('#overlay-cats').isHidden() && await m.evaluate(() => document.activeElement && document.activeElement.id === 'btn-cat-open'), '로비(설정): 닫기 → 창 닫힘 · [고르기]로 포커스 복귀');
       }
+      // 난이도: 처음엔 접힌 채 요약 한 줄(lib 가 펼쳐 둠) → 펼친 상태는 다시 그려도 유지
+      await m.evaluate(() => window.__dg.renderAll());
+      check(await m.locator('#diff-body').isVisible() && (await m.textContent('#diff-note')).startsWith('후보 '), '로비(설정): 난이도 펼침 유지 · 요약 한 줄', await m.textContent('#diff-note'));
       // 미니 채팅: 목록(최대 5줄) + 입력창이 보이고, 목록을 터치하면 시트
       const ml = await m.locator('#chat-panel #chat-list').evaluate((e) => ({ h: Math.round(e.getBoundingClientRect().height), maxH: getComputedStyle(e).maxHeight, vis: getComputedStyle(e).display !== 'none' }));
       check(ml.vis && ml.h <= 170, '로비: 미니 채팅 목록 표시(≤5줄, ≤170px)', JSON.stringify(ml));
@@ -398,6 +422,22 @@ const LONG_WORDS = '아이스아메리카노한잔, 딸기바나나초코스무�
 async function longWordRun() {
   await runMobileFlow(async (stage, ctx) => {
     const m = ctx.mobile;
+    if (stage === 'lobby-settings') {
+      // 커스텀 단어 입력 중(키보드): "게임 시작" 고정을 풀어 입력칸이 버튼에 가리지 않는다
+      check(await m.locator('#set-customWords').isVisible(), '커스텀 단어: 입력칸 보임');
+      await m.locator('#set-customWords').focus();
+      await m.setViewportSize({ width: VW, height: KB_VH });
+      await m.locator('#set-customWords').evaluate((e) => e.scrollIntoView({ block: 'center' }));
+      await sleep(300);
+      const typ = await m.evaluate(() => ({ cls: document.getElementById('settings-panel').classList.contains('typing'), pos: getComputedStyle(document.getElementById('start-row')).position }));
+      const ta = await box(m, '#set-customWords'), st = await box(m, '#btn-start');
+      check(typ.cls && typ.pos === 'static', '커스텀 단어 입력 중: 시작 버튼 고정 풀림(.typing · static)', JSON.stringify(typ));
+      check(inside(ta, KB_VH) && !overlaps(ta, st), '커스텀 단어 입력 중(키보드 360px): 입력칸이 화면 안 · 시작 버튼에 안 가림', `${fmt(ta)} / ${fmt(st)}`);
+      await m.locator('#set-customWords').blur();
+      await m.setViewportSize({ width: VW, height: VH });
+      await sleep(200);
+      check((await m.locator('#start-row').evaluate((e) => getComputedStyle(e).position)) === 'sticky' && !(await m.evaluate(() => document.getElementById('settings-panel').classList.contains('typing'))), '입력을 마치면 시작 버튼 다시 고정');
+    }
     if (stage === 'drawing-drawer') {
       const w = (await m.locator('.word-secret .word').textContent().catch(() => '')).trim();
       check(w.length >= 10, '긴 단어(출제자): 단어 10자 이상', w);
@@ -464,9 +504,11 @@ async function relayRun() {
     await m.click('#mode-panel .mode-card[data-mode="relay"]');
     await m.waitForSelector('#settings-panel:not([hidden])', { timeout: 3000 });
     check(await m.locator('#btn-start').isEnabled(), 'relay 360px: 3명이면 시작 버튼 풀림');
-    await m.click('#settings-details > summary');
-    await m.selectOption('#set-drawTime', '15');
-    await m.selectOption('#set-wordCount', '8'); // 가장 많은 후보(8개)로 360px 한 화면 검사
+    await setStep(m, 'drawTime', 15);
+    check(await m.locator('#row-rounds').isHidden() && (await m.textContent('#relay-turns-note')).includes('문제 수 = 인원(3명)'), 'relay 360px: 라운드 줄 대신 "문제 수 = 인원(3명)"', await m.textContent('#relay-turns-note'));
+    await m.click('#btn-diff-toggle');
+    check(await m.locator('#row-hintEndAt').isHidden() && (await m.textContent('#set-wordCount-label')) === '제시어 후보', 'relay 360px: 난이도에 제시어 후보 · 최대 힌트(마지막 힌트 시점 숨김)');
+    await setStep(m, 'wordCount', 8); // 가장 많은 후보(8개)로 360px 한 화면 검사
     await sleep(400);
     await m.evaluate(() => {
       const v = document.getElementById('view-room'); window.__roles = [];
