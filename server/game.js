@@ -8,7 +8,7 @@
  *  - word / wordOptions 는 출제자에게만 보낸다
  */
 
-const { pickWords, categoryOf, CATEGORY_NAMES, pickRelayWords, RELAY_PART_COUNT, maskParts, revealPartsAll, matchParts, PART_SEP } = require('./words');
+const { pickWords, categoryOf, CATEGORY_NAMES, parseCustomWords, pickRelayWords, RELAY_PART_COUNT, maskParts, revealPartsAll, matchParts, PART_SEP } = require('./words');
 const { normalizeAnswer, levenshtein, isHangulSyllable, hintChar, maskWord, revealAll } = require('./textmatch');
 
 // ── 상수 ────────────────────────────────────────────────────────
@@ -1047,7 +1047,9 @@ class Room {
     this.bytesOut = 0;
     this.metric('game_started', {
       mode: this.settings.mode, players: this.connectedPlayers().length, rounds: this.settings.rounds, drawTime: this.settings.drawTime,
-      customWords: !!(this.settings.customWords && String(this.settings.customWords).trim()),
+      // 설정 사용 지표: 개수·불린만(단어·카테고리 이름은 남기지 않는다). 모든 모드(relay 포함)가 여기서 나간다
+      customWords: parseCustomWords(this.settings.customWords).length > 0,
+      categories: Array.isArray(this.settings.categories) ? this.settings.categories.length : 0,
     });
 
     this.systemMessage('게임이 시작되었습니다!');

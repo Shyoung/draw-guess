@@ -2,6 +2,7 @@
  * 이용 지표 시뮬레이션 (socket.io-client)
  *  - [metric] 로그 한 줄: room_created(ref · fromWordSetLink) · player_joined(via/ref/midGame/size) · game_started · game_completed(turns/bytesOut)
  *    · game_aborted(host · notEnoughPlayers) · room_closed · room_full_rejected
+ *  - game_started 설정 사용 지표: categories(개수, 0 = 전체) · customWords(불린) → 일별 starts_cat_some · starts_custom. 단어·카테고리 이름은 로그에 없다
  *  - 로그에 닉네임이 없다
  *  - /admin/stats: 키 없음/틀림 → 403, 맞으면 오늘 누적 = 이벤트 합. ADMIN_KEY 없는 서버는 404
  *  node test/metrics.js
@@ -10,6 +11,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const { io } = require('socket.io-client');
+const { CATEGORY_NAMES } = require('../server/words');
 
 const PORT = 3131 + Number(process.env.TEST_PORT_OFFSET ?? 0);
 const URL = `http://localhost:${PORT}`;
@@ -106,7 +108,7 @@ const stats = (key, days) => fetch(`${URL}/admin/stats?key=${encodeURIComponent(
   check('서버 로그에 닉네임이 없다', !serverLog.join('').includes('방장닉네임') && !/created by/.test(serverLog.join('')));
 
   // ── 게임 한 판(classic · 1라운드 · 3명 = 3턴) ────────────────────
-  c1.emit('room:settings', { settings: { mode: 'classic', rounds: 1, drawTime: 30, hints: 0, wordCount: 2, customWords: '자전거,냉장고,해바라기,고슴도치,선풍기,우산', customWordsOnly: true } });
+  c1.emit('room:settings', { settings: { mode: 'classic', rounds: 1, drawTime: 30, hints: 0, wordCount: 2, customWords: '자전거,냉장고,해바라기,고슴도치,선풍기,우산', customWordsOnly: true, categories: ['동물', '음식'] } });
   c1.emit('lobby:step', { step: 'settings' });
   await sleep(200);
   const all = [c1, c2, c3];
@@ -117,6 +119,7 @@ const stats = (key, days) => fetch(`${URL}/admin/stats?key=${encodeURIComponent(
   await sleep(200);
   const gs = last('game_started');
   check('game_started: mode classic · players 3 · rounds 1 · drawTime 30 · customWords true', gs && gs.mode === 'classic' && gs.players === 3 && gs.rounds === 1 && gs.drawTime === 30 && gs.customWords === true, gs);
+  check('game_started: categories = 고른 개수 2 · 필드는 개수·불린만', gs && gs.categories === 2 && Object.keys(gs).sort().join(',') === 'categories,customWords,drawTime,ev,mode,players,room,rounds,ts', gs);
 
   // 턴 진행: 출제자가 단어 고르고 한 획, 나머지가 정답 → allGuessed → 5초 뒤 다음 턴
   let choosing = firstChoosing;
@@ -143,6 +146,9 @@ const stats = (key, days) => fetch(`${URL}/admin/stats?key=${encodeURIComponent(
   // ── 방장이 게임 끝내기 → game_aborted reason host ───────────────
   for (const c of all) c.emit('results:done');
   await sleep(300);
+  // 2번째 판: 카테고리 전부 고름(= 전체로 정규화) · 쉼표·공백뿐인 커스텀 단어 → categories 0 · customWords false
+  c1.emit('room:settings', { settings: { customWords: ' , ,', customWordsOnly: false, categories: [...CATEGORY_NAMES] } });
+  await sleep(200);
   const ch2P = waitNext(c1, 'game:choosing', undefined, 5000, 'second game');
   c1.emit('game:start');
   await ch2P;
@@ -152,9 +158,14 @@ const stats = (key, days) => fetch(`${URL}/admin/stats?key=${encodeURIComponent(
   const ga = last('game_aborted');
   check('game_aborted(host): reason host · turnsPlayed 0 · players 3 · bytesOut ≥ 0', ga && ga.reason === 'host' && ga.turnsPlayed === 0 && ga.players === 3 && ga.bytesOut >= 0, ga);
   check('game_started 2번째 기록', count('game_started') === 2);
+  const gs2 = last('game_started');
+  check('game_started(2번째): 카테고리 전부 = categories 0 · 쉼표뿐인 커스텀 단어 = customWords false', gs2 && gs2.categories === 0 && gs2.customWords === false, gs2);
 
   // ── 인원 부족 → game_aborted reason notEnoughPlayers ────────────
   c3.disconnect(); await sleep(300);
+  // 3번째 판: 카테고리 하나 · 커스텀 단어 없음 → categories 1 · customWords false
+  c1.emit('room:settings', { settings: { customWords: '', categories: ['탈것'] } });
+  await sleep(200);
   const ch3P = waitNext(c1, 'game:choosing', undefined, 5000, 'third game');
   c1.emit('game:start');
   await ch3P;
@@ -163,6 +174,10 @@ const stats = (key, days) => fetch(`${URL}/admin/stats?key=${encodeURIComponent(
   await overP; await sleep(300);
   const ga2 = last('game_aborted');
   check('game_aborted(notEnoughPlayers): reason · players 1', ga2 && ga2.reason === 'notEnoughPlayers' && ga2.players === 1, ga2);
+  const gs3 = last('game_started');
+  check('game_started(3번째): categories 1 · customWords false', gs3 && gs3.categories === 1 && gs3.customWords === false, gs3);
+  const metricLines = serverLog.join('').split(/\r?\n/).filter((l) => l.includes('[metric] ')).join(' ');
+  check('[metric] 로그에 카테고리 이름·커스텀 단어가 없다', !CATEGORY_NAMES.some((n) => metricLines.includes(n)) && !['자전거', '냉장고', '우산'].some((w) => metricLines.includes(w)));
 
   // ── 마지막 사람이 나감 → room_closed ────────────────────────────
   c1.emit('room:leave'); await sleep(300);
@@ -198,6 +213,7 @@ const stats = (key, days) => fetch(`${URL}/admin/stats?key=${encodeURIComponent(
     today.rooms === 2 && today.rooms_from_wsl === 1 && today['ref:gn'] === 1 && today.joins === 13 && today.joins_link === 1 && today.joins_code === 12 && today.starts === 3 && today.starts_classic === 3
       && today.completes === 1 && today.aborts === 2 && today.aborts_host === 1 && today.aborts_notEnoughPlayers === 1 && today.turns === 3 && today.full === 1 && today.closed === 1
       && today.players_start === 3 + 3 + 2 && today.players_complete === 3, today);
+  check('오늘 누적: starts_cat_some 2(1·3번째 판) · starts_custom 1(1번째 판)', today.starts_cat_some === 2 && today.starts_custom === 1, today);
   check('오늘 누적 bytes_out = 로그의 bytesOut 합 (> 0)', today.bytes_out === bytesFromLog && bytesFromLog > 0, { stats: today.bytes_out, log: bytesFromLog });
   check('/healthz 에는 통계가 없다', !('days' in (await (await fetch(`${URL}/healthz`)).json())));
 
